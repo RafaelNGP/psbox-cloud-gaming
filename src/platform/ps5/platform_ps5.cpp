@@ -377,6 +377,13 @@ bool restartApp() {
     // takes under a second, and the new eboot.bin is the one that starts).
     char* argv[] = {nullptr};
     int rc = sceSystemServiceLoadExec("/app0/eboot.bin", argv);
+    if (rc != 0) {
+        rc = sceSystemServiceLoadExec("/mnt/sandbox/PPSA99810_000/app0/eboot.bin", argv);
+    }
+    if (rc != 0) {
+        std::string legacyEboot = std::string(kLegacyDir) + "/eboot.bin";
+        rc = sceSystemServiceLoadExec(legacyEboot.c_str(), argv);
+    }
     XC_LOGE("restart: sceSystemServiceLoadExec returned 0x%08x", static_cast<unsigned>(rc));
     return false;
 }

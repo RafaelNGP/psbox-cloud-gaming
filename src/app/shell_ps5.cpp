@@ -98,8 +98,17 @@ void setMouseHandler(std::function<void(const MouseEvent&)>) {}
 bool isInstalledCopy(const std::string& dir) {
     // /app0 is the folder the system started the app from.
     struct stat here {}, running {};
-    return ::stat((dir + "/eboot.bin").c_str(), &here) == 0 && ::stat("/app0/eboot.bin", &running) == 0 &&
-           here.st_ino == running.st_ino;
+    if (::stat((dir + "/eboot.bin").c_str(), &here) != 0) return false;
+    if (::stat("/app0/eboot.bin", &running) == 0 && here.st_ino == running.st_ino) {
+        return true;
+    }
+    // When unjailed for native trophy sync, rootdir is set to the true system root
+    // where /app0 is not mounted at top level. The title's runtime files remain accessible
+    // via the sandbox mount (/mnt/sandbox/PPSA99810_000/app0) or standard homebrew folder.
+    if (::stat("/mnt/sandbox/PPSA99810_000/app0/eboot.bin", &running) == 0 && here.st_ino == running.st_ino) {
+        return true;
+    }
+    return dir == "/data/homebrew/PPSA99810";
 }
 
 void restartOrExit() {
