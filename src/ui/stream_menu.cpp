@@ -432,10 +432,30 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
 
     // The items: the selected one white, like the Xbox guide.
-    constexpr int kRowH = 37, kTop = 78, kPx = 19;
-    int shown = 0;  // the items on screen so far
+    constexpr int kRowH = 36, kTop = 76, kPx = 19, kMaxVisible = 13;
+    int shownList[ItemCount];
+    int totalShown = 0;
+    int selIdx = 0;
     for (int i = 0; i < ItemCount; ++i) {
         if (!itemShown(i)) continue;
+        if (i == selected_) selIdx = totalShown;
+        shownList[totalShown++] = i;
+    }
+    int startIdx = 0;
+    if (totalShown > kMaxVisible) {
+        startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
+    }
+    int visibleCount = std::min(totalShown, kMaxVisible);
+    const Language lang = language();
+    const bool pt = (lang == Language::PortugueseBR);
+    const bool es = (lang == Language::Spanish);
+    const bool fr = (lang == Language::French);
+    const bool de = (lang == Language::German);
+    const bool it = (lang == Language::Italian);
+
+    int shown = 0;  // the items on screen so far
+    for (int v = 0; v < visibleCount; ++v) {
+        int i = shownList[startIdx + v];
         Rect row{kPad - 16, kTop + shown++ * kRowH, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
@@ -454,9 +474,9 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                             : i == ConfirmItem         ? tr(Str::ConfirmButton)
                             : i == GyroItem            ? tr(Str::Gyro)
                             : i == GyroLevelItem       ? tr(Str::GyroIntensity)
-                            : i == GyroYawItem         ? "Gyro Horizontal (Yaw)"
-                            : i == GyroPitchItem       ? "Gyro Vertical (Pitch)"
-                            : i == GyroCalibrateItem   ? "Gyro Calibration"
+                            : i == GyroYawItem         ? (pt ? "Giroscópio Horizontal (Yaw)" : es ? "Giroscopio Horizontal (Yaw)" : fr ? "Gyro Horizontal (Yaw)" : de ? "Gyro Horizontal (Yaw)" : it ? "Giroscopio Orizzontale (Yaw)" : "Gyro Horizontal (Yaw)")
+                            : i == GyroPitchItem       ? (pt ? "Giroscópio Vertical (Pitch)" : es ? "Giroscopio Vertical (Pitch)" : fr ? "Gyro Vertical (Pitch)" : de ? "Gyro Vertikal (Pitch)" : it ? "Giroscopio Verticale (Pitch)" : "Gyro Vertical (Pitch)")
+                            : i == GyroCalibrateItem   ? (pt ? "Calibração do Giroscópio" : es ? "Calibración del Giroscopio" : fr ? "Calibration du Gyroscope" : de ? "Gyro-Kalibrierung" : it ? "Calibrazione Giroscopio" : "Gyro Calibration")
                             : i == PadSpeakerVolumeItem ? tr(Str::PadSpeakerVolume)
                             : i == TouchpadShortcutsItem ? tr(Str::TouchpadShortcuts)
                             : i == SmartGlassItem        ? "SmartGlass Web Gamepad"
@@ -527,13 +547,13 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
         if (i == GyroCalibrateItem) {
             if (calibrating_) {
-                value = "Calibrating " + std::to_string(static_cast<int>(calProgress_ * 100.0f)) + " %";
+                value = (pt ? "Calibrando " : "Calibrating ") + std::to_string(static_cast<int>(calProgress_ * 100.0f)) + " %";
             } else if (calSucceeded_) {
-                value = "Calibrated (0-Drift)";
+                value = pt ? "Calibrado (0-Drift)" : "Calibrated (0-Drift)";
             } else if (calFailed_) {
-                value = "Failed (Motion)";
+                value = pt ? "Falhou (Movimento)" : "Failed (Motion)";
             } else {
-                value = "Calibrate Pad 0";
+                value = pt ? "Calibrar Controle" : "Calibrate Pad 0";
             }
             if (sel) value = "< " + value + " >";
         }
@@ -557,6 +577,15 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             int w = fonts_.semibold.measure(value, kPx);
             fonts_.semibold.draw(c, value, row.x + row.w - 16 - w, ty, kPx, sel ? kDark : kGray);
         }
+    }
+    if (totalShown > kMaxVisible) {
+        int trackH = visibleCount * kRowH - 8;
+        int trackX = kMenuW - 14;
+        int trackY = kTop + 2;
+        c.fillRect({trackX, trackY, 4, trackH}, rgba(60, 60, 60), 2);
+        int thumbH = std::max(24, trackH * kMaxVisible / totalShown);
+        int thumbY = trackY + (trackH - thumbH) * startIdx / (totalShown - kMaxVisible);
+        c.fillRect({trackX, thumbY, 4, thumbH}, kGray, 2);
     }
     int y = kTop + shown * kRowH + 4;
     if (resolutionAsked_) {
