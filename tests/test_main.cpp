@@ -4,6 +4,7 @@
 #include "app/auto_deband.h"
 #include "app/library.h"
 #include "app/settings.h"
+#include "app/stream_player.cpp"
 #include "app/update_check.h"
 #include "app/updater.h"
 #include "app/web_server.h"
@@ -68,6 +69,7 @@
 #include <atomic>
 #include <cstring>
 #include <cmath>
+#include <limits>
 #include <cstdio>
 #include <csignal>
 #include <sys/wait.h>
@@ -864,12 +866,26 @@ static void testStreamMenu() {
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroMode() == 2);
     press([](xc::ui::NavInput& n) { n.down = true; });  // its intensity, 1..10
     CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::Gyro && menu.gyroLevel() == 4);
+    press([](xc::ui::NavInput& n) { n.down = true; });  // horizontal (yaw) sensitivity, 20..200%
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroYawScale() == 110);
+    press([](xc::ui::NavInput& n) { n.down = true; });  // vertical (pitch) sensitivity, 20..200%
+    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::Gyro && menu.gyroPitchScale() == 70);
+    press([](xc::ui::NavInput& n) { n.down = true; });  // calibrate gyro trigger
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Gyro && menu.isGyroCalibrating());
     press([](xc::ui::NavInput& n) { n.down = true; });  // DualSense speaker volume
     CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::PadSpeakerVolume && menu.padSpeakerVolume() == 95);
     press([](xc::ui::NavInput& n) { n.down = true; });  // Touchpad shortcuts
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::TouchpadShortcuts);
     CHECK(press([](xc::ui::NavInput& n) { n.back = true; }) == MenuAction::TouchpadShortcuts);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // "Leave game", last
+    press([](xc::ui::NavInput& n) { n.down = true; });  // SmartGlass Web Gamepad
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::SmartGlassToggle);
+    CHECK(menu.smartGlassOpen());
+    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::SmartGlassToggle);
+    press([](xc::ui::NavInput& n) { n.down = true; });  // Reload Stream
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::ReloadStream);
+    CHECK(!menu.isOpen());
+    menu.open(0, false);
+    press([](xc::ui::NavInput& n) { n.up = true; });  // "Leave game", last (wraps from top)
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Leave);
     CHECK(!menu.isOpen());
     menu.open(1, true);
@@ -901,6 +917,218 @@ static void testStreamMenu() {
     press([](xc::ui::NavInput& n) { n.back = true; });
     CHECK(!menu.isCustomizingStats());
     CHECK(menu.isOpen());
+}
+
+static void testSmartGlassInGameMenuInvariants() {
+    using xc::ui::MenuAction;
+    xc::ui::Fonts fonts;
+    fonts.load("assets/fonts");
+    xc::ui::StreamMenu menu(fonts);
+
+    // =========================================================================
+    // 1. Menu navigation state machine & SmartGlass toggling stress
+    // =========================================================================
+    CHECK(!menu.isOpen());
+    CHECK(!menu.smartGlassOpen());
+
+    menu.open(0, false);
+    CHECK(menu.isOpen());
+    CHECK(!menu.smartGlassOpen());
+
+    // Navigation stress and wrap-around targeting SmartGlassItem
+    xc::ui::NavInput navUp;
+    navUp.up = true;
+    xc::ui::NavInput navDown;
+    navDown.down = true;
+
+    // Up from XboxButton wraps to Leave
+    menu.handle(navUp);
+    // Up from Leave moves to ReloadStreamItem
+    menu.handle(navUp);
+    // Up from ReloadStreamItem moves to SmartGlassItem
+    menu.handle(navUp);
+
+    // Test accept toggling on SmartGlassItem
+    xc::ui::NavInput navAccept;
+    navAccept.accept = true;
+    CHECK(menu.handle(navAccept) == MenuAction::SmartGlassToggle);
+    CHECK(menu.smartGlassOpen());
+
+    // Test left toggling on SmartGlassItem
+    xc::ui::NavInput navLeft;
+    navLeft.left = true;
+    CHECK(menu.handle(navLeft) == MenuAction::SmartGlassToggle);
+    CHECK(!menu.smartGlassOpen());
+
+    // Test right toggling on SmartGlassItem
+    xc::ui::NavInput navRight;
+    navRight.right = true;
+    CHECK(menu.handle(navRight) == MenuAction::SmartGlassToggle);
+    CHECK(menu.smartGlassOpen());
+
+    // Test non-modifying inputs (square, triangle, l1)
+    xc::ui::NavInput navSquare, navTriangle, navL1;
+    navSquare.square = true;
+    CHECK(menu.handle(navSquare) == MenuAction::None);
+    CHECK(menu.smartGlassOpen());
+    navTriangle.triangle = true;
+    CHECK(menu.handle(navTriangle) == MenuAction::None);
+    CHECK(menu.smartGlassOpen());
+    navL1.l1 = true;
+    CHECK(menu.handle(navL1) == MenuAction::None);
+    CHECK(menu.smartGlassOpen());
+
+    // Stress test: 200 consecutive rapid toggles
+    for (int i = 0; i < 200; ++i) {
+        bool expected = (i % 2 == 1); // starts true: i=0 toggles to false, i=1 toggles to true
+        auto act = (i % 3 == 0) ? menu.handle(navLeft)
+                 : (i % 3 == 1) ? menu.handle(navRight)
+                                : menu.handle(navAccept);
+        CHECK(act == MenuAction::SmartGlassToggle);
+        CHECK(menu.smartGlassOpen() == expected);
+    }
+
+    // Navigation when caps without touchpad is used
+    xc::ui::UiCaps capsNoTouchpad{};
+    capsNoTouchpad.touchpad = false;
+    menu.setCapabilities(capsNoTouchpad);
+    // Menu item selection still valid and navigates cleanly
+    menu.setSmartGlassOpen(true);
+    CHECK(menu.smartGlassOpen());
+
+    // =========================================================================
+    // 2. Geometry invariants: 620 when closed, 1200 when open
+    // =========================================================================
+    menu.open(0, false);
+    menu.setSmartGlassOpen(false);
+    xc::ui::StreamInfo sinfo;
+    xc::ui::Canvas cClosed = menu.renderMenu(sinfo);
+    CHECK(cClosed.width() == xc::ui::StreamMenu::kMenuW); // 620
+    CHECK(cClosed.height() == xc::ui::StreamMenu::kMenuH); // 1064
+
+    menu.setSmartGlassOpen(true);
+    xc::ui::Canvas cOpen = menu.renderMenu(sinfo);
+    CHECK(cOpen.width() == xc::ui::StreamMenu::kCombinedW); // 1200
+    CHECK(cOpen.height() == xc::ui::StreamMenu::kMenuH); // 1064
+    CHECK(xc::ui::StreamMenu::kCombinedW == xc::ui::StreamMenu::kMenuW + xc::ui::StreamMenu::kCardGap + xc::ui::StreamMenu::kCardW);
+    CHECK(xc::ui::StreamMenu::kMenuW == 620);
+    CHECK(xc::ui::StreamMenu::kCardGap == 40);
+    CHECK(xc::ui::StreamMenu::kCardW == 540);
+    CHECK(xc::ui::StreamMenu::kCombinedW == 1200);
+
+    // Edge case: stats customization collapses canvas width to kMenuW (620)
+    menu.open(0, true);
+    menu.setSmartGlassOpen(true);
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW);
+    // Navigate to Stats and open customization
+    menu.handle(navDown); // Profile
+    menu.handle(navDown); // Stats
+    CHECK(menu.handle(navAccept) == MenuAction::Stats);
+    CHECK(menu.isCustomizingStats());
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW);
+    // Exit customization with Back
+    xc::ui::NavInput navBack;
+    navBack.back = true;
+    menu.handle(navBack);
+    CHECK(!menu.isCustomizingStats());
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW);
+
+    // =========================================================================
+    // 3. Transparency invariants across the gap [620, 660) and surrounding regions
+    // =========================================================================
+    const uint32_t* px = cOpen.data();
+    const int w = cOpen.width();
+    const int h = cOpen.height();
+
+    // Verify 100% of gap pixels (x in [620, 660)) have alpha == 0 and p == 0u
+    size_t gapViolationCount = 0;
+    for (int y = 0; y < h; ++y) {
+        for (int x = xc::ui::StreamMenu::kMenuW; x < xc::ui::StreamMenu::kMenuW + xc::ui::StreamMenu::kCardGap; ++x) {
+            uint32_t p = px[y * w + x];
+            if (xc::ui::alphaOf(p) != 0 || p != 0u) {
+                gapViolationCount++;
+            }
+        }
+    }
+    CHECK(gapViolationCount == 0);
+
+    // Verify above-card region in right quadrant (x in [660, 1200), y in [0, 204)) is transparent
+    size_t topQuadrantViolations = 0;
+    for (int y = 0; y < 204; ++y) {
+        for (int x = xc::ui::StreamMenu::kMenuW + xc::ui::StreamMenu::kCardGap; x < w; ++x) {
+            uint32_t p = px[y * w + x];
+            if (xc::ui::alphaOf(p) != 0 || p != 0u) {
+                topQuadrantViolations++;
+            }
+        }
+    }
+    CHECK(topQuadrantViolations == 0);
+
+    // Verify below-card region in right quadrant (x in [660, 1200), y in [844, 1064)) is transparent
+    size_t bottomQuadrantViolations = 0;
+    for (int y = 844; y < h; ++y) {
+        for (int x = xc::ui::StreamMenu::kMenuW + xc::ui::StreamMenu::kCardGap; x < w; ++x) {
+            uint32_t p = px[y * w + x];
+            if (xc::ui::alphaOf(p) != 0 || p != 0u) {
+                bottomQuadrantViolations++;
+            }
+        }
+    }
+    CHECK(bottomQuadrantViolations == 0);
+
+    // Verify left panel is actually rendered (not blank)
+    CHECK(xc::ui::alphaOf(px[500 * w + 300]) == 255);
+
+    // Verify side card is actually rendered (not blank)
+    int cardCenterX = 660 + 270;
+    int cardCenterY = 204 + 320;
+    CHECK(xc::ui::alphaOf(px[cardCenterY * w + cardCenterX]) > 0);
+
+    // =========================================================================
+    // 4. QR code generation, readability & module validation
+    // =========================================================================
+    std::vector<std::string> testUrls = {
+        "http://192.168.15.17:8080/gamepad",
+        "http://127.0.0.1:8080/gamepad",
+        "http://10.0.0.1:8080/gamepad",
+        "http://172.16.42.1:8080/gamepad",
+        "http://" + xc::platform::localIPv4() + ":8080/gamepad",
+        "http://psbox.local:8080/gamepad",
+        "http://192.168.100.254:8080/gamepad?player=1&layout=custom_studio_v1"
+    };
+
+    xc::ui::Canvas testCanvas(1200, 800);
+    for (const auto& url : testUrls) {
+        testCanvas.clear(0);
+        xc::ui::Rect box = xc::ui::drawQr(testCanvas, url, 1000, 50, 300, qrcodegen_Ecc_LOW);
+        CHECK(box.w > 0 && box.h > 0);
+        CHECK(box.w == box.h);
+        CHECK(box.x + box.w == 1000);
+
+        // Verify independent QR encoder output matches canvas
+        uint8_t qrBuf[qrcodegen_BUFFER_LEN_MAX], tmpBuf[qrcodegen_BUFFER_LEN_MAX];
+        bool ok = qrcodegen_encodeText(url.c_str(), tmpBuf, qrBuf, qrcodegen_Ecc_LOW,
+                                       qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX,
+                                       qrcodegen_Mask_AUTO, true);
+        CHECK(ok);
+        int n = qrcodegen_getSize(qrBuf);
+        CHECK(n >= 21);
+        int mod = 300 / (n + 2);
+        CHECK(mod > 0);
+
+        // Check top-left finder pattern corner module at (0, 0)
+        CHECK(qrcodegen_getModule(qrBuf, 0, 0));
+        int ox = box.x + 20 + mod;
+        int oy = box.y + 20 + mod;
+        uint32_t modulePixel = testCanvas.data()[(oy + mod / 2) * testCanvas.width() + (ox + mod / 2)];
+        CHECK(xc::ui::alphaOf(modulePixel) == 255);
+        // Finder pattern module is drawn with kBg = rgba(14, 14, 14)
+        CHECK(modulePixel == xc::ui::rgba(14, 14, 14));
+
+        // Check quiet zone around the QR code (at ox - mod/2, oy - mod/2) is white
+        uint32_t quietPixel = testCanvas.data()[(oy - mod / 2) * testCanvas.width() + (ox - mod / 2)];
+        CHECK(quietPixel == xc::ui::rgba(255, 255, 255));
+    }
 }
 
 // A zip archive of stored (uncompressed) files, as the test needs one.
@@ -1742,8 +1970,8 @@ static void testH264LossWaitFollowsRtt() {
     xc::stream::VideoReceiveStats stats;
     xc::stream::H264Receiver rx([] {}, stats);
     CHECK(rx.lossWaitMs() == 90 && rx.renackMs() == 50);
-    rx.setRttMs(15);  // this console's connection: as before
-    CHECK(rx.lossWaitMs() == 90 && rx.renackMs() == 50);
+    rx.setRttMs(15);  // dynamic low-RTT adaptation (< 30 ms): lossWait 60 ms, renack 25 ms
+    CHECK(rx.lossWaitMs() == 60 && rx.renackMs() == 25);
     rx.setRttMs(68);  // issue #317 (PS4): 166 ms, a second NACK after 78
     CHECK(rx.lossWaitMs() == 166 && rx.renackMs() == 78);
     rx.setRttMs(141);  // issue #342: 300 ms at most
@@ -2332,6 +2560,271 @@ static void testGyro() {
     const float level[3] = {0.0f, 1.0f, 0.0f};
     for (int i = 0; i < 60; ++i) gyroToStick(left, level, 5, flat, xf, yf);
     CHECK(std::abs(x5 - xf) < 0.01f);
+}
+
+static void testGyroProZeroDriftAndDecoupledSensitivity() {
+    // 1. GyroCalibrator convergence on stationary synthetic data
+    {
+        xc::input::GyroCalibrator cal;
+        cal.start(240);
+        CHECK(cal.state == xc::input::GyroCalibrator::State::Calibrating);
+        CHECK(cal.sampleCount == 0);
+        CHECK(cal.progress() == 0.0f);
+
+        // Stationary data with a constant DC offset and tiny noise (variance < 0.0001)
+        const float trueBias[3] = {0.0350f, -0.0220f, 0.0150f};
+        for (int i = 0; i < 240; ++i) {
+            float noiseX = ((i % 5) - 2) * 0.001f;
+            float noiseY = (((i + 1) % 5) - 2) * 0.001f;
+            float noiseZ = (((i + 2) % 5) - 2) * 0.001f;
+            float sample[3] = {trueBias[0] + noiseX, trueBias[1] + noiseY, trueBias[2] + noiseZ};
+            bool finished = cal.feed(sample);
+            if (i < 239) {
+                CHECK(!finished);
+                CHECK(cal.state == xc::input::GyroCalibrator::State::Calibrating);
+            } else {
+                CHECK(finished);
+                CHECK(cal.state == xc::input::GyroCalibrator::State::Succeeded);
+            }
+        }
+        CHECK(cal.sampleCount == 240);
+        CHECK(cal.progress() == 1.0f);
+        CHECK(std::abs(cal.resultBias[0] - trueBias[0]) < 0.002f);
+        CHECK(std::abs(cal.resultBias[1] - trueBias[1]) < 0.002f);
+        CHECK(std::abs(cal.resultBias[2] - trueBias[2]) < 0.002f);
+        CHECK(cal.maxVariance < 0.0025f);
+    }
+
+    // 2. GyroCalibrator rejection on noisy / moving data (variance > 0.0025 rad^2/s^2)
+    {
+        xc::input::GyroCalibrator cal;
+        cal.start(240);
+        // Sinusoidal movement with amplitude 0.1 rad/s (variance ~ A^2 / 2 = 0.005 > 0.0025)
+        for (int i = 0; i < 240; ++i) {
+            float t = static_cast<float>(i) * 0.05f;
+            float sample[3] = {std::sin(t) * 0.1f, std::cos(t) * 0.1f, std::sin(t * 2.0f) * 0.1f};
+            bool finished = cal.feed(sample);
+            if (i == 239) {
+                CHECK(!finished);
+                CHECK(cal.state == xc::input::GyroCalibrator::State::Failed);
+            }
+        }
+        CHECK(cal.maxVariance > 0.0025f);
+    }
+
+    // 3. gyroToStick zero-drift: when raw gyro matches static bias offset, output stick deflection is exactly zero
+    {
+        xc::input::GyroState s{};
+        s.bias[0] = 0.045f;
+        s.bias[1] = -0.030f;
+        s.bias[2] = 0.012f;
+        s.yawScale = 1.0f;
+        s.pitchScale = 0.8f;
+        s.up[0] = 0.0f; s.up[1] = 1.0f; s.up[2] = 0.0f;
+
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        float x = 999.0f, y = 999.0f;
+        // Feed raw gyro equal to bias offset
+        float rawAtRest[3] = {s.bias[0], s.bias[1], s.bias[2]};
+        for (int i = 0; i < 30; ++i) {
+            xc::input::gyroToStick(rawAtRest, accel, 5, s, x, y);
+        }
+        CHECK(x == 0.0f);
+        CHECK(y == 0.0f);
+    }
+
+    // 4. Decoupled horizontal (yaw) vs vertical (pitch) sensitivity scaling
+    {
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+
+        // Test 1: Standard scaling (yawScale = 1.0, pitchScale = 1.0)
+        xc::input::GyroState s1{};
+        s1.yawScale = 1.0f;
+        s1.pitchScale = 1.0f;
+        float x1 = 0, y1 = 0;
+        float rawYaw[3] = {0.0f, 0.25f, 0.0f};
+        for (int i = 0; i < 40; ++i) xc::input::gyroToStick(rawYaw, accel, 5, s1, x1, y1);
+
+        // Test 2: Double yaw scaling (yawScale = 2.0, pitchScale = 1.0)
+        xc::input::GyroState s2{};
+        s2.yawScale = 2.0f;
+        s2.pitchScale = 1.0f;
+        float x2 = 0, y2 = 0;
+        for (int i = 0; i < 40; ++i) xc::input::gyroToStick(rawYaw, accel, 5, s2, x2, y2);
+
+        CHECK(std::abs(x2) > std::abs(x1));
+        CHECK(y1 == 0.0f);
+        CHECK(y2 == 0.0f);
+
+        // Test 3: Pitch movement (rawW = [0.25, 0, 0]) with pitchScale = 0.5 vs 1.5
+        xc::input::GyroState s3{};
+        s3.yawScale = 1.0f;
+        s3.pitchScale = 0.5f;
+        float x3 = 0, y3 = 0;
+        float rawPitch[3] = {0.25f, 0.0f, 0.0f};
+        for (int i = 0; i < 40; ++i) xc::input::gyroToStick(rawPitch, accel, 5, s3, x3, y3);
+
+        xc::input::GyroState s4{};
+        s4.yawScale = 1.0f;
+        s4.pitchScale = 1.5f;
+        float x4 = 0, y4 = 0;
+        for (int i = 0; i < 40; ++i) xc::input::gyroToStick(rawPitch, accel, 5, s4, x4, y4);
+
+        CHECK(std::abs(y4) > std::abs(y3));
+        CHECK(x3 == 0.0f);
+        CHECK(x4 == 0.0f);
+    }
+
+    // 5. Settings & Profile JSON round-trip serialization and deserialization
+    {
+        const std::string tmpPath = "/tmp/test_gyro_settings.json";
+        app::Settings s;
+        s.gyroYawScale = 140;
+        s.gyroPitchScale = 120;
+        s.gyroBias[0] = 0.0125f;
+        s.gyroBias[1] = -0.0345f;
+        s.gyroBias[2] = 0.0078f;
+
+        app::GameProfile p = s.defaultProfile();
+        p.gyroYawScale = 160;
+        p.gyroPitchScale = 90;
+        p.gyroBias[0] = 0.0050f;
+        p.gyroBias[1] = -0.0100f;
+        p.gyroBias[2] = 0.0200f;
+        s.perGame["test_game_1"] = p;
+
+        CHECK(s.save(tmpPath));
+
+        app::Settings loaded;
+        CHECK(loaded.load(tmpPath));
+        CHECK(loaded.gyroYawScale == 140);
+        CHECK(loaded.gyroPitchScale == 120);
+        CHECK(std::abs(loaded.gyroBias[0] - 0.0125f) < 0.0001f);
+        CHECK(std::abs(loaded.gyroBias[1] - -0.0345f) < 0.0001f);
+        CHECK(std::abs(loaded.gyroBias[2] - 0.0078f) < 0.0001f);
+
+        auto it = loaded.perGame.find("test_game_1");
+        CHECK(it != loaded.perGame.end());
+        CHECK(it->second.gyroYawScale == 160);
+        CHECK(it->second.gyroPitchScale == 90);
+        CHECK(std::abs(it->second.gyroBias[0] - 0.0050f) < 0.0001f);
+        CHECK(std::abs(it->second.gyroBias[1] - -0.0100f) < 0.0001f);
+        CHECK(std::abs(it->second.gyroBias[2] - 0.0200f) < 0.0001f);
+
+        unlink(tmpPath.c_str());
+    }
+
+    // 6. GyroCalibrator rejection of NaN / Non-Finite angular velocity
+    {
+        xc::input::GyroCalibrator cal;
+        cal.start(240);
+        float nanSample[3] = {std::numeric_limits<float>::quiet_NaN(), 0.0f, 0.0f};
+        bool accepted = cal.feed(nanSample);
+        CHECK(!accepted);
+        CHECK(cal.state == xc::input::GyroCalibrator::State::Failed);
+
+        cal.start(240);
+        float infSample[3] = {0.0f, std::numeric_limits<float>::infinity(), 0.0f};
+        accepted = cal.feed(infSample);
+        CHECK(!accepted);
+        CHECK(cal.state == xc::input::GyroCalibrator::State::Failed);
+    }
+
+    // 7. Live input pipeline integration: global calibration & setGyroCalibration eliminate resting stick drift
+    {
+        const float testBias[3] = {0.0480f, -0.0320f, 0.0150f};
+        xc::input::resetGlobalGyroCalibration();
+        xc::input::setGyroCalibration(testBias, 1.4f, 0.7f);
+
+        float gotBias[3] = {0};
+        float gotYaw = 0, gotPitch = 0;
+        xc::input::getGlobalGyroCalibration(gotBias, gotYaw, gotPitch);
+        CHECK(std::abs(gotBias[0] - testBias[0]) < 0.0001f);
+        CHECK(std::abs(gotBias[1] - testBias[1]) < 0.0001f);
+        CHECK(std::abs(gotBias[2] - testBias[2]) < 0.0001f);
+        CHECK(std::abs(gotYaw - 1.4f) < 0.0001f);
+        CHECK(std::abs(gotPitch - 0.7f) < 0.0001f);
+
+        // A resting controller with raw gyro equal to sensor bias
+        const float rawRest[3] = {testBias[0], testBias[1], testBias[2]};
+        const float accel[3] = {0.0f, 1.0f, 0.0f};
+
+        // When a slot is unpopulated (bias {0,0,0}), gyroToStick must safely fallback to global calibration
+        xc::input::GyroState unpopulatedState{};
+        float x = 999.0f, y = 999.0f;
+        for (int i = 0; i < 30; ++i) {
+            xc::input::gyroToStick(rawRest, accel, 5, unpopulatedState, x, y);
+        }
+        CHECK(x == 0.0f);
+        CHECK(y == 0.0f);
+        CHECK(unpopulatedState.bias[0] == testBias[0]);
+        CHECK(unpopulatedState.yawScale == 1.4f);
+        CHECK(unpopulatedState.pitchScale == 0.7f);
+
+        xc::input::resetGlobalGyroCalibration();
+    }
+
+    // 8. StreamMenu & Settings persistence integration for gyro yaw, pitch, and bias
+    {
+        xc::ui::Fonts fonts;
+        xc::ui::StreamMenu menu(fonts);
+        const float calBias[3] = {0.0210f, -0.0140f, 0.0080f};
+
+        menu.setGyroYawScale(150);
+        menu.setGyroPitchScale(110);
+        menu.setGyroBias(calBias);
+        CHECK(menu.gyroYawScale() == 150);
+        CHECK(menu.gyroPitchScale() == 110);
+        CHECK(menu.gyroBias() != nullptr);
+        CHECK(std::abs(menu.gyroBias()[0] - calBias[0]) < 0.0001f);
+        CHECK(std::abs(menu.gyroBias()[1] - calBias[1]) < 0.0001f);
+        CHECK(std::abs(menu.gyroBias()[2] - calBias[2]) < 0.0001f);
+
+        // Test calibration state machine in StreamMenu
+        menu.startGyroCalibration(60);
+        CHECK(menu.isGyroCalibrating());
+        CHECK(menu.gyroCalProgress() == 0.0f);
+
+        for (int i = 0; i < 60; ++i) {
+            float sample[3] = {calBias[0], calBias[1], calBias[2]};
+            menu.feedGyroCalibration(sample);
+        }
+        CHECK(!menu.isGyroCalibrating());
+        CHECK(menu.gyroCalSucceeded());
+        CHECK(!menu.gyroCalFailed());
+        CHECK(std::abs(menu.gyroBias()[0] - calBias[0]) < 0.002f);
+
+        // Test persistence into Settings and GameProfile
+        const std::string tmpPath = "/tmp/test_stream_menu_gyro_persist.json";
+        app::Settings s;
+        s.gyroYawScale = menu.gyroYawScale();
+        s.gyroPitchScale = menu.gyroPitchScale();
+        for (int i = 0; i < 3; ++i) s.gyroBias[i] = menu.gyroBias()[i];
+
+        app::GameProfile p = s.defaultProfile();
+        p.gyroYawScale = 175;
+        p.gyroPitchScale = 125;
+        p.gyroBias[0] = 0.033f;
+        p.gyroBias[1] = -0.018f;
+        p.gyroBias[2] = 0.009f;
+        s.perGame["halo_infinite"] = p;
+
+        CHECK(s.save(tmpPath));
+
+        app::Settings loaded;
+        CHECK(loaded.load(tmpPath));
+        CHECK(loaded.gyroYawScale == 150);
+        CHECK(loaded.gyroPitchScale == 110);
+        CHECK(std::abs(loaded.gyroBias[0] - calBias[0]) < 0.002f);
+
+        auto it = loaded.perGame.find("halo_infinite");
+        CHECK(it != loaded.perGame.end());
+        CHECK(it->second.gyroYawScale == 175);
+        CHECK(it->second.gyroPitchScale == 125);
+        CHECK(std::abs(it->second.gyroBias[0] - 0.033f) < 0.0001f);
+
+        unlink(tmpPath.c_str());
+    }
 }
 
 // The desktop's stand-ins for the PS5 backends: nothing connected, the
@@ -3433,7 +3926,7 @@ static void testBlock2Features() {
     // When at 100%, right should not trigger PadSpeakerVolume action
     ui::NavInput down;
     down.down = true;
-    for (int i = 0; i < 12; ++i) menu.handle(down);
+    for (int i = 0; i < 15; ++i) menu.handle(down);
 
     ui::NavInput right;
     right.right = true;
@@ -4569,7 +5062,14 @@ static void testUsbPadDescriptors() {
     CHECK(input::findUsbPadInterface(keyboard, sizeof keyboard).protocol == input::UsbPadProtocol::None);
     CHECK(input::findUsbPadInterface(series, 20).protocol == input::UsbPadProtocol::None);
     CHECK(input::findUsbPadInterface(nullptr, 0).protocol == input::UsbPadProtocol::None);
-    CHECK(input::usbPadProtocolFor(0x03, 0x00, 0x00) == input::UsbPadProtocol::None);
+    CHECK(input::usbPadProtocolFor(0x03, 0x00, 0x00) == input::UsbPadProtocol::DualShock4);
+    CHECK(input::usbPadProtocolFor(0xff, 0x5d, 0x81) == input::UsbPadProtocol::XInput);
+    CHECK(input::usbPadProtocolFor(0xff, 0x5d, 0x00) == input::UsbPadProtocol::XInput);
+    CHECK(input::usbPadProtocolFor(0xff, 0x5d, 0x01) == input::UsbPadProtocol::XInput);
+    CHECK(input::usbPadProtocolFor(0xff, 0x47, 0xd0) == input::UsbPadProtocol::Gip);
+    CHECK(input::usbPadProtocolFor(0x03, 0x01, 0x01) == input::UsbPadProtocol::None);
+    CHECK(input::usbPadProtocolFor(0x03, 0x01, 0x02) == input::UsbPadProtocol::None);
+    CHECK(input::usbPadProtocolFor(0xff, 0x00, 0x00) == input::UsbPadProtocol::None);
 }
 
 static void testUsbPadSlots() {
@@ -4716,6 +5216,103 @@ static void testUsbPadSlots() {
     input::setUsbPadsEnabled(true);
     CHECK(input::usbPadsEnabled());
     input::takeUsbPadEvents();
+}
+
+static void testSoloInputRedirectionMerging() {
+    input::ControllerState s0{};
+    s0.connected = true;
+    s0.btnA = true;
+    s0.leftStickX = 0.3f;
+    s0.leftStickY = -0.2f;
+    s0.triggerL2 = 0.25f;
+
+    // Slot 1 (e.g. secondary USB pad on OneFamily option 2)
+    input::ControllerState s1{};
+    s1.connected = true;
+    s1.btnB = true;
+    s1.btnX = true;
+    s1.leftStickX = -0.85f;  // magnitude larger than s0 (0.85 > 0.3)
+    s1.rightStickY = 0.65f;
+    s1.triggerL2 = 0.90f;   // max with 0.25f -> 0.90f
+
+    // Slot 2 (e.g. secondary pad on OneFamily option 3 or Web Gamepad)
+    input::ControllerState s2{};
+    s2.connected = true;
+    s2.btnY = true;
+    s2.dpadUp = true;
+    s2.rightStickY = -0.95f; // magnitude larger than s1 (0.95 > 0.65)
+    s2.triggerR2 = 0.70f;
+    s2.btnNexus = true;
+
+    // Perform merging into slot 0
+    input::mergePads(s0, s1);
+    CHECK(s0.btnA);
+    CHECK(s0.btnB);
+    CHECK(s0.btnX);
+    CHECK(!s0.btnY);
+    CHECK(std::abs(s0.leftStickX - (-0.85f)) < 1e-4f);
+    CHECK(std::abs(s0.leftStickY - (-0.2f)) < 1e-4f);
+    CHECK(std::abs(s0.rightStickY - 0.65f) < 1e-4f);
+    CHECK(std::abs(s0.triggerL2 - 0.90f) < 1e-4f);
+    CHECK(s0.triggerR2 == 0.0f);
+
+    input::mergePads(s0, s2);
+    CHECK(s0.btnA);
+    CHECK(s0.btnB);
+    CHECK(s0.btnX);
+    CHECK(s0.btnY);
+    CHECK(s0.dpadUp);
+    CHECK(s0.btnNexus);
+    CHECK(std::abs(s0.rightStickY - (-0.95f)) < 1e-4f);
+    CHECK(std::abs(s0.triggerR2 - 0.70f) < 1e-4f);
+}
+
+static void testSoloInputRedirectSettingsPersistence() {
+    const std::string path = "/tmp/test_solo_settings.json";
+    std::remove(path.c_str());
+
+    xc::app::Settings s;
+    CHECK(!s.soloInputRedirect);
+    CHECK(!s.defaultProfile().soloInputRedirect);
+
+    s.soloInputRedirect = true;
+    CHECK(s.defaultProfile().soloInputRedirect);
+
+    xc::app::GameProfile prof;
+    prof.soloInputRedirect = true;
+    s.perGame["TEST_SOLO_GAME"] = prof;
+
+    CHECK(s.save(path));
+
+    xc::app::Settings reloaded;
+    CHECK(reloaded.load(path));
+    CHECK(reloaded.soloInputRedirect);
+    CHECK(reloaded.defaultProfile().soloInputRedirect);
+    bool hasCustom = false;
+    auto loadedProf = reloaded.profileForGame("TEST_SOLO_GAME", "", &hasCustom);
+    CHECK(hasCustom);
+    CHECK(loadedProf.soloInputRedirect);
+
+    // Test fallback to legacy snake_case key "solo_input_redirect"
+    std::string legacyJson = R"({
+        "settingsVersion": 3,
+        "solo_input_redirect": true,
+        "perGame": {
+            "LEGACY_GAME": {
+                "solo_input_redirect": true
+            }
+        }
+    })";
+    platform::writeFileAtomic(path, legacyJson);
+    xc::app::Settings legacySettings;
+    CHECK(legacySettings.load(path));
+    CHECK(legacySettings.soloInputRedirect);
+    hasCustom = false;
+    auto legProf = legacySettings.profileForGame("LEGACY_GAME", "", &hasCustom);
+    CHECK(hasCustom);
+    CHECK(legProf.soloInputRedirect);
+
+    std::remove(path.c_str());
 }
 
 static void testDesktopMouseNav() {
@@ -5282,58 +5879,89 @@ static void testTouchpadShortcutsAndSlots() {
     }
 }
 
+namespace xc::app {
+void releaseVirtualGamepadSlot(int slot);
+}
+
 static void testPlayerSwitchAndUnresolvedTiles() {
-    // 1. Virtual Gamepad Player Switching & Ghost Icon Prevention
+    // 1. Virtual Gamepad Multi-Phone Concurrency & Slot Release
     {
         app::resetVirtualGamepads();
         app::WebServer srv;
 
-        // Player 2 connects and sends input
-        auto resP2 = srv.handleRequest("POST", "/api/gamepad", "{\"player\":2,\"btnA\":true}");
+        // Player 1 connects and sends input
+        auto resP1 = srv.handleRequest("POST", "/api/gamepad", "{\"player\":1,\"btnA\":true}");
+        CHECK(resP1.status == 200);
+        input::ControllerState s0{};
+        bool conn0 = false;
+        CHECK(app::virtualGamepadState(0, s0, conn0) && conn0);
+        CHECK(s0.btnA);
+        CHECK(app::virtualGamepadActiveAt(0) > 0);
+
+        // Player 2 connects concurrently and sends input
+        auto resP2 = srv.handleRequest("POST", "/api/gamepad", "{\"player\":2,\"btnB\":true}");
         CHECK(resP2.status == 200);
         input::ControllerState s1{};
         bool conn1 = false;
         CHECK(app::virtualGamepadState(1, s1, conn1) && conn1);
-        CHECK(s1.btnA);
+        CHECK(s1.btnB);
         CHECK(app::virtualGamepadActiveAt(1) > 0);
 
-        // Player 2 switches to Player 1 (with activeSwitch: true)
-        auto resP1 = srv.handleRequest("POST", "/api/gamepad", "{\"player\":1,\"activeSwitch\":true,\"btnB\":true}");
-        CHECK(resP1.status == 200);
-
-        // Player 1 must now be connected
-        input::ControllerState s0{};
-        bool conn0 = false;
-        CHECK(app::virtualGamepadState(0, s0, conn0) && conn0);
-        CHECK(s0.btnB);
+        // Concurrency verification: Player 1 (Slot 0) must STILL be connected and active!
+        // No cross-slot wiping occurred when Player 2 connected and sent inputs.
+        input::ControllerState s0Check{};
+        bool conn0Check = false;
+        CHECK(app::virtualGamepadState(0, s0Check, conn0Check) && conn0Check);
+        CHECK(s0Check.btnA);
         CHECK(app::virtualGamepadActiveAt(0) > 0);
 
-        // Player 2 MUST be completely cleared and disconnected (no ghost icon on PS5)
+        // Active switch without prevPlayer: touches slot 2 without dropping slots 0 or 1
+        auto resP3 = srv.handleRequest("POST", "/api/gamepad", "{\"player\":3,\"activeSwitch\":true,\"btnX\":true}");
+        CHECK(resP3.status == 200);
+        input::ControllerState s2{};
+        bool conn2 = false;
+        CHECK(app::virtualGamepadState(2, s2, conn2) && conn2);
+        CHECK(s2.btnX);
+        CHECK(app::virtualGamepadState(0, s0Check, conn0Check) && conn0Check);
+        CHECK(app::virtualGamepadState(1, s1, conn1) && conn1);
+
+        // Migration with optional prevPlayer: Player 2 (slot 1) migrates to Player 1 (slot 0)
+        auto resMigrate = srv.handleRequest("POST", "/api/gamepad",
+            "{\"player\":1,\"activeSwitch\":true,\"prevPlayer\":1,\"btnY\":true}");
+        CHECK(resMigrate.status == 200);
+        CHECK(app::virtualGamepadState(0, s0, conn0) && conn0);
+        CHECK(s0.btnY);
+
+        // Slot 1 was explicitly released via prevPlayer
         input::ControllerState s1After{};
         bool conn1After = false;
         app::virtualGamepadState(1, s1After, conn1After);
         CHECK(!conn1After);
         CHECK(app::virtualGamepadActiveAt(1) == 0);
-        CHECK(!s1After.btnA);
 
-        // Player 3 & 4 remain disconnected
-        input::ControllerState sX{};
-        bool connX = false;
-        app::virtualGamepadState(2, sX, connX);
-        CHECK(!connX);
-        CHECK(app::virtualGamepadActiveAt(2) == 0);
-        app::virtualGamepadState(3, sX, connX);
-        CHECK(!connX);
-        CHECK(app::virtualGamepadActiveAt(3) == 0);
-
-        // Direct switchVirtualGamepadSlot test
+        // Direct non-destructive switchVirtualGamepadSlot test:
+        // switchVirtualGamepadSlot(3) activates slot 3 without clearing slot 0
         app::switchVirtualGamepadSlot(3);
-        app::virtualGamepadState(0, s0, conn0);
-        CHECK(!conn0);
-        CHECK(app::virtualGamepadActiveAt(0) == 0);
-        app::virtualGamepadState(3, sX, connX);
-        CHECK(connX);
+        input::ControllerState s3{};
+        bool conn3 = false;
+        CHECK(app::virtualGamepadState(3, s3, conn3) && conn3);
         CHECK(app::virtualGamepadActiveAt(3) > 0);
+        CHECK(app::virtualGamepadState(0, s0, conn0) && conn0);
+
+        // Direct releaseVirtualGamepadSlot test:
+        // explicitly release slot 0
+        app::releaseVirtualGamepadSlot(0);
+        input::ControllerState s0After{};
+        bool conn0After = false;
+        app::virtualGamepadState(0, s0After, conn0After);
+        CHECK(!conn0After);
+        CHECK(app::virtualGamepadActiveAt(0) == 0);
+
+        // Direct releaseVirtualGamepadSlot test on slot 3
+        app::releaseVirtualGamepadSlot(3);
+        app::virtualGamepadState(3, s3, conn3);
+        CHECK(!conn3);
+        CHECK(app::virtualGamepadActiveAt(3) == 0);
     }
 
     // 2. Library Filtering of Unresolved Store BigIds (e.g. bsr9nlhvf1kl)
@@ -5350,7 +5978,7 @@ static void testPlayerSwitchAndUnresolvedTiles() {
         CHECK(!foundRawId);
     }
 
-    // 3. WebUI HTML contains responsive layout and safe-area rules
+    // 3. WebUI HTML contains responsive layout, safe-area rules, and Layout Studio
     {
         app::WebServer srv;
         auto res = srv.handleRequest("GET", "/", "");
@@ -5359,6 +5987,32 @@ static void testPlayerSwitchAndUnresolvedTiles() {
         CHECK(res.body.find("safe-area-inset-bottom") != std::string::npos);
         CHECK(res.body.find("gamepad-viewport-wrapper") != std::string::npos);
         CHECK(res.body.find("gamepad-container") != std::string::npos);
+
+        // Layout Studio components & storage persistence
+        CHECK(res.body.find("studioToolbar") != std::string::npos);
+        CHECK(res.body.find("btnToggleStudio") != std::string::npos);
+        CHECK(res.body.find("Layout Studio") != std::string::npos);
+        CHECK(res.body.find("psbox_layout_studio_v1") != std::string::npos);
+        CHECK(res.body.find("exportStudioLayout") != std::string::npos);
+        CHECK(res.body.find("importStudioLayout") != std::string::npos);
+        CHECK(res.body.find("resetStudioLayout") != std::string::npos);
+        CHECK(res.body.find("mod_stick_left") != std::string::npos);
+        CHECK(res.body.find("mod_player_bar") != std::string::npos);
+
+        // Layout JSON payload parsing verification
+        std::string sampleLayout = R"({
+            "hapticMs": 24,
+            "stickSensitivity": 1.4,
+            "modules": {
+                "mod_stick_left": {"x": 50, "y": 100, "scale": 1.25},
+                "mod_abxy": {"x": 700, "y": 110, "scale": 1.35}
+            }
+        })";
+        auto parsedLayout = json::parse(sampleLayout);
+        CHECK(parsedLayout.has_value());
+        CHECK((*parsedLayout)["hapticMs"].asInt(0) == 24);
+        CHECK((*parsedLayout)["stickSensitivity"].asNumber(0.0) > 1.39);
+        CHECK((*parsedLayout)["modules"]["mod_stick_left"]["x"].asInt(0) == 50);
 
         auto resBoost = srv.handleRequest("GET", "/boost", "");
         CHECK(resBoost.status == 200);
@@ -9065,6 +9719,139 @@ static void testTrophyModalsAndDesktopInput() {
     CHECK(!app.wantsTextInput());
 }
 
+static void testMilestone5TransmissionQualityAndStreamReload() {
+    // 1. Dynamic Low-RTT Jitter Buffer Adaptation in H264Receiver
+    {
+        xc::stream::VideoReceiveStats stats;
+        xc::stream::H264Receiver rx([] {}, stats, 90);
+
+        // Low RTT (RTT = 14 ms):
+        // lossWaitMs: dynamicMin = max(40, 14*2 + 15) = 43. 14*2 + 30 = 58. Clamp(58, 43, 300) = 58 ms.
+        // renackMs: dynamicMin = max(20, 14 + 6) = 20. 14 + 10 = 24. Clamp(24, 20, 250) = 24 ms.
+        rx.setRttMs(14);
+        CHECK(rx.lossWaitMs() == 58);
+        CHECK(rx.renackMs() == 24);
+
+        // Boundary low RTT (RTT = 2 ms):
+        // lossWaitMs: dynamicMin = max(40, 4 + 15) = 40. 2*2 + 30 = 34. Clamp(34, 40, 300) = 40 ms.
+        // renackMs: dynamicMin = max(20, 2 + 6) = 20. 2 + 10 = 12. Clamp(12, 20, 250) = 20 ms.
+        rx.setRttMs(2);
+        CHECK(rx.lossWaitMs() == 40);
+        CHECK(rx.renackMs() == 20);
+
+        // Intermediate low RTT (RTT = 25 ms):
+        // lossWaitMs: dynamicMin = max(40, 50 + 15) = 65. 25*2 + 30 = 80. Clamp(80, 65, 300) = 80 ms.
+        // renackMs: dynamicMin = max(20, 25 + 6) = 31. 25 + 10 = 35. Clamp(35, 31, 250) = 35 ms.
+        rx.setRttMs(25);
+        CHECK(rx.lossWaitMs() == 80);
+        CHECK(rx.renackMs() == 35);
+
+        // High RTT (RTT = 60 ms):
+        // lossWaitMs: dynamicMin = 90. 60*2 + 30 = 150. Clamp(150, 90, 300) = 150 ms.
+        // renackMs: dynamicMin = 50. 60 + 10 = 70. Clamp(70, 50, 250) = 70 ms.
+        rx.setRttMs(60);
+        CHECK(rx.lossWaitMs() == 150);
+        CHECK(rx.renackMs() == 70);
+
+        // Boundary RTT (RTT = 30 ms):
+        // lossWaitMs: dynamicMin = 90. 30*2 + 30 = 90. Clamp(90, 90, 300) = 90 ms.
+        // renackMs: dynamicMin = 50. 30 + 10 = 40. Clamp(40, 50, 250) = 50 ms.
+        rx.setRttMs(30);
+        CHECK(rx.lossWaitMs() == 90);
+        CHECK(rx.renackMs() == 50);
+
+        // Unmeasured / negative RTT
+        rx.setRttMs(-1);
+        CHECK(rx.lossWaitMs() == 90);
+        CHECK(rx.renackMs() == 50);
+    }
+
+    // 2. Accelerated Downward Audio Latency Recovery
+    {
+        xc::app::AudioLatency lat;
+        xc::media::AudioQueue q;
+        q.open();
+        lat.reset();
+        CHECK(lat.targetMs == 40);
+        CHECK(!lat.warm);
+
+        // Warm-up phase
+        lat.update(1000, &q);
+        CHECK(!lat.warm);
+        lat.update(4000, &q);
+        CHECK(lat.warm);
+        CHECK(lat.calmSinceMs == 4000);
+
+        // Step up on single dry grain (dry == 1): +5 ms step
+        float sample[2] = {0.0f, 0.0f};
+        q.push(sample, 1);
+        float buf[256 * 2];
+        q.pull(buf, 256);  // 1 underrun
+        lat.update(5000, &q);
+        CHECK(lat.targetMs == 45);
+        CHECK(lat.calmSinceMs == 5000);
+
+        // Step up on multi-dry grain (dry == 2): +10 ms step
+        q.setRefill(0);
+        q.pull(buf, 256);
+        q.pull(buf, 256);  // 2 underruns
+        lat.update(6000, &q);
+        CHECK(lat.targetMs == 55);
+        CHECK(lat.calmSinceMs == 6000);
+
+        // Downward recovery: 30s calm -> -5 ms step down to 50 ms
+        lat.update(36000, &q);
+        CHECK(lat.targetMs == 50);
+        CHECK(lat.calmSinceMs == 36000);
+
+        // Another 30s calm -> -5 ms step down to 45 ms
+        lat.update(66000, &q);
+        CHECK(lat.targetMs == 45);
+        CHECK(lat.calmSinceMs == 66000);
+
+        // Another 30s calm: at 45 ms floor, must NOT decrease further
+        lat.update(96000, &q);
+        CHECK(lat.targetMs == 45);
+
+        // Reset check
+        lat.reset();
+        CHECK(lat.targetMs == 40);
+        CHECK(!lat.warm);
+    }
+
+    // 3. StreamPlayer::requestReconnect() sets reconnecting state
+    {
+        xc::xcloud::GssvClient gssv;
+        xc::app::StreamPlayer player(gssv);
+        CHECK(!player.isReconnecting());
+        player.requestReconnect();
+        CHECK(player.isReconnecting());
+    }
+
+    // 4. StreamMenu returns MenuAction::ReloadStream on reload item accept
+    {
+        using xc::ui::MenuAction;
+        xc::ui::Fonts fonts;
+        xc::ui::StreamMenu menu(fonts);
+        menu.open(0, false);
+        CHECK(menu.isOpen());
+
+        // Navigating Up twice from XboxButton:
+        // Up 1: wraps to Leave
+        // Up 2: moves to ReloadStreamItem
+        xc::ui::NavInput navUp;
+        navUp.up = true;
+        menu.handle(navUp);
+        menu.handle(navUp);
+
+        xc::ui::NavInput navAccept;
+        navAccept.accept = true;
+        MenuAction action = menu.handle(navAccept);
+        CHECK(action == MenuAction::ReloadStream);
+        CHECK(!menu.isOpen());
+    }
+}
+
 int main() {
     testPs4VideoPipelineAndSse2Converter();
     testTrophySystem();
@@ -9100,6 +9887,7 @@ int main() {
     testLoginRetry();
     testTokenRefresh();
     testGyro();
+    testGyroProZeroDriftAndDecoupledSensitivity();
     testReport();
     testCrashGuard();
     testBuiltinCa();
@@ -9125,6 +9913,7 @@ int main() {
     testAccentColor();
     testVersions();
     testStreamMenu();
+    testSmartGlassInGameMenuInvariants();
     testSplashInputBlocking();
     testSettingsMigration();
     testSettingsChoiceRoundTrip();
@@ -9156,6 +9945,8 @@ int main() {
     testUsbPadReports();
     testUsbPadDescriptors();
     testUsbPadSlots();
+    testSoloInputRedirectionMerging();
+    testSoloInputRedirectSettingsPersistence();
     testDesktopMouseNav();
     testWebSocketRFC6455();
     testAudioToHaptics();
@@ -9166,6 +9957,7 @@ int main() {
     testCodSearchRomanAndSettingsReset();
     testFreeAccountPlayability();
     testDetailsHydrationAndPlaytimeBadge();
+    testMilestone5TransmissionQualityAndStreamReload();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

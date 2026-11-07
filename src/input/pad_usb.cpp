@@ -113,9 +113,20 @@ bool pollWhere(int player, int except, ControllerState& out) {
 }  // namespace
 
 UsbPadProtocol usbPadProtocolFor(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol) {
-    if (ifaceClass != 0xFF) return UsbPadProtocol::None;
-    if (ifaceSubclass == 0x5D && ifaceProtocol == 0x01) return UsbPadProtocol::XInput;
-    if (ifaceSubclass == 0x47 && ifaceProtocol == 0xD0) return UsbPadProtocol::Gip;
+    if (ifaceClass == 0x03) {
+        // Standard HID: DualShock 4 is subclass 0, protocol 0.
+        // Skip boot keyboards (protocol 1) and mice (protocol 2) so they are never claimed as gamepads.
+        if (ifaceSubclass == 0x01 && (ifaceProtocol == 0x01 || ifaceProtocol == 0x02)) {
+            return UsbPadProtocol::None;
+        }
+        return UsbPadProtocol::DualShock4;
+    }
+    if (ifaceClass == 0xFF) {
+        if (ifaceSubclass == 0x5D && (ifaceProtocol == 0x01 || ifaceProtocol == 0x81 || ifaceProtocol == 0x00))
+            return UsbPadProtocol::XInput;
+        if (ifaceSubclass == 0x47 && ifaceProtocol == 0xD0)
+            return UsbPadProtocol::Gip;
+    }
     return UsbPadProtocol::None;
 }
 

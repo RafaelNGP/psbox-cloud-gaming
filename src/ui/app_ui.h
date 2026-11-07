@@ -601,7 +601,7 @@ private:
     Color pickerColour() const;
     void drawColourPicker(Canvas& c);
     // The testers that Dead zone and Trigger vibration open in Settings.
-    enum class Tester { None, Sticks, Triggers, Keys, Pad, Touchpad, SignInCheck, NetworkTest, Donation };
+    enum class Tester { None, Sticks, Triggers, Keys, Pad, Touchpad, SignInCheck, NetworkTest, Donation, GyroCal };
     void openTester(Tester t);
     void handleTester(const NavInput& in);
     void drawStickTester(Canvas& c);

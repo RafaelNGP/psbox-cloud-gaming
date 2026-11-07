@@ -45,6 +45,48 @@ bool hasIdrSlice(const std::vector<uint8_t>& au) {
         }
     return false;
 }
+}  // namespace
+
+void AudioLatency::reset() {
+    nextMs = 0, targetMs = 40, warm = false, lowNext = 0;
+    for (size_t& l : lows) l = SIZE_MAX;
+    media::audioQueue().setRefill(0);
+}
+
+void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
+    auto& q = queue ? *queue : media::audioQueue();
+    if (!nextMs) nextMs = now + 3000;
+    q.setRefill(static_cast<size_t>(targetMs) * 48);  // what a dry queue fills back to
+    if (now < nextMs) return;
+    nextMs = now + 1000;
+    if (!warm) {
+        warm = true, calmSinceMs = now;
+        q.takeUnderruns(), q.takeLowWater();  // the start's own
+        return;
+    }
+    const uint64_t dry = q.takeUnderruns();
+    lows[lowNext++ % 5] = q.takeLowWater();
+    if (dry) {
+        if (targetMs < 100) {
+            targetMs = std::min(targetMs + (dry == 1 ? 5 : 10), 100);
+            XC_LOGI("audio: ran dry (%llu grains), target %d ms", static_cast<unsigned long long>(dry), targetMs);
+        }
+        calmSinceMs = now;
+        return;
+    }
+    if (now - calmSinceMs >= 30000 && targetMs > 45) {
+        targetMs -= 5, calmSinceMs = now;
+        XC_LOGI("audio: steady for 30s, target %d ms", targetMs);
+    }
+    if (lowNext < 5) return;  // 5 s seen first
+    size_t low = SIZE_MAX;
+    for (size_t l : lows) low = std::min(low, l);
+    const size_t target = static_cast<size_t>(targetMs) * 48;
+    if (low != SIZE_MAX && low > target + 480) {
+        const size_t cut = std::min<size_t>(low - target, 960);
+        if (q.cutAhead(cut))
+            for (size_t& l : lows) l = l == SIZE_MAX ? l : l - std::min(l, cut);  // the queue is that much shorter
+    }
 }
 
 struct StreamPlayer::Impl {
@@ -305,56 +347,9 @@ struct StreamPlayer::Impl {
     // The sound's delay: what waits in the audio queue. Once a second, if
     // even its lowest point over the last 5 s stayed above the target, up to
     // 20 ms is cut out (crossfaded); a pull that found it dry raises the
-    // target 10 ms (up to 100), a minute without one lowers it 5 (down to
-    // 40). A network burst would otherwise leave the sound that much later
-    // for good (it sat at ~100 ms).
-    struct AudioLatency {
-        uint64_t nextMs = 0, calmSinceMs = 0;
-        int targetMs = 40;
-        bool warm = false;  // past the first 3 s, while the queue fills
-        size_t lows[5] = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};  // each second's lowest
-        size_t lowNext = 0;
-        void reset() {
-            nextMs = 0, targetMs = 40, warm = false, lowNext = 0;
-            for (size_t& l : lows) l = SIZE_MAX;
-            media::audioQueue().setRefill(0);
-        }
-        void update(uint64_t now) {
-            auto& q = media::audioQueue();
-            if (!nextMs) nextMs = now + 3000;
-            q.setRefill(static_cast<size_t>(targetMs) * 48);  // what a dry queue fills back to
-            if (now < nextMs) return;
-            nextMs = now + 1000;
-            if (!warm) {
-                warm = true, calmSinceMs = now;
-                q.takeUnderruns(), q.takeLowWater();  // the start's own
-                return;
-            }
-            const uint64_t dry = q.takeUnderruns();
-            lows[lowNext++ % 5] = q.takeLowWater();
-            if (dry) {
-                if (targetMs < 100) {
-                    targetMs = std::min(targetMs + 10, 100);
-                    XC_LOGI("audio: ran dry (%llu grains), target %d ms", static_cast<unsigned long long>(dry), targetMs);
-                }
-                calmSinceMs = now;
-                return;
-            }
-            if (now - calmSinceMs >= 60000 && targetMs > 40) {
-                targetMs -= 5, calmSinceMs = now;
-                XC_LOGI("audio: steady for a minute, target %d ms", targetMs);
-            }
-            if (lowNext < 5) return;  // 5 s seen first
-            size_t low = SIZE_MAX;
-            for (size_t l : lows) low = std::min(low, l);
-            const size_t target = static_cast<size_t>(targetMs) * 48;
-            if (low != SIZE_MAX && low > target + 480) {
-                const size_t cut = std::min<size_t>(low - target, 960);
-                if (q.cutAhead(cut))
-                    for (size_t& l : lows) l = l == SIZE_MAX ? l : l - std::min(l, cut);  // the queue is that much shorter
-            }
-        }
-    } audioLatency;
+    // target 5 ms (1 dry grain) or 10 ms (multi-grain, up to 100), 30 s
+    // without one lowers it 5 (down to 45).
+    AudioLatency audioLatency;
 
     void audioLoop() {
         platform::setThreadAffinity(platform::ThreadRole::Audio, "xcloud_adec");
@@ -1307,6 +1302,16 @@ void StreamPlayer::answerTextInput(const std::string& id, bool accepted, const s
 void StreamPlayer::requestKeyframe() { impl_->keyframeWanted = true; }
 
 uint32_t StreamPlayer::reconnects() const { return impl_->reconnects; }
+
+void StreamPlayer::requestReconnect() {
+    if (!impl_->reconnecting.exchange(true)) {
+        XC_LOGI("user requested stream reload / reconnect");
+    }
+}
+
+bool StreamPlayer::isReconnecting() const {
+    return impl_->reconnecting.load();
+}
 
 void StreamPlayer::simulateDrop() {
     if (auto s = impl_->current()) s->simulateDrop();

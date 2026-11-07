@@ -9,6 +9,7 @@
 #include "ui/canvas.h"
 #include "ui/font.h"
 #include "ui/pad_icons.h"
+#include "input/gyro.h"
 
 #include <string>
 
@@ -45,13 +46,16 @@ enum StatsIndicator : uint32_t {
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, PadSpeakerVolume,
-    TouchpadShortcuts, Player
+    TouchpadShortcuts, Player, SmartGlassToggle, ReloadStream
 };
 
 class StreamMenu {
 public:
     static constexpr int kMenuW = 620, kMenuH = 1064;
+    static constexpr int kCardW = 540, kCardGap = 40;
+    static constexpr int kCombinedW = kMenuW + kCardGap + kCardW;
     static constexpr int kMenuX = 80, kMenuY = (1080 - kMenuH) / 2;
+    static constexpr Color kPanel = rgba(24, 24, 24);
     static constexpr int kStatsX = 32, kStatsY = 28;
     // The connection warning, alone (the statistics line off), top right.
     static constexpr int kWarnRight = 1888, kWarnY = 28;
@@ -93,10 +97,24 @@ public:
     void setCircleConfirms(bool cc) { circleConfirms_ = cc; }
     int padSpeakerVolume() const { return padSpeakerVolume_; }
     void setPadSpeakerVolume(int vol) { padSpeakerVolume_ = vol; }
+    bool smartGlassOpen() const { return smartGlassOpen_; }
+    void setSmartGlassOpen(bool open) { smartGlassOpen_ = open; }
     // Gyro aiming: mode (input::GyroMode) and intensity 1..input::kGyroLevels.
     int gyroMode() const { return gyroMode_; }
     int gyroLevel() const { return gyroLevel_; }
     void setGyro(int mode, int level) { gyroMode_ = mode, gyroLevel_ = level; }
+    int gyroYawScale() const { return gyroYawScale_; }
+    void setGyroYawScale(int s) { gyroYawScale_ = s; }
+    int gyroPitchScale() const { return gyroPitchScale_; }
+    void setGyroPitchScale(int s) { gyroPitchScale_ = s; }
+    const float* gyroBias() const { return gyroBias_; }
+    void setGyroBias(const float b[3]) { if (b) { gyroBias_[0] = b[0]; gyroBias_[1] = b[1]; gyroBias_[2] = b[2]; } }
+    void startGyroCalibration(int samples = 240);
+    bool feedGyroCalibration(const float rawW[3]);
+    bool isGyroCalibrating() const { return calibrating_; }
+    float gyroCalProgress() const { return calProgress_; }
+    bool gyroCalSucceeded() const { return calSucceeded_; }
+    bool gyroCalFailed() const { return calFailed_; }
     bool micMuted() const { return micMuted_; }
     void setMicMuted(bool muted) { micMuted_ = muted; }
     float micLevel() const { return micLevel_; }
@@ -143,8 +161,13 @@ private:
         ConfirmItem,
         GyroItem,
         GyroLevelItem,
+        GyroYawItem,
+        GyroPitchItem,
+        GyroCalibrateItem,
         PadSpeakerVolumeItem,
         TouchpadShortcutsItem,
+        SmartGlassItem,
+        ReloadStreamItem,
         Leave,
         ItemCount
     };
@@ -171,11 +194,19 @@ private:
     int triggerStrength_ = 2;
     int deadzone_ = 15;
     int gyroMode_ = 0, gyroLevel_ = 5;
+    int gyroYawScale_ = 100, gyroPitchScale_ = 80;
+    float gyroBias_[3] = {0.0f, 0.0f, 0.0f};
+    bool calibrating_ = false;
+    bool calSucceeded_ = false;
+    bool calFailed_ = false;
+    float calProgress_ = 0.0f;
+    input::GyroCalibrator calibrator_{};
     bool micMuted_ = false;
     float micLevel_ = 0.0f;
     int padSpeakerVolume_ = 100;
     PadSlots pads_{};
     int usbOwnerPlayer_ = -1;
+    bool smartGlassOpen_ = false;
     mutable std::vector<float> frametimes_;
 };
 

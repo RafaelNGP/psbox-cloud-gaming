@@ -45,6 +45,9 @@ struct GameProfile {
     // Gyro aiming: 0 off, 1 always, 2 while L2 is held; intensity 1..10
     int gyroMode = 0;
     int gyroLevel = 5;
+    int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
+    int gyroPitchScale = 80;   // vertical sensitivity percent (20..200%, default 80%)
+    float gyroBias[3] = {0.0f, 0.0f, 0.0f}; // static zero-drift bias
     // Touchpad as mouse in games with native MKB support (OFF by default)
     bool touchpadMouse = false;
     // Configurable DualSense touchpad gestures and left/right click actions
@@ -56,6 +59,7 @@ struct GameProfile {
     // Optional title metadata persisted for background trophy sync filtering
     std::string xboxTitleId;
     std::string gameName;
+    bool soloInputRedirect = false;
 };
 
 // Key to identify a game profile: productId first, else titleId.
@@ -118,6 +122,9 @@ struct Settings {
     int keyboardPlayer = 0;    // the player a USB keyboard and mouse play as (0..3; keys 1-4): 0 native with player 1, else that player's controller
     int gyroMode = 0;          // gyro aiming (input/gyro.h): 0 off, 1 always, 2 while L2 is held
     int gyroLevel = 5;         // its intensity, 1..10
+    int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
+    int gyroPitchScale = 80;   // vertical sensitivity percent (20..200%, default 80%)
+    float gyroBias[3] = {0.0f, 0.0f, 0.0f}; // static zero-drift bias
     bool touchpadMouse = false; // touchpad as mouse in games with native MKB support
     input::TouchpadShortcuts touchpadShortcuts = input::defaultTouchpadShortcuts();
     int micGain = 1;        // 0: 50%, 1: 100%, 2: 150%
@@ -128,6 +135,7 @@ struct Settings {
     bool previewFeatures = true; // xCloud preview client identification & ad-supported F2P streaming
     bool syncTrophies = false;   // Xbox achievement to PlayStation trophy conversion
     bool usbControllers = true;  // in-app USB controllers driver (OneFamily)
+    bool soloInputRedirect = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
 
     uint64_t playtimeForGame(const std::string& productId, const std::string& titleId) const {

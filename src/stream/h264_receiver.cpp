@@ -415,13 +415,15 @@ uint64_t H264Receiver::firstPacketUs(uint32_t rtpTimestamp) const {
 uint64_t H264Receiver::lossWaitMs() const {
     const int rtt = rttMs_;
     if (rtt <= 0) return waitMs_;
-    return std::clamp<uint64_t>(static_cast<uint64_t>(rtt) * 2 + 30, waitMs_, 300);
+    const uint64_t dynamicMin = (rtt < 30) ? std::max<uint64_t>(40, static_cast<uint64_t>(rtt) * 2 + 15) : waitMs_;
+    return std::clamp<uint64_t>(static_cast<uint64_t>(rtt) * 2 + 30, dynamicMin, 300);
 }
 
 uint64_t H264Receiver::renackMs() const {
     const int rtt = rttMs_;
     if (rtt <= 0) return kRenackMs;
-    return std::clamp<uint64_t>(static_cast<uint64_t>(rtt) + 10, kRenackMs, 250);
+    const uint64_t dynamicMin = (rtt < 30) ? std::max<uint64_t>(20, static_cast<uint64_t>(rtt) + 6) : kRenackMs;
+    return std::clamp<uint64_t>(static_cast<uint64_t>(rtt) + 10, dynamicMin, 250);
 }
 
 }  // namespace xc::stream

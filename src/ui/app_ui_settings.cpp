@@ -1,8 +1,103 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "ui/app_ui_internal.h"
+#include "input/gyro.h"
+#include "input/controller_backend.h"
 
 namespace xc::ui {
+
+namespace {
+int s_gyroYawScale = 100;
+int s_gyroPitchScale = 80;
+float s_gyroBias[3] = {0, 0, 0};
+bool s_gyroCalModalOpen = false;
+input::GyroCalibrator s_gyroCalibrator;
+uint64_t s_gyroCalDoneTime = 0;
+
+static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
+                                       const std::function<Rect(Canvas&, int, int, const std::string&)>& drawModalFn,
+                                       const std::function<void(Canvas&, const std::vector<std::pair<int, const char*>>&)>& drawHintsFn,
+                                       app::GameProfile& activeGameProfile, bool gameSettingsOpen,
+                                       bool& activeGameHasCustom, uint64_t lastRender, bool& dirty, bool& animating) {
+    if (s_gyroCalibrator.state == input::GyroCalibrator::State::Calibrating) {
+        float rawGyro[3]{0};
+        input::pollPadRawGyro(0, rawGyro);
+        bool done = s_gyroCalibrator.feed(rawGyro);
+        dirty = true;
+        animating = true;
+        if (done) {
+            s_gyroBias[0] = s_gyroCalibrator.resultBias[0];
+            s_gyroBias[1] = s_gyroCalibrator.resultBias[1];
+            s_gyroBias[2] = s_gyroCalibrator.resultBias[2];
+            input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
+            if (gameSettingsOpen) {
+                activeGameProfile.gyroBias[0] = s_gyroBias[0];
+                activeGameProfile.gyroBias[1] = s_gyroBias[1];
+                activeGameProfile.gyroBias[2] = s_gyroBias[2];
+                activeGameHasCustom = true;
+            }
+            s_gyroCalDoneTime = lastRender;
+        } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Failed) {
+            s_gyroCalDoneTime = lastRender;
+        }
+    }
+
+    Rect panel = drawModalFn(c, 1080, 520, "Gyroscope Pro Calibration");
+
+    int textX = panel.x + 56;
+    int textY = panel.y + 110;
+    fonts.regular.draw(c, "Place controller on a flat, stationary surface during calibration.",
+                       textX, textY, 24, rgba(230, 230, 230));
+    textY += 45;
+
+    // Progress bar
+    float prog = s_gyroCalibrator.progress();
+    int barW = panel.w - 112;
+    int barH = 26;
+    c.fillRect({textX, textY, barW, barH}, rgba(255, 255, 255, 25), 8);
+    c.strokeRect({textX, textY, barW, barH}, rgba(255, 255, 255, 50), 2, 8);
+    int fillW = static_cast<int>(barW * prog);
+    if (fillW > 0) {
+        Color barColor = s_gyroCalibrator.state == input::GyroCalibrator::State::Failed
+            ? rgba(239, 68, 68)
+            : s_gyroCalibrator.state == input::GyroCalibrator::State::Succeeded
+                ? rgba(34, 197, 94)
+                : rgba(59, 130, 246);
+        c.fillRect({textX, textY, fillW, barH}, barColor, 8);
+    }
+    textY += 48;
+
+    if (s_gyroCalibrator.state == input::GyroCalibrator::State::Calibrating) {
+        std::string status = "Sampling pad 0 at 120 Hz... (" + std::to_string(s_gyroCalibrator.sampleCount) +
+                             "/" + std::to_string(s_gyroCalibrator.targetSamples) + ")";
+        fonts.semibold.draw(c, status, textX, textY, 22, kWhite);
+        textY += 32;
+        fonts.regular.draw(c, "Measuring static angular velocity drift and rotational variance...", textX, textY, 20, kGray);
+    } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Succeeded) {
+        fonts.bold.draw(c, "Calibration Complete - Zero-Drift Applied", textX, textY, 26, rgba(74, 222, 128));
+        textY += 38;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Offset: X: %+.4f  Y: %+.4f  Z: %+.4f rad/s (max var: %.6f)",
+                      s_gyroCalibrator.resultBias[0], s_gyroCalibrator.resultBias[1], s_gyroCalibrator.resultBias[2],
+                      s_gyroCalibrator.maxVariance);
+        fonts.regular.draw(c, buf, textX, textY, 22, rgba(200, 230, 200));
+        textY += 32;
+        fonts.regular.draw(c, "Static zero-drift calibration saved to settings profile.", textX, textY, 20, kGray);
+    } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Failed) {
+        fonts.bold.draw(c, "Calibration Failed - Motion Detected", textX, textY, 26, rgba(248, 113, 113));
+        textY += 38;
+        char buf[128];
+        std::snprintf(buf, sizeof(buf), "Motion variance: %.6f rad^2/s^2 (threshold: 0.0025 rad^2/s^2)", s_gyroCalibrator.maxVariance);
+        fonts.regular.draw(c, buf, textX, textY, 22, rgba(254, 202, 202));
+        textY += 32;
+        fonts.regular.draw(c, "The controller moved during sampling. Please keep it still and retry.", textX, textY, 20, kGray);
+    }
+
+    c.fillRect({0, kH - 80, kW, 80}, kBg);
+    drawHintsFn(c, {{kIconCross, tr(Str::Select)}, {kIconCircle, tr(Str::Back)}});
+}
+}  // namespace
+
 
 bool AppUi::settingsLightBar(int& mode, Color& colour) const {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -277,6 +372,22 @@ void AppUi::handleTouchpadTester(const NavInput& in) {
 void AppUi::handleTester(const NavInput& in) {
     // Caller holds mutex_. Changes apply as they are made (the pad follows);
     // Cross keeps them, Circle puts the old ones back.
+    if (tester_ == Tester::GyroCal) {
+        if (in.back) {
+            s_gyroCalibrator.reset();
+            s_gyroCalModalOpen = false;
+            tester_ = Tester::None;
+            dirty_ = true;
+            return;
+        }
+        if (in.accept && s_gyroCalibrator.isDone()) {
+            s_gyroCalModalOpen = false;
+            tester_ = Tester::None;
+            dirty_ = true;
+            return;
+        }
+        return;
+    }
     if (tester_ == Tester::Keys) return handleKeysTester(in);
     if (tester_ == Tester::Pad) return handlePadTester(in);
     if (tester_ == Tester::Touchpad) return handleTouchpadTester(in);
@@ -384,6 +495,10 @@ void AppUi::setGyroDefaults(int mode, int level) {
     gyroLevel_ = level;
     settings_.gyroMode = mode;
     settings_.gyroLevel = level;
+    float y = 1.0f, p = 0.8f;
+    input::getGlobalGyroCalibration(s_gyroBias, y, p);
+    s_gyroYawScale = static_cast<int>(std::round(y * 100.0f));
+    s_gyroPitchScale = static_cast<int>(std::round(p * 100.0f));
     dirty_ = true;
 }
 
@@ -422,6 +537,11 @@ void AppUi::openGameSettings() {
         activeGameProfile_.padMap = settings_.padMap;
         activeGameProfile_.gyroMode = gyroMode_;
         activeGameProfile_.gyroLevel = gyroLevel_;
+        activeGameProfile_.gyroYawScale = s_gyroYawScale;
+        activeGameProfile_.gyroPitchScale = s_gyroPitchScale;
+        activeGameProfile_.gyroBias[0] = s_gyroBias[0];
+        activeGameProfile_.gyroBias[1] = s_gyroBias[1];
+        activeGameProfile_.gyroBias[2] = s_gyroBias[2];
         activeGameProfile_.touchpadMouse = settings_.touchpadMouse;
         activeGameProfile_.touchpadShortcuts = settings_.touchpadShortcuts;
         activeGameProfile_.locale.clear();
@@ -487,7 +607,14 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
     } else if (row == 22) {
         out = {tr(Str::Deactivated), tr(Str::Activated)};
     } else if (row == 15) {
-        out = {tr(Str::Off), tr(Str::GyroAlways), tr(Str::GyroAiming)};
+        out = {
+            tr(Str::Off),
+            tr(Str::GyroAlways),
+            tr(Str::GyroAiming),
+            "Calibrate Gyro (Pad 0)",
+            "Horizontal (Yaw) Sensitivity: " + std::to_string(s_gyroYawScale) + "%",
+            "Vertical (Pitch) Sensitivity: " + std::to_string(s_gyroPitchScale) + "%"
+        };
     } else if (row == 17) {
         out = {tr(Str::RunCheck)};
     } else if (row == 18) {
@@ -595,8 +722,39 @@ void AppUi::applySetting(int row, int index) {
         if (settings_.fullscreen != (index == 1)) displayModeChanged_ = true;
         settings_.fullscreen = index == 1;
     } else if (row == 15) {
-        settings_.gyroMode = index;
-        gyroMode_ = index;
+        if (index <= 2) {
+            settings_.gyroMode = index;
+            gyroMode_ = index;
+        } else if (index == 3) {
+            s_gyroCalModalOpen = true;
+            s_gyroCalibrator.start(240);
+            s_gyroCalDoneTime = 0;
+            tester_ = Tester::GyroCal;
+        } else if (index == 4) {
+            static constexpr int kScales[] = {20, 50, 80, 100, 120, 150, 180, 200};
+            int cur = s_gyroYawScale;
+            int next = 100;
+            for (size_t k = 0; k < std::size(kScales); ++k) {
+                if (cur <= kScales[k]) {
+                    next = kScales[(k + 1) % std::size(kScales)];
+                    break;
+                }
+            }
+            s_gyroYawScale = next;
+            input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
+        } else if (index == 5) {
+            static constexpr int kScales[] = {20, 40, 60, 80, 100, 120, 150, 200};
+            int cur = s_gyroPitchScale;
+            int next = 80;
+            for (size_t k = 0; k < std::size(kScales); ++k) {
+                if (cur <= kScales[k]) {
+                    next = kScales[(k + 1) % std::size(kScales)];
+                    break;
+                }
+            }
+            s_gyroPitchScale = next;
+            input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
+        }
     } else if (row == 10) {
         settings_.maxBitrateMbps = index == 0 ? 0 : kBitrateCaps[index - 1];
     } else if (row == 11) {
@@ -621,6 +779,11 @@ void AppUi::changeSetting(int delta) {
     // Caller holds mutex_. Left / right: the previous / next choice.
     int n = static_cast<int>(settingOptions(settingsRow_).size());
     if (n <= 0) return;
+    if (settingsRow_ == 15) {
+        int cur = std::clamp(settings_.gyroMode, 0, 2);
+        applySetting(15, (cur + delta + 3) % 3);
+        return;
+    }
     if (settingsRow_ == 10) {
         // Bitrate slider: clamp between 0 (Automatic) and n - 1 (50 Mbps)
         int cur = settingSelected(10);
@@ -891,6 +1054,11 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             activeGameProfile_.highRefresh = settings_.highRefresh;
             activeGameProfile_.gyroMode = gyroMode_;
             activeGameProfile_.gyroLevel = gyroLevel_;
+            activeGameProfile_.gyroYawScale = s_gyroYawScale;
+            activeGameProfile_.gyroPitchScale = s_gyroPitchScale;
+            activeGameProfile_.gyroBias[0] = s_gyroBias[0];
+            activeGameProfile_.gyroBias[1] = s_gyroBias[1];
+            activeGameProfile_.gyroBias[2] = s_gyroBias[2];
             activeGameProfile_.touchpadMouse = settings_.touchpadMouse;
             gameSettingsRow_ = 0;
             dirty_ = true;
@@ -898,7 +1066,32 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
         default: break;
         }
     }
-    if ((in.left || in.right || in.accept) && tester_ == Tester::None) {
+    if (in.square && rowId == 12) {
+        s_gyroCalModalOpen = true;
+        s_gyroCalibrator.start(240);
+        s_gyroCalDoneTime = 0;
+        tester_ = Tester::GyroCal;
+        dirty_ = true;
+    }
+    if (in.triangle && rowId == 12) {
+        if (activeGameProfile_.gyroYawScale == 100 && activeGameProfile_.gyroPitchScale == 80) {
+            activeGameProfile_.gyroYawScale = 140;
+            activeGameProfile_.gyroPitchScale = 110;
+        } else if (activeGameProfile_.gyroYawScale == 140) {
+            activeGameProfile_.gyroYawScale = 180;
+            activeGameProfile_.gyroPitchScale = 140;
+        } else if (activeGameProfile_.gyroYawScale == 180) {
+            activeGameProfile_.gyroYawScale = 60;
+            activeGameProfile_.gyroPitchScale = 50;
+        } else {
+            activeGameProfile_.gyroYawScale = 100;
+            activeGameProfile_.gyroPitchScale = 80;
+        }
+        activeGameHasCustom_ = true;
+        input::setGyroCalibration(activeGameProfile_.gyroBias, activeGameProfile_.gyroYawScale / 100.0f, activeGameProfile_.gyroPitchScale / 100.0f);
+        dirty_ = true;
+    }
+    if ((in.left || in.right || in.accept || in.square || in.triangle) && tester_ == Tester::None) {
         std::string key = app::gameProfileKey(detail_.productId, detail_.titleId);
         if (activeGameHasCustom_) {
             perGameSettings_[key] = activeGameProfile_;
@@ -1100,6 +1293,19 @@ void AppUi::drawSettings(Canvas& c) {
 
         int urlW = fonts_.semibold.measure(qrUrl, 20);
         fonts_.semibold.draw(c, qrUrl, pill.x + (pill.w - urlW) / 2, fonts_.semibold.centeredY(pill.y, pill.h, 20), 20, rgba(140, 230, 160));
+    }
+
+    if (s_gyroCalModalOpen) {
+        if (tester_ == Tester::None && (s_gyroCalDoneTime == 0 || lastRender_ - s_gyroCalDoneTime > 400)) {
+            s_gyroCalModalOpen = false;
+            s_gyroCalibrator.reset();
+        } else {
+            renderGyroCalibrationModal(c, fonts_,
+                [this](Canvas& cv, int w, int h, const std::string& t) { return drawModal(cv, w, h, t); },
+                [this](Canvas& cv, const std::vector<std::pair<int, const char*>>& h) { drawHints(cv, h); },
+                activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
+            return;
+        }
     }
 
     if (trophyDisclaimerOpen_) return drawTrophyDisclaimerModal(c);
@@ -1902,6 +2108,18 @@ void AppUi::drawSignOutHold(Canvas& c, uint64_t nowMs) {
 }
 
 void AppUi::drawGameSettings(Canvas& c) {
+    if (s_gyroCalModalOpen) {
+        if (tester_ == Tester::None && (s_gyroCalDoneTime == 0 || lastRender_ - s_gyroCalDoneTime > 400)) {
+            s_gyroCalModalOpen = false;
+            s_gyroCalibrator.reset();
+        } else {
+            renderGyroCalibrationModal(c, fonts_,
+                [this](Canvas& cv, int w, int h, const std::string& t) { return drawModal(cv, w, h, t); },
+                [this](Canvas& cv, const std::vector<std::pair<int, const char*>>& h) { drawHints(cv, h); },
+                activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
+            return;
+        }
+    }
     if (tester_ == Tester::Sticks) {
         drawStickTester(c);
         return;
@@ -2042,6 +2260,9 @@ void AppUi::drawGameSettings(Canvas& c) {
             value = tr(activeGameProfile_.gyroMode == 1 ? Str::GyroAlways
                      : activeGameProfile_.gyroMode == 2 ? Str::GyroAiming
                      : Str::Off);
+            if (activeGameProfile_.gyroMode != 0) {
+                value += " (" + std::to_string(activeGameProfile_.gyroYawScale) + "% / " + std::to_string(activeGameProfile_.gyroPitchScale) + "%)";
+            }
             break;
         case 13:
             label = tr(Str::TouchpadMouse);

@@ -280,7 +280,7 @@ void wakeUp(Device& d) {
         bool c = send(d, ledOn, sizeof ledOn);
         XC_LOGI("usb pad %d: GIP power on %s, init %s, light %s", d.slot, a ? "ok" : "failed", b ? "ok" : "failed",
                 c ? "ok" : "failed");
-    } else {
+    } else if (d.iface.protocol == UsbPadProtocol::XInput) {
         // The player 1 light, which XInput hosts set as a pad connects: the
         // 8BitDo Ultimate dongle stays silent without it and drops off USB
         // after ~10 s.
@@ -414,6 +414,12 @@ void probe(const std::string& path, ino_t ino) {
         return;
     }
     const uint16_t vid = UGETW(dd.idVendor), pid = UGETW(dd.idProduct);
+    // Explicitly skip DualSense USB (0x054C:0x0CE6) to ensure native PS5 libScePad retains exclusive ownership
+    if (vid == 0x054C && pid == 0x0CE6) {
+        close(fd);
+        g_ignored.insert(key);
+        return;
+    }
     UsbPadInterface iface;
     uint8_t config[1024] = {};
     size_t configLen = 0;
@@ -426,6 +432,13 @@ void probe(const std::string& path, ino_t ino) {
         if (ioctl(fd, USB_GET_FULL_DESC, &gd) == 0) {
             configLen = std::min<size_t>(gd.ugd_actlen, sizeof config);
             iface = findUsbPadInterface(config, configLen);
+            if (vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC)) {
+                iface.protocol = UsbPadProtocol::DualShock4;
+                iface.epIn = 0x81;
+            } else if (vid == 0x045E && pid == 0x0719) {
+                iface.protocol = UsbPadProtocol::XInput;
+                iface.epIn = 0x81;
+            }
         }
     }
     if (iface.protocol == UsbPadProtocol::None) {

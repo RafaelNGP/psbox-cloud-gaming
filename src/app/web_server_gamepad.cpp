@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "app/web_server.h"
+#include "app/web_server_gamepad.h"
 #include "platform/platform.h"
 
 #include <algorithm>
@@ -319,14 +320,15 @@ void touchVirtualGamepad(int playerIndex) {
 void switchVirtualGamepadSlot(int newSlot) {
     if (newSlot < 0 || newSlot >= 4) return;
     std::lock_guard<std::mutex> lock(s_vpadMutex);
-    for (int i = 0; i < 4; ++i) {
-        if (i != newSlot) {
-            s_virtualPads[i] = {};
-        }
-    }
     uint64_t now = platform::nowMs();
     s_virtualPads[newSlot].lastSeenMs = now;
     s_virtualPads[newSlot].lastInputMs = now;
+}
+
+void releaseVirtualGamepadSlot(int slot) {
+    if (slot < 0 || slot >= 4) return;
+    std::lock_guard<std::mutex> lock(s_vpadMutex);
+    s_virtualPads[slot] = {};
 }
 
 uint64_t virtualGamepadActiveAt(int playerIndex) {

@@ -458,6 +458,7 @@ enum class Str {
     RemoveTrophiesConfirm,
     TrophiesRemovedToast,
     SyncingTrophies,
+    ReloadStream,
     Count
 };
 

@@ -449,4 +449,5 @@ constexpr Column kItalian = {
     "Rimuovi",                                        // RemoveTrophiesConfirm
     "Rimossi %s titoli di trofei da questo profilo.", // TrophiesRemovedToast
     "Sincronizzazione obiettivi...",                  // SyncingTrophies
+    "Ricarica streaming",                             // ReloadStream
 };

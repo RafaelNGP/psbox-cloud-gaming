@@ -7,6 +7,8 @@
 #include "ui/strings.h"
 #include "ui/input_mode.h"
 #include "ui/pad_glyphs.h"
+#include "ui/app_ui_internal.h"
+#include "platform/platform.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -15,16 +17,9 @@ namespace xc::ui {
 
 namespace {
 
-constexpr Color kPanel = rgba(24, 24, 24);
-constexpr Color kWhite = rgba(255, 255, 255);
-constexpr Color kGray = rgba(190, 190, 190);
-constexpr Color kDim = rgba(140, 140, 140);
 constexpr Color kDark = rgba(20, 20, 20);
-constexpr Color kGreen = rgba(16, 124, 16);
 constexpr Color kWarnColor = rgba(255, 176, 32);  // the connection warning
 
-// Left to right on the resolution row: SettingsChoice::resolution values.
-constexpr int kResolutionOrder[] = {1, 0, 2};
 const char* resolutionName(int r) { return r == 1 ? "720p" : r == 2 ? tr(Str::ResBest) : "1080p"; }
 
 std::string fmt(const char* f, double v) {
@@ -42,10 +37,14 @@ bool StreamMenu::itemShown(int item) const {
     case Deband: return caps_.deband;
     case Triggers: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case GyroItem:
-    case GyroLevelItem: return caps_.gyro;
+    case GyroLevelItem:
+    case GyroYawItem:
+    case GyroPitchItem:
+    case GyroCalibrateItem: return caps_.gyro;
     case PadSpeakerVolumeItem: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case TouchpadShortcutsItem: return caps_.touchpad;
     case PlayerItem: return usbOwnerPlayer_ >= 0;
+    case SmartGlassItem: return true;
     default: return true;
     }
 }
@@ -159,6 +158,12 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         open_ = false;
         return MenuAction::Close;
     }
+    if (calibrating_) {
+        float raw[3];
+        if (input::pollPadRawGyro(0, raw)) {
+            feedGyroCalibration(raw);
+        }
+    }
     // Up / down over the items shown (the Xbox button always is).
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
     if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
@@ -219,6 +224,26 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         gyroLevel_ = level;
         return MenuAction::Gyro;
     }
+    if (selected_ == GyroYawItem && (in.left || in.right)) {
+        int s = std::clamp(gyroYawScale_ + (in.right ? 10 : -10), 20, 200);
+        if (s != gyroYawScale_) {
+            gyroYawScale_ = s;
+            input::setGlobalGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
+            return MenuAction::Gyro;
+        }
+    }
+    if (selected_ == GyroPitchItem && (in.left || in.right)) {
+        int s = std::clamp(gyroPitchScale_ + (in.right ? 10 : -10), 20, 200);
+        if (s != gyroPitchScale_) {
+            gyroPitchScale_ = s;
+            input::setGlobalGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
+            return MenuAction::Gyro;
+        }
+    }
+    if (selected_ == GyroCalibrateItem && (in.accept || in.left || in.right)) {
+        startGyroCalibration(240);
+        return MenuAction::Gyro;
+    }
     if (selected_ == PadSpeakerVolumeItem && (in.left || in.right)) {
         int newVol = std::clamp(padSpeakerVolume_ + (in.right ? 5 : -5), 0, 100);
         if (newVol == padSpeakerVolume_) return MenuAction::None;
@@ -229,6 +254,10 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         touchpadCustomizing_ = true;
         touchpadCustomIndex_ = 0;
         return MenuAction::TouchpadShortcuts;
+    }
+    if (selected_ == SmartGlassItem && (in.accept || in.left || in.right)) {
+        smartGlassOpen_ = !smartGlassOpen_;
+        return MenuAction::SmartGlassToggle;
     }
     if (selected_ == Stats && (in.left || in.right)) {
         stats_ = !stats_;
@@ -246,14 +275,17 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         applied_ = resolution_;
         resolutionAsked_ = true;
         return MenuAction::Resolution;
+    case ReloadStreamItem: open_ = false; return MenuAction::ReloadStream;
     case Leave: open_ = false; return MenuAction::Leave;
     default: return MenuAction::None;
     }
 }
 
 Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
-    Canvas c(kMenuW, kMenuH);
-    c.clear(kPanel);
+    const int canvasW = (smartGlassOpen_ && !statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
+    Canvas c(canvasW, kMenuH);
+    std::fill(c.data(), c.data() + static_cast<size_t>(canvasW) * kMenuH, 0u);
+    c.fillRect({0, 0, kMenuW, kMenuH}, kPanel, 0);
     c.fillRect({0, 0, kMenuW, 6}, kGreen);
     constexpr int kPad = 40;
 
@@ -422,8 +454,13 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                             : i == ConfirmItem         ? tr(Str::ConfirmButton)
                             : i == GyroItem            ? tr(Str::Gyro)
                             : i == GyroLevelItem       ? tr(Str::GyroIntensity)
+                            : i == GyroYawItem         ? "Gyro Horizontal (Yaw)"
+                            : i == GyroPitchItem       ? "Gyro Vertical (Pitch)"
+                            : i == GyroCalibrateItem   ? "Gyro Calibration"
                             : i == PadSpeakerVolumeItem ? tr(Str::PadSpeakerVolume)
                             : i == TouchpadShortcutsItem ? tr(Str::TouchpadShortcuts)
+                            : i == SmartGlassItem        ? "SmartGlass Web Gamepad"
+                            : i == ReloadStreamItem      ? tr(Str::ReloadStream)
                             : homeConsole_             ? tr(Str::MenuEndStream)
                                                        : tr(Str::MenuLeave);
         fonts_.semibold.draw(c, label, row.x + 16, ty, kPx, fg);
@@ -480,12 +517,36 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = std::to_string(gyroLevel_) + " / 10";
             if (sel) value = "< " + value + " >";
         }
+        if (i == GyroYawItem) {
+            value = std::to_string(gyroYawScale_) + " %";
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == GyroPitchItem) {
+            value = std::to_string(gyroPitchScale_) + " %";
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == GyroCalibrateItem) {
+            if (calibrating_) {
+                value = "Calibrating " + std::to_string(static_cast<int>(calProgress_ * 100.0f)) + " %";
+            } else if (calSucceeded_) {
+                value = "Calibrated (0-Drift)";
+            } else if (calFailed_) {
+                value = "Failed (Motion)";
+            } else {
+                value = "Calibrate Pad 0";
+            }
+            if (sel) value = "< " + value + " >";
+        }
         if (i == PadSpeakerVolumeItem) {
             value = padSpeakerVolume_ == 0 ? tr(Str::Mute) : std::to_string(padSpeakerVolume_) + " %";
             if (sel) value = "< " + value + " >";
         }
         if (i == TouchpadShortcutsItem) {
             value = tr(touchpadShortcuts_ == input::defaultTouchpadShortcuts() ? Str::ProfileDefault : Str::ProfileCustom);
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == SmartGlassItem) {
+            value = smartGlassOpen_ ? tr(Str::On) : tr(Str::Off);
             if (sel) value = "< " + value + " >";
         }
         if (i == ConfirmItem) {
@@ -597,6 +658,46 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             fonts_.regular.draw(c, l, kPad, gy, 16, kDim);
             gy += 22;
         }
+    }
+    if (smartGlassOpen_) {
+        const int cardX = kMenuW + kCardGap;
+        const int cardY = 204;
+        const Rect card{cardX, cardY, kCardW, 640};
+        c.fillRect(card, rgba(20, 24, 34, 245), 20);
+        c.strokeRect(card, rgba(16, 124, 65, 200), 2, 20);
+
+        int cy = card.y + 36;
+        const char* title = "SMARTGLASS GAMEPAD";
+        int tw = fonts_.bold.measure(title, 26);
+        fonts_.bold.draw(c, title, card.x + (card.w - tw) / 2, cy, 26, kWhite);
+        cy += 38;
+
+        std::string sub = "Scan with your phone to use as controller or touch remote";
+        auto lines = fonts_.regular.wrap(sub, 16, card.w - 48, 2);
+        for (const auto& l : lines) {
+            int lw = fonts_.regular.measure(l, 16);
+            fonts_.regular.draw(c, l, card.x + (card.w - lw) / 2, cy, 16, kGray);
+            cy += 22;
+        }
+        cy += 16;
+
+        std::string url = "http://" + platform::localIPv4() + ":8080/gamepad";
+        uint8_t qrBuf[qrcodegen_BUFFER_LEN_MAX], tmpBuf[qrcodegen_BUFFER_LEN_MAX];
+        int qrCardW = 340;
+        if (qrcodegen_encodeText(url.c_str(), tmpBuf, qrBuf, qrcodegen_Ecc_LOW,
+                                 qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true)) {
+            int n = qrcodegen_getSize(qrBuf);
+            int mod = 300 / (n + 2);
+            qrCardW = mod * (n + 2) + 40;
+        }
+        Rect qrBox = drawQr(c, url, card.x + (card.w + qrCardW) / 2, cy, 300, qrcodegen_Ecc_LOW);
+        cy += (qrBox.w <= 0 ? 340 : qrBox.h) + 24;
+
+        Rect pill{card.x + 32, cy, card.w - 64, 46};
+        c.fillRect(pill, rgba(0, 0, 0, 140), 12);
+        c.strokeRect(pill, rgba(255, 255, 255, 40), 1, 12);
+        int uw = fonts_.semibold.measure(url, 20);
+        fonts_.semibold.draw(c, url, pill.x + (pill.w - uw) / 2, fonts_.semibold.centeredY(pill.y, pill.h, 20), 20, rgba(74, 222, 128));
     }
     if (g_keyboardHints) {  // Enter / Esc as key caps
         auto cap = [&](const char* key) {
@@ -713,6 +814,36 @@ Canvas StreamMenu::renderWarning() const {
     c.fillCircle(14.0f + kDot, kH / 2.0f, static_cast<float>(kDot), kWarnColor);
     fonts_.semibold.draw(c, text, 14 + 2 * kDot + 10, fonts_.semibold.centeredY(0, kH, kPx), kPx, kWhite);
     return c;
+}
+
+void StreamMenu::startGyroCalibration(int samples) {
+    calibrator_.start(samples);
+    calibrating_ = true;
+    calSucceeded_ = false;
+    calFailed_ = false;
+    calProgress_ = 0.0f;
+}
+
+bool StreamMenu::feedGyroCalibration(const float rawW[3]) {
+    if (!calibrating_) return false;
+    bool done = calibrator_.feed(rawW);
+    calProgress_ = calibrator_.progress();
+    if (calibrator_.state == input::GyroCalibrator::State::Succeeded) {
+        calibrating_ = false;
+        calSucceeded_ = true;
+        calFailed_ = false;
+        gyroBias_[0] = calibrator_.resultBias[0];
+        gyroBias_[1] = calibrator_.resultBias[1];
+        gyroBias_[2] = calibrator_.resultBias[2];
+        input::setGlobalGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
+        return true;
+    } else if (calibrator_.state == input::GyroCalibrator::State::Failed) {
+        calibrating_ = false;
+        calSucceeded_ = false;
+        calFailed_ = true;
+        return false;
+    }
+    return done;
 }
 
 }  // namespace xc::ui

@@ -44,7 +44,15 @@ void loop() {
     platform::setThreadRealtimePriority();
     std::vector<float> grain(kGrain * 2);
     AudioQueue& queue = audioQueue();
+    bool primed = false;
     while (g_running) {
+        if (!primed) {
+            if (queue.queuedFrames() < kGrain) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(2));
+                continue;
+            }
+            primed = true;
+        }
         queue.pull(grain.data(), kGrain);  // silence past what is queued
         int h = g_handle;
         if (h < 0) {

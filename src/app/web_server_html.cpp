@@ -243,6 +243,18 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   touch-action: none !important;
   box-sizing: border-box;
 }
+.studio-editing .gamepad-module {
+  outline: 2px dashed rgba(16, 124, 65, 0.8) !important;
+  outline-offset: 3px !important;
+  cursor: grab !important;
+}
+.studio-editing .gamepad-module:active {
+  cursor: grabbing !important;
+}
+.studio-editing .gamepad-module.active-module {
+  outline: 2px solid #22c55e !important;
+  box-shadow: 0 0 12px rgba(34, 197, 94, 0.6) !important;
+}
 
 /* Stick Styling (Matching Layout Studio) */
 .stick-base {
@@ -1013,6 +1025,51 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
           <button type="button" class="btn btn-primary" id="btnFullscreenPad" onclick="toggleGamepadFullscreen()" style="padding: 6px 12px; font-size: 0.78rem;">
             ⛶ Tela Cheia
           </button>
+          <button type="button" class="btn btn-secondary" id="btnToggleStudio" onclick="toggleLayoutStudio()" style="padding: 6px 12px; font-size: 0.78rem; margin-left: 6px;">
+            🎨 Layout Studio
+          </button>
+        </div>
+      </div>
+
+      <div id="studioToolbar" style="display:none; margin: 10px 0; background: #0f172a; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; font-size: 0.82rem;">
+        <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label for="studioModuleSelect" style="font-weight: 600; color: #94a3b8;">Módulo:</label>
+            <select id="studioModuleSelect" onchange="onStudioSelectModule(this.value)" style="background: #1e293b; color: #e2e8f0; border: 1px solid #334155; border-radius: 6px; padding: 4px 8px; font-size: 0.8rem;">
+              <option value="mod_stick_left">Alavanca Esquerda (LS)</option>
+              <option value="mod_dpad">Direcional (D-Pad)</option>
+              <option value="mod_abxy">Botões ABXY</option>
+              <option value="mod_stick_right">Alavanca Direita (RS)</option>
+              <option value="mod_btn_lt">Gatilho LT (L2)</option>
+              <option value="mod_btn_lb">Botão LB (L1)</option>
+              <option value="mod_btn_ls">Clique LS (L3)</option>
+              <option value="mod_btn_rs">Clique RS (R3)</option>
+              <option value="mod_btn_rb">Botão RB (R1)</option>
+              <option value="mod_btn_rt">Gatilho RT (R2)</option>
+              <option value="mod_center_sys">Sistema (View/Xbox/Menu)</option>
+              <option value="mod_player_bar">Barra de Jogadores (P1..P4)</option>
+            </select>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label id="lblModScale" for="studioScaleSlider" style="color: #94a3b8;">Escala: 1.00x</label>
+            <input type="range" id="studioScaleSlider" min="0.8" max="1.6" step="0.05" value="1.0" oninput="onStudioScaleChange(parseFloat(this.value))" style="width: 110px;">
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label id="lblStickSens" for="studioSensSlider" style="color: #94a3b8;">Sensibilidade: 1.0x</label>
+            <input type="range" id="studioSensSlider" min="0.5" max="2.0" step="0.1" value="1.0" oninput="onStudioSensChange(parseFloat(this.value))" style="width: 100px;">
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label id="lblHaptic" for="studioHapticSlider" style="color: #94a3b8;">Haptic: 14ms</label>
+            <input type="range" id="studioHapticSlider" min="0" max="50" step="2" value="14" oninput="onStudioHapticChange(parseInt(this.value, 10))" style="width: 90px;">
+            <button type="button" class="btn btn-secondary" onclick="testHaptic()" style="padding: 2px 8px; font-size: 0.72rem;">Testar</button>
+          </div>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center;">
+          <button type="button" class="btn btn-primary" id="btnExportLayout" onclick="exportStudioLayout()" style="padding: 4px 10px; font-size: 0.78rem;">📥 Exportar JSON</button>
+          <button type="button" class="btn btn-secondary" id="btnImportLayout" onclick="document.getElementById('studioImportFile').click()" style="padding: 4px 10px; font-size: 0.78rem;">📤 Importar JSON</button>
+          <button type="button" class="btn btn-secondary" id="btnResetLayout" onclick="resetStudioLayout()" style="padding: 4px 10px; font-size: 0.78rem;">↺ Restaurar Padrão</button>
+          <button type="button" class="btn btn-success" id="btnCloseStudio" onclick="toggleLayoutStudio()" style="padding: 4px 12px; font-size: 0.78rem; margin-left: auto;">✓ Salvar e Fechar</button>
+          <input type="file" id="studioImportFile" accept=".json,application/json" style="display:none;" onchange="importStudioLayout(event)">
         </div>
       </div>
 
@@ -2053,7 +2110,7 @@ const padState = {
 let padSendScheduled = false;
 
 function setVirtualPlayer(p) {
-  const prev = activePlayer;
+  const prevSlot = activePlayer - 1;
   activePlayer = p;
   for (let i = 1; i <= 4; i++) {
     const btn = document.getElementById('btnPlayer' + i);
@@ -2063,7 +2120,7 @@ function setVirtualPlayer(p) {
   if (statusEl) {
     statusEl.textContent = 'Controle ativo para Jogador ' + p + (p === 1 ? ' (Principal)' : ' (Co-op Local)');
   }
-  sendPadState(true, prev);
+  sendPadState(true, prevSlot);
 }
 
 function toggleGamepadFullscreen() {
@@ -2111,8 +2168,11 @@ document.addEventListener('webkitfullscreenchange', () => {
   setTimeout(updateGamepadScale, 30);
 });
 
-function sendPadState(activeSwitch = false, prevPlayer = 0) {
-  const payload = { player: activePlayer, prevPlayer: prevPlayer, activeSwitch: !!activeSwitch, ...padState };
+function sendPadState(activeSwitch = false, prevPlayer = -1) {
+  const payload = { player: activePlayer, activeSwitch: !!activeSwitch, ...padState };
+  if (prevPlayer !== null && prevPlayer !== undefined && prevPlayer >= 0 && prevPlayer < 4 && prevPlayer !== (activePlayer - 1)) {
+    payload.prevPlayer = prevPlayer;
+  }
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload));
   } else {
@@ -2133,6 +2193,328 @@ function schedulePadSend() {
   });
 }
 
+// --- PSBox Web Layout Studio State & Engine ---
+const defaultLayoutConfig = {
+  hapticMs: 14,
+  stickSensitivity: 1.0,
+  modules: {
+    mod_stick_left: { x: 32, y: 97, scale: 1.3 },
+    mod_abxy: { x: 712, y: 97, scale: 1.3 },
+    mod_dpad: { x: 205, y: 242, scale: 1.05 },
+    mod_stick_right: { x: 545, y: 240, scale: 1.2 },
+    mod_btn_lt: { x: 10, y: 10, scale: 1.0 },
+    mod_btn_lb: { x: 110, y: 11, scale: 1.0 },
+    mod_btn_ls: { x: 192, y: 11, scale: 1.0 },
+    mod_btn_rs: { x: 669, y: 11, scale: 1.0 },
+    mod_btn_rb: { x: 729, y: 11, scale: 1.0 },
+    mod_btn_rt: { x: 811, y: 10, scale: 1.0 },
+    mod_center_sys: { x: 342, y: 66, scale: 1.0 },
+    mod_player_bar: { x: 381, y: 12, scale: 1.0 }
+  }
+};
+
+let studioLayout = loadStudioLayout();
+let isStudioEditing = false;
+let activeStudioModuleId = 'mod_stick_left';
+
+function loadStudioLayout() {
+  try {
+    const raw = localStorage.getItem('psbox_layout_studio_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        return {
+          hapticMs: typeof parsed.hapticMs === 'number' ? Math.max(0, Math.min(50, parsed.hapticMs)) : 14,
+          stickSensitivity: typeof parsed.stickSensitivity === 'number' ? Math.max(0.5, Math.min(2.0, parsed.stickSensitivity)) : 1.0,
+          modules: (parsed.modules && typeof parsed.modules === 'object') ? parsed.modules : {}
+        };
+      }
+    }
+  } catch (_) {}
+  return JSON.parse(JSON.stringify(defaultLayoutConfig));
+}
+
+function saveStudioLayout() {
+  try {
+    localStorage.setItem('psbox_layout_studio_v1', JSON.stringify(studioLayout));
+  } catch (_) {}
+}
+
+function applyStudioLayout() {
+  if (!studioLayout || !studioLayout.modules) return;
+  for (const [modId, conf] of Object.entries(studioLayout.modules)) {
+    const el = document.getElementById(modId);
+    if (el && conf) {
+      if (typeof conf.x === 'number' && typeof conf.y === 'number') {
+        el.style.setProperty('left', conf.x + 'px', 'important');
+        el.style.setProperty('top', conf.y + 'px', 'important');
+      }
+      if (typeof conf.scale === 'number') {
+        el.style.setProperty('transform', 'scale(' + conf.scale + ')', 'important');
+      }
+    }
+  }
+}
+
+function toggleLayoutStudio() {
+  isStudioEditing = !isStudioEditing;
+  const toolbar = document.getElementById('studioToolbar');
+  const card = document.getElementById('gamepadCard');
+  const btn = document.getElementById('btnToggleStudio');
+  if (toolbar) toolbar.style.display = isStudioEditing ? 'block' : 'none';
+  if (card) card.classList.toggle('studio-editing', isStudioEditing);
+  if (btn) {
+    btn.classList.toggle('btn-primary', isStudioEditing);
+    btn.classList.toggle('btn-secondary', !isStudioEditing);
+    btn.innerHTML = isStudioEditing ? '✓ Concluir Edição' : '🎨 Layout Studio';
+  }
+  if (isStudioEditing) {
+    selectStudioModule(activeStudioModuleId);
+    syncStudioControls();
+  } else {
+    saveStudioLayout();
+    document.querySelectorAll('.gamepad-module').forEach(m => m.classList.remove('active-module'));
+  }
+}
+
+function selectStudioModule(modId) {
+  activeStudioModuleId = modId;
+  const select = document.getElementById('studioModuleSelect');
+  if (select && select.value !== modId) select.value = modId;
+  document.querySelectorAll('.gamepad-module').forEach(m => {
+    m.classList.toggle('active-module', m.id === modId);
+  });
+  const conf = (studioLayout.modules && studioLayout.modules[modId]) || { scale: 1.0 };
+  const scale = conf.scale !== undefined ? conf.scale : 1.0;
+  const slider = document.getElementById('studioScaleSlider');
+  if (slider) slider.value = scale.toFixed(2);
+  const lbl = document.getElementById('lblModScale');
+  if (lbl) lbl.textContent = 'Escala: ' + scale.toFixed(2) + 'x';
+}
+
+function onStudioSelectModule(modId) {
+  selectStudioModule(modId);
+}
+
+function onStudioScaleChange(scale) {
+  scale = Math.max(0.8, Math.min(1.6, scale));
+  if (!studioLayout.modules[activeStudioModuleId]) {
+    studioLayout.modules[activeStudioModuleId] = {};
+  }
+  studioLayout.modules[activeStudioModuleId].scale = Math.round(scale * 100) / 100;
+  const el = document.getElementById(activeStudioModuleId);
+  if (el) el.style.setProperty('transform', 'scale(' + scale + ')', 'important');
+  const lbl = document.getElementById('lblModScale');
+  if (lbl) lbl.textContent = 'Escala: ' + scale.toFixed(2) + 'x';
+  saveStudioLayout();
+}
+
+function onStudioSensChange(sens) {
+  sens = Math.max(0.5, Math.min(2.0, sens));
+  studioLayout.stickSensitivity = Math.round(sens * 10) / 10;
+  const lbl = document.getElementById('lblStickSens');
+  if (lbl) lbl.textContent = 'Sensibilidade: ' + studioLayout.stickSensitivity.toFixed(1) + 'x';
+  saveStudioLayout();
+}
+
+function onStudioHapticChange(ms) {
+  ms = Math.max(0, Math.min(50, ms));
+  studioLayout.hapticMs = ms;
+  const lbl = document.getElementById('lblHaptic');
+  if (lbl) lbl.textContent = 'Haptic: ' + ms + 'ms';
+  saveStudioLayout();
+}
+
+function testHaptic() {
+  const ms = studioLayout.hapticMs !== undefined ? studioLayout.hapticMs : 14;
+  if (ms > 0 && navigator.vibrate) {
+    try { navigator.vibrate(ms); } catch (_) {}
+  }
+}
+
+function exportStudioLayout() {
+  const json = JSON.stringify(studioLayout, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'psbox_layout_studio_v1.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function importStudioLayout(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const parsed = JSON.parse(e.target.result);
+      if (parsed && typeof parsed === 'object') {
+        if (typeof parsed.hapticMs === 'number') studioLayout.hapticMs = Math.max(0, Math.min(50, parsed.hapticMs));
+        if (typeof parsed.stickSensitivity === 'number') studioLayout.stickSensitivity = Math.max(0.5, Math.min(2.0, parsed.stickSensitivity));
+        if (parsed.modules && typeof parsed.modules === 'object') {
+          studioLayout.modules = parsed.modules;
+        }
+        applyStudioLayout();
+        saveStudioLayout();
+        syncStudioControls();
+      }
+    } catch (_) {}
+  };
+  reader.readAsText(file);
+  event.target.value = '';
+}
+
+function resetStudioLayout() {
+  try { localStorage.removeItem('psbox_layout_studio_v1'); } catch (_) {}
+  studioLayout = JSON.parse(JSON.stringify(defaultLayoutConfig));
+  document.querySelectorAll('.gamepad-module').forEach(m => {
+    m.style.removeProperty('left');
+    m.style.removeProperty('top');
+    m.style.removeProperty('transform');
+  });
+  applyStudioLayout();
+  saveStudioLayout();
+  syncStudioControls();
+}
+
+function syncStudioControls() {
+  const modId = activeStudioModuleId;
+  const conf = (studioLayout.modules && studioLayout.modules[modId]) || { scale: 1.0 };
+  const scale = conf.scale !== undefined ? conf.scale : 1.0;
+  const scaleSlider = document.getElementById('studioScaleSlider');
+  if (scaleSlider) scaleSlider.value = scale.toFixed(2);
+  const lblScale = document.getElementById('lblModScale');
+  if (lblScale) lblScale.textContent = 'Escala: ' + scale.toFixed(2) + 'x';
+
+  const sens = studioLayout.stickSensitivity !== undefined ? studioLayout.stickSensitivity : 1.0;
+  const sensSlider = document.getElementById('studioSensSlider');
+  if (sensSlider) sensSlider.value = sens.toFixed(1);
+  const lblSens = document.getElementById('lblStickSens');
+  if (lblSens) lblSens.textContent = 'Sensibilidade: ' + sens.toFixed(1) + 'x';
+
+  const haptic = studioLayout.hapticMs !== undefined ? studioLayout.hapticMs : 14;
+  const hapticSlider = document.getElementById('studioHapticSlider');
+  if (hapticSlider) hapticSlider.value = haptic;
+  const lblHaptic = document.getElementById('lblHaptic');
+  if (lblHaptic) lblHaptic.textContent = 'Haptic: ' + haptic + 'ms';
+}
+
+function initStudioDraggableModules() {
+  const area = document.getElementById('gamepadArea');
+  if (!area) return;
+
+  document.querySelectorAll('.gamepad-module').forEach(mod => {
+    const modId = mod.id;
+    let startX = 0, startY = 0, origLeft = 0, origTop = 0;
+    let isDragging = false;
+    let dragTouchId = null;
+
+    const onDragStart = (clientX, clientY, touchId) => {
+      if (!isStudioEditing) return;
+      selectStudioModule(modId);
+      isDragging = true;
+      dragTouchId = touchId;
+      startX = clientX;
+      startY = clientY;
+      origLeft = parseFloat(mod.style.left) || mod.offsetLeft;
+      origTop = parseFloat(mod.style.top) || mod.offsetTop;
+    };
+
+    const onDragMove = (clientX, clientY) => {
+      if (!isDragging || !isStudioEditing) return;
+      const rect = area.getBoundingClientRect();
+      const scaleX = rect.width / (area.offsetWidth || 1);
+      const scale = scaleX > 0 ? scaleX : 1.0;
+      const dx = (clientX - startX) / scale;
+      const dy = (clientY - startY) / scale;
+      const maxW = area.offsetWidth || 915;
+      const maxH = area.offsetHeight || 412;
+      const newX = Math.max(0, Math.min(maxW - 40, origLeft + dx));
+      const newY = Math.max(0, Math.min(maxH - 30, origTop + dy));
+      mod.style.setProperty('left', Math.round(newX) + 'px', 'important');
+      mod.style.setProperty('top', Math.round(newY) + 'px', 'important');
+      if (!studioLayout.modules[modId]) studioLayout.modules[modId] = {};
+      studioLayout.modules[modId].x = Math.round(newX);
+      studioLayout.modules[modId].y = Math.round(newY);
+    };
+
+    const onDragEnd = () => {
+      if (!isDragging) return;
+      isDragging = false;
+      dragTouchId = null;
+      saveStudioLayout();
+    };
+
+    mod.addEventListener('mousedown', (e) => {
+      if (isStudioEditing) {
+        e.preventDefault();
+        e.stopPropagation();
+        onDragStart(e.clientX, e.clientY, null);
+      }
+    });
+
+    mod.addEventListener('touchstart', (e) => {
+      if (isStudioEditing) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.changedTouches.length > 0) {
+          const t = e.changedTouches[0];
+          onDragStart(t.clientX, t.clientY, t.identifier);
+        }
+      }
+    }, { passive: false });
+
+    window.addEventListener('mousemove', (e) => {
+      if (isDragging && dragTouchId === null) {
+        e.preventDefault();
+        onDragMove(e.clientX, e.clientY);
+      }
+    });
+
+    window.addEventListener('touchmove', (e) => {
+      if (isDragging && dragTouchId !== null) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === dragTouchId) {
+            e.preventDefault();
+            onDragMove(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
+            break;
+          }
+        }
+      }
+    }, { passive: false });
+
+    window.addEventListener('mouseup', () => {
+      if (isDragging && dragTouchId === null) onDragEnd();
+    });
+
+    window.addEventListener('touchend', (e) => {
+      if (isDragging && dragTouchId !== null) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === dragTouchId) {
+            onDragEnd();
+            break;
+          }
+        }
+      }
+    });
+
+    window.addEventListener('touchcancel', (e) => {
+      if (isDragging && dragTouchId !== null) {
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === dragTouchId) {
+            onDragEnd();
+            break;
+          }
+        }
+      }
+    });
+  });
+}
+
 function bindPadButtons() {
   document.querySelectorAll('[data-btn]').forEach(el => {
     const key = el.getAttribute('data-btn');
@@ -2140,16 +2522,19 @@ function bindPadButtons() {
     const activeTouches = new Set();
 
     const setDown = () => {
+      if (isStudioEditing) return;
       if (isTrigger) padState[key] = 1.0;
       else padState[key] = true;
       el.classList.add('pressed');
-      if (navigator.vibrate) {
-        try { navigator.vibrate(14); } catch (_) {}
+      const haptic = (studioLayout && studioLayout.hapticMs !== undefined) ? studioLayout.hapticMs : 14;
+      if (haptic > 0 && navigator.vibrate) {
+        try { navigator.vibrate(haptic); } catch (_) {}
       }
       sendPadState(false);
     };
 
     const setUp = () => {
+      if (isStudioEditing) return;
       if (isTrigger) padState[key] = 0.0;
       else padState[key] = false;
       el.classList.remove('pressed');
@@ -2188,6 +2573,7 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   let activeTouchId = null;
 
   function updateStick(clientX, clientY) {
+    if (isStudioEditing) return;
     const rect = zone.getBoundingClientRect();
     const maxR = Math.max(28, (rect.width - head.offsetWidth) / 2);
     const cx = rect.left + rect.width / 2;
@@ -2200,8 +2586,13 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
       dy = (dy / dist) * maxR;
     }
     head.style.transform = `translate(${dx}px, ${dy}px)`;
-    padState[stickKeyX] = Math.round((dx / maxR) * 100) / 100;
-    padState[stickKeyY] = Math.round((dy / maxR) * 100) / 100;
+    const sens = (studioLayout && studioLayout.stickSensitivity !== undefined) ? studioLayout.stickSensitivity : 1.0;
+    let normX = (dx / maxR) * sens;
+    let normY = (dy / maxR) * sens;
+    normX = Math.max(-1.0, Math.min(1.0, normX));
+    normY = Math.max(-1.0, Math.min(1.0, normY));
+    padState[stickKeyX] = Math.round(normX * 100) / 100;
+    padState[stickKeyY] = Math.round(normY * 100) / 100;
     schedulePadSend();
   }
 
@@ -2214,6 +2605,7 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   }
 
   zone.addEventListener('touchstart', (e) => {
+    if (isStudioEditing) return;
     e.preventDefault();
     if (activeTouchId === null && e.changedTouches.length > 0) {
       activeTouchId = e.changedTouches[0].identifier;
@@ -2222,6 +2614,7 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   }, { passive: false });
 
   zone.addEventListener('touchmove', (e) => {
+    if (isStudioEditing) return;
     e.preventDefault();
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === activeTouchId) {
@@ -2245,6 +2638,7 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   // Mouse fallback
   let isMouseDown = false;
   zone.addEventListener('mousedown', (e) => {
+    if (isStudioEditing) return;
     isMouseDown = true;
     updateStick(e.clientX, e.clientY);
   });
@@ -2262,6 +2656,10 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
 bindPadButtons();
 setupStick('leftStickZone', 'leftStickHead', 'leftStickX', 'leftStickY');
 setupStick('rightStickZone', 'rightStickHead', 'rightStickX', 'rightStickY');
+
+applyStudioLayout();
+initStudioDraggableModules();
+syncStudioControls();
 
 // Periodic streaming state poll and PS5 <-> WebUI settings version sync
 let isCurrentlyStreaming = false;

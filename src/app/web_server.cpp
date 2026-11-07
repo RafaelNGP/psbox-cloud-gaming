@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "app/web_server.h"
+#include "app/web_server_gamepad.h"
 #include "app/report.h"
 #include "app/settings.h"
 #include "input/key_map.h"
@@ -336,6 +337,15 @@ void WebServer::handleWebSocket(int wsFd) {
                         int slot = 0;
                         input::ControllerState s{};
                         if (parseGamepadJson(*j, slot, s)) {
+                            int prevPlayer = -1;
+                            if ((*j).has("prevPlayer")) {
+                                prevPlayer = static_cast<int>((*j)["prevPlayer"].asInt(-1));
+                            } else if ((*j).has("prevPlayerIndex")) {
+                                prevPlayer = static_cast<int>((*j)["prevPlayerIndex"].asInt(-1));
+                            }
+                            if (prevPlayer >= 0 && prevPlayer < 4 && prevPlayer != slot) {
+                                releaseVirtualGamepadSlot(prevPlayer);
+                            }
                             if ((*j).has("activeSwitch") && (*j)["activeSwitch"].asBool()) {
                                 switchVirtualGamepadSlot(slot);
                             }
@@ -565,6 +575,16 @@ WebServer::HttpResponse WebServer::handleRequest(const std::string& method, cons
             input::ControllerState s{};
             if (!parseGamepadJson(*j, slot, s)) {
                 return {400, "application/json", "", "{\"ok\":false,\"error\":\"invalid state\"}"};
+            }
+
+            int prevPlayer = -1;
+            if ((*j).has("prevPlayer")) {
+                prevPlayer = static_cast<int>((*j)["prevPlayer"].asInt(-1));
+            } else if ((*j).has("prevPlayerIndex")) {
+                prevPlayer = static_cast<int>((*j)["prevPlayerIndex"].asInt(-1));
+            }
+            if (prevPlayer >= 0 && prevPlayer < 4 && prevPlayer != slot) {
+                releaseVirtualGamepadSlot(prevPlayer);
             }
 
             if ((*j).has("activeSwitch") && (*j)["activeSwitch"].asBool()) {

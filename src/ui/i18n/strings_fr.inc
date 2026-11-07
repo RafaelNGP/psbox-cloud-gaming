@@ -449,4 +449,5 @@ constexpr Column kFrench = {
     "Supprimer",                                      // RemoveTrophiesConfirm
     "%s titre(s) de trophées supprimé(s) de ce profil.", // TrophiesRemovedToast
     "Synchronisation des succès...",                  // SyncingTrophies
+    "Recharger la diffusion",                         // ReloadStream
 };

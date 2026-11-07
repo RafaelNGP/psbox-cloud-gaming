@@ -119,6 +119,7 @@ void resetLightBar(int pad = 0);
 // active (in a game with its menu closed).
 void setGyro(int mode, int level);
 void setGyroActive(bool on);
+void setGyroCalibration(const float bias[3], float yawScale, float pitchScale);
 // DualSense: suppresses vibration and trigger effect bleed while embedded mic is active
 void setEmbeddedMicActive(bool active, int pad = 0);
 

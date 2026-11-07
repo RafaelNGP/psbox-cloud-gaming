@@ -185,6 +185,14 @@ void slotOpened(int slot) {
     pad.motors.applied = pad.triggers.applied = 0;
     pad.triggerFresh = false;
     pad.triggerMotorsSent = 0;
+    float b[3];
+    float ys = 1.0f, ps = 0.8f;
+    getGlobalGyroCalibration(b, ys, ps);
+    pad.gyro.bias[0] = b[0];
+    pad.gyro.bias[1] = b[1];
+    pad.gyro.bias[2] = b[2];
+    pad.gyro.yawScale = ys;
+    pad.gyro.pitchScale = ps;
 }
 
 bool slotLightSet(int slot) { return g_pads[slot].lightApplied != 0; }
@@ -327,7 +335,10 @@ bool pollPad(int index, ControllerState& out) {
             XC_LOGI("gyro: pitch %.2f yaw %.2f roll %.2f rad/s, gravity %.2f,%.2f,%.2f -> stick %.2f,%.2f", pad.gyro[0],
                     pad.gyro[1], pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], gx, gy), ++logged;
     } else {
-        slot.gyro = {};
+        slot.gyro.x = slot.gyro.y = 0.0f;
+        slot.gyro.up[0] = 0.0f;
+        slot.gyro.up[1] = 1.0f;
+        slot.gyro.up[2] = 0.0f;
     }
 
     if (pad.touching) {
@@ -348,5 +359,20 @@ void setGyro(int mode, int level) {
 }
 
 void setGyroActive(bool on) { g_gyroActive = on; }
+
+void setGyroCalibration(const float bias[3], float yawScale, float pitchScale) {
+    setGlobalGyroCalibration(bias, yawScale, pitchScale);
+    for (Pad& p : g_pads) {
+        if (bias) {
+            p.gyro.bias[0] = bias[0];
+            p.gyro.bias[1] = bias[1];
+            p.gyro.bias[2] = bias[2];
+        } else {
+            p.gyro.bias[0] = p.gyro.bias[1] = p.gyro.bias[2] = 0.0f;
+        }
+        p.gyro.yawScale = yawScale;
+        p.gyro.pitchScale = pitchScale;
+    }
+}
 
 }  // namespace xc::input

@@ -10,10 +10,26 @@
 #include "stream/stream_session.h"
 #include "xcloud/gssv.h"
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
 
+namespace xc::media {
+class AudioQueue;
+}
+
 namespace xc::app {
+
+struct AudioLatency {
+    uint64_t nextMs = 0, calmSinceMs = 0;
+    int targetMs = 40;
+    bool warm = false;  // past the first 3 s, while the queue fills
+    size_t lows[5] = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};  // each second's lowest
+    size_t lowNext = 0;
+    void reset();
+    void update(uint64_t now, media::AudioQueue* queue = nullptr);
+};
 
 class StreamPlayer {
 public:
@@ -48,6 +64,9 @@ public:
     // How many times the stream reconnected after losing the connection (a
     // new session: controllers 1..3 must be announced again).
     uint32_t reconnects() const;
+    // Triggers a seamless WebRTC/ICE session reconnection via reconnect() without leaving the game.
+    void requestReconnect();
+    bool isReconnecting() const;
     // Test hook: drops the connection as a network outage would.
     void simulateDrop();
     // Another stream tier mid-session: "720", "720HQ", "1080", "1080HQ", "1440".

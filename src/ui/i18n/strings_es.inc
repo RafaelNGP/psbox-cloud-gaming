@@ -449,4 +449,5 @@ constexpr Column kSpanish = {
     "Eliminar",                                       // RemoveTrophiesConfirm
     "Se han eliminado %s título(s) de trofeos de este perfil.", // TrophiesRemovedToast
     "Sincronizando logros...",                        // SyncingTrophies
+    "Recargar Transmisión",                           // ReloadStream
 };

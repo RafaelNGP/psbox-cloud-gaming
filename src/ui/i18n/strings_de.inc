@@ -449,4 +449,5 @@ constexpr Column kGerman = {
     "Entfernen",                                      // RemoveTrophiesConfirm
     "%s Trophäen-Titel aus diesem Profil entfernt.",  // TrophiesRemovedToast
     "Erfolge werden synchronisiert...",               // SyncingTrophies
+    "Stream neu laden",                               // ReloadStream
 };

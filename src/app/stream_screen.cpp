@@ -134,6 +134,7 @@ void StreamScreen::syncFromSettings() {
     gyroMode_ = prof.gyroMode;
     gyroLevel_ = prof.gyroLevel;
     input::setGyro(gyroMode_, gyroLevel_);
+    input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
     input::setDeadzone(prof.deadzoneLeft / 100.0f, prof.deadzoneRight / 100.0f);
     input::setTriggerFeel(prof.triggerStrength, prof.triggerHz, prof.triggerResistance, prof.triggerPulses, triggerProfile_);
     input::setCircleConfirms(prof.circleConfirms);
@@ -149,6 +150,9 @@ void StreamScreen::syncFromSettings() {
     menu_.setProfileValues(streamResolution_, sharpness_, deband_, upscaler_,
                            triggerStrength_, deadzone_, circleConfirms_, hasCustomProfile_);
     menu_.setGyro(gyroMode_, gyroLevel_);
+    menu_.setGyroYawScale(prof.gyroYawScale);
+    menu_.setGyroPitchScale(prof.gyroPitchScale);
+    menu_.setGyroBias(prof.gyroBias);
     menu_.setTouchpadShortcuts(touchpadShortcuts_);
     menu_.setPadSpeakerVolume(g_settings.padSpeakerVolume);
     overlaySeq_ = 0;
@@ -361,6 +365,21 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             bool micMuted = g_player ? (g_player->micMuted() || g_player->isMicHardwareMuted()) : false;
             menu_.setDebandInUse(autoDeband_.level());
             menu_.setGyro(gyroMode_, gyroLevel_);
+            {
+                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                if (hasCustomProfile_) {
+                    auto it = g_settings.perGame.find(gameKey_);
+                    if (it != g_settings.perGame.end()) {
+                        menu_.setGyroYawScale(it->second.gyroYawScale);
+                        menu_.setGyroPitchScale(it->second.gyroPitchScale);
+                        menu_.setGyroBias(it->second.gyroBias);
+                    }
+                } else {
+                    menu_.setGyroYawScale(g_settings.gyroYawScale);
+                    menu_.setGyroPitchScale(g_settings.gyroPitchScale);
+                    menu_.setGyroBias(g_settings.gyroBias);
+                }
+            }
             menu_.setTouchpadShortcuts(touchpadShortcuts_);
             menu_.setStatsMask(g_settings.statsMask);
             int padVol = 100;
@@ -378,8 +397,41 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             overlaySeq_ = 0;
             g_player->requestKeyframe();
         } else if (wasOpen) {
+            if (menu_.isGyroCalibrating()) {
+                float rawGyro[3]{0};
+                if (input::pollPadRawGyro(0, rawGyro)) {
+                    if (menu_.feedGyroCalibration(rawGyro)) {
+                        int yawScale = menu_.gyroYawScale();
+                        int pitchScale = menu_.gyroPitchScale();
+                        const float* b = menu_.gyroBias();
+                        input::setGyroCalibration(b, yawScale / 100.0f, pitchScale / 100.0f);
+                        std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                        if (hasCustomProfile_) {
+                            g_settings.perGame[gameKey_].gyroYawScale = yawScale;
+                            g_settings.perGame[gameKey_].gyroPitchScale = pitchScale;
+                            if (b) {
+                                for (int i = 0; i < 3; ++i) g_settings.perGame[gameKey_].gyroBias[i] = b[i];
+                            }
+                        } else {
+                            g_settings.gyroYawScale = yawScale;
+                            g_settings.gyroPitchScale = pitchScale;
+                            if (b) {
+                                for (int i = 0; i < 3; ++i) g_settings.gyroBias[i] = b[i];
+                            }
+                        }
+                        g_settings.save(settingsPath());
+                        refreshSettingsUiLocked();
+                        if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    }
+                }
+            }
             switch (menu_.handle(nav)) {
             case ui::MenuAction::Leave: g_cancel = true; break;
+            case ui::MenuAction::ReloadStream:
+                XC_LOGI("menu: user requested stream reload / reconnect");
+                g_player->requestReconnect();
+                menu_.close();
+                break;
             case ui::MenuAction::XboxButton: {
                 // A short press, once the menu is gone: the Xbox guide opens,
                 // for the player whose controller opened the menu.
@@ -448,6 +500,11 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     p.touchpadMouse = touchpadMouse_;
                     p.gyroMode = gyroMode_;
                     p.gyroLevel = gyroLevel_;
+                    p.gyroYawScale = menu_.gyroYawScale();
+                    p.gyroPitchScale = menu_.gyroPitchScale();
+                    if (const float* b = menu_.gyroBias()) {
+                        for (int i = 0; i < 3; ++i) p.gyroBias[i] = b[i];
+                    }
                     g_settings.perGame[gameKey_] = p;
                 } else {
                     g_settings.perGame.erase(gameKey_);
@@ -468,6 +525,10 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     gyroLevel_ = def.gyroLevel;
                     input::setGyro(gyroMode_, gyroLevel_);
                     menu_.setGyro(gyroMode_, gyroLevel_);
+                    menu_.setGyroYawScale(def.gyroYawScale);
+                    menu_.setGyroPitchScale(def.gyroPitchScale);
+                    menu_.setGyroBias(def.gyroBias);
+                    input::setGyroCalibration(def.gyroBias, def.gyroYawScale / 100.0f, def.gyroPitchScale / 100.0f);
                     menu_.setTouchpadShortcuts(touchpadShortcuts_);
                     display::setSharpness(kSharpAmount[sharpness_]);
                     applyDeband_();
@@ -547,13 +608,27 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 gyroMode_ = menu_.gyroMode();
                 gyroLevel_ = menu_.gyroLevel();
                 input::setGyro(gyroMode_, gyroLevel_);
+                int yawScale = menu_.gyroYawScale();
+                int pitchScale = menu_.gyroPitchScale();
+                const float* b = menu_.gyroBias();
+                input::setGyroCalibration(b, yawScale / 100.0f, pitchScale / 100.0f);
                 std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
                 if (hasCustomProfile_) {
                     g_settings.perGame[gameKey_].gyroMode = gyroMode_;
                     g_settings.perGame[gameKey_].gyroLevel = gyroLevel_;
+                    g_settings.perGame[gameKey_].gyroYawScale = yawScale;
+                    g_settings.perGame[gameKey_].gyroPitchScale = pitchScale;
+                    if (b) {
+                        for (int i = 0; i < 3; ++i) g_settings.perGame[gameKey_].gyroBias[i] = b[i];
+                    }
                 } else {
                     g_settings.gyroMode = gyroMode_;
                     g_settings.gyroLevel = gyroLevel_;
+                    g_settings.gyroYawScale = yawScale;
+                    g_settings.gyroPitchScale = pitchScale;
+                    if (b) {
+                        for (int i = 0; i < 3; ++i) g_settings.gyroBias[i] = b[i];
+                    }
                 }
                 g_settings.save(settingsPath());
                 refreshSettingsUiLocked();  // the gyro's defaults too
@@ -591,6 +666,9 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
                 break;
             }
+            case ui::MenuAction::SmartGlassToggle:
+                overlaySeq_ = 0;
+                break;
             default: break;
             }
             overlaySeq_ = 0;
@@ -703,6 +781,24 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     g_xboxButtonUntil = platform::nowMs() + 250;
                 }
             }
+            if (g_settings.soloInputRedirect) {
+                for (int slot = 1; slot < input::kMaxPads; ++slot) {
+                    input::ControllerState auxPad;
+                    if (input::pollPad(slot, auxPad)) input::mergePads(sent, auxPad);
+
+                    input::ControllerState auxUsb;
+                    if (input::pollUsbPadsFor(slot, auxUsb, menuUsbOwner())) input::mergePads(sent, auxUsb);
+
+                    input::ControllerState auxVpad;
+                    bool auxVconn = false;
+                    if (virtualGamepadState(slot, auxVpad, auxVconn) && auxVconn) input::mergePads(sent, auxVpad);
+
+                    if (auxPad.btnNexus || auxUsb.btnNexus || auxVpad.btnNexus) {
+                        sent.btnNexus = true;
+                        g_xboxButtonUntil = platform::nowMs() + 250;
+                    }
+                }
+            }
         }
         if (platform::nowMs() < g_xboxButtonUntil) sent.btnNexus = true;
         g_player->sendInput(sent);
@@ -781,23 +877,31 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             const bool usbOnly = usbOn && !padOn && !vconn;
             if (on) other = input::applyPadMap(other, padMap_);  // the same map as player 1's (the keys keep theirs)
             if (on && i == kbSlot) input::mergePads(other, kbPad_);  // the keyboard plays with this player's pad
-            if (on != padAttached_[i]) {
-                const bool quiet = on ? usbOnly : padUsbOnly_[i];
-                padAttached_[i] = on;
-                g_player->setPadConnected(i, on);
-                std::string who = std::to_string(i + 1);
-                std::string name = input::padUserName(i);
-                if (!name.empty()) who += " (" + name + ")";
-                else if (vconn && !input::padConnected(i)) who += " (Web Gamepad)";
-                // The PS5 user's name on the TV, not in the log.
-                if (!quiet)
-                    platform::notify(ui::trf(on ? ui::Str::PadConnected : ui::Str::PadDisconnected, who),
-                                     std::string("controller ") + std::to_string(i + 1) +
-                                         (on ? " connected" : " disconnected"));
+            if (!g_settings.soloInputRedirect) {
+                if (on != padAttached_[i]) {
+                    const bool quiet = on ? usbOnly : padUsbOnly_[i];
+                    padAttached_[i] = on;
+                    g_player->setPadConnected(i, on);
+                    std::string who = std::to_string(i + 1);
+                    std::string name = input::padUserName(i);
+                    if (!name.empty()) who += " (" + name + ")";
+                    else if (vconn && !input::padConnected(i)) who += " (Web Gamepad)";
+                    // The PS5 user's name on the TV, not in the log.
+                    if (!quiet)
+                        platform::notify(ui::trf(on ? ui::Str::PadConnected : ui::Str::PadDisconnected, who),
+                                         std::string("controller ") + std::to_string(i + 1) +
+                                             (on ? " connected" : " disconnected"));
+                }
+                padUsbOnly_[i] = on && usbOnly;
+                if (on && platform::nowMs() < xboxUntil_[i]) other.btnNexus = true;
+                if (on) g_player->sendInput(other, i);
+            } else {
+                if (padAttached_[i]) {
+                    padAttached_[i] = false;
+                    g_player->setPadConnected(i, false);
+                }
+                padUsbOnly_[i] = on && usbOnly;
             }
-            padUsbOnly_[i] = on && usbOnly;
-            if (on && platform::nowMs() < xboxUntil_[i]) other.btnNexus = true;
-            if (on) g_player->sendInput(other, i);
         }
         // The window holds the mouse while the keyboard and mouse go to the
         // game (natively, or as a player's controller): not with the app's

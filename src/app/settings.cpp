@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "app/settings.h"
+#include "input/gyro.h"
 
 #include "platform/platform.h"
 #include "util/json.h"
@@ -106,6 +107,14 @@ bool Settings::load(const std::string& path) {
     keyboardPlayer = static_cast<int>(std::clamp<int64_t>((*j)["keyboardPlayer"].asInt(keyboardPlayer), 0, 3));
     gyroMode = static_cast<int>(std::clamp<int64_t>((*j)["gyroMode"].asInt(gyroMode), 0, 2));
     gyroLevel = static_cast<int>(std::clamp<int64_t>((*j)["gyroLevel"].asInt(gyroLevel), 1, 10));
+    gyroYawScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroYawScale"].asInt(gyroYawScale), 20, 200));
+    gyroPitchScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
+    if ((*j)["gyroBias"].isArray() && (*j)["gyroBias"].items().size() >= 3) {
+        gyroBias[0] = static_cast<float>((*j)["gyroBias"][0].asNumber(gyroBias[0]));
+        gyroBias[1] = static_cast<float>((*j)["gyroBias"][1].asNumber(gyroBias[1]));
+        gyroBias[2] = static_cast<float>((*j)["gyroBias"][2].asNumber(gyroBias[2]));
+    }
+    input::setGlobalGyroCalibration(gyroBias, gyroYawScale / 100.0f, gyroPitchScale / 100.0f);
     touchpadMouse = (*j)["touchpadMouse"].asBool(touchpadMouse);
     touchpadShortcuts = readTouchpadShortcutsOr((*j)["touchpadShortcuts"], input::defaultTouchpadShortcuts());
     micGain = static_cast<int>(std::clamp<int64_t>((*j)["micGain"].asInt(micGain), 0, 2));
@@ -136,6 +145,7 @@ bool Settings::load(const std::string& path) {
     previewFeatures = (*j)["previewFeatures"].asBool(previewFeatures);
     syncTrophies = (*j)["syncTrophies"].asBool(syncTrophies);
     usbControllers = (*j)["usbControllers"].asBool((*j)["usb_controllers"].asBool((*j)["enable_onefamily"].asBool(usbControllers)));
+    soloInputRedirect = (*j)["soloInputRedirect"].asBool((*j)["solo_input_redirect"].asBool(soloInputRedirect));
     titlePlaytime.clear();
     for (const auto& [id, sec] : (*j)["titlePlaytime"].members())
         if (sec.asInt() > 0) titlePlaytime[id] = static_cast<uint64_t>(sec.asInt());
@@ -162,12 +172,24 @@ bool Settings::load(const std::string& path) {
         p.padMap = readPadMapOr(obj["padMap"], padMap, id.c_str());
         p.gyroMode = static_cast<int>(std::clamp<int64_t>(obj["gyroMode"].asInt(gyroMode), 0, 2));
         p.gyroLevel = static_cast<int>(std::clamp<int64_t>(obj["gyroLevel"].asInt(gyroLevel), 1, 10));
+        p.gyroYawScale = static_cast<int>(std::clamp<int64_t>(obj["gyroYawScale"].asInt(gyroYawScale), 20, 200));
+        p.gyroPitchScale = static_cast<int>(std::clamp<int64_t>(obj["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
+        if (obj["gyroBias"].isArray() && obj["gyroBias"].items().size() >= 3) {
+            p.gyroBias[0] = static_cast<float>(obj["gyroBias"][0].asNumber(gyroBias[0]));
+            p.gyroBias[1] = static_cast<float>(obj["gyroBias"][1].asNumber(gyroBias[1]));
+            p.gyroBias[2] = static_cast<float>(obj["gyroBias"][2].asNumber(gyroBias[2]));
+        } else {
+            p.gyroBias[0] = gyroBias[0];
+            p.gyroBias[1] = gyroBias[1];
+            p.gyroBias[2] = gyroBias[2];
+        }
         p.touchpadMouse = obj["touchpadMouse"].asBool(touchpadMouse);
         p.touchpadShortcuts = readTouchpadShortcutsOr(obj["touchpadShortcuts"], touchpadShortcuts);
         p.locale = obj["locale"].str();
         p.syncTrophies = obj["syncTrophies"].asBool(true);
         p.xboxTitleId = obj["xboxTitleId"].str();
         p.gameName = obj["gameName"].str();
+        p.soloInputRedirect = obj["soloInputRedirect"].asBool(obj["solo_input_redirect"].asBool(soloInputRedirect));
         perGame[id] = p;
     }
     return true;
@@ -199,8 +221,14 @@ GameProfile Settings::defaultProfile() const {
     p.padMap = padMap;
     p.gyroMode = gyroMode;
     p.gyroLevel = gyroLevel;
+    p.gyroYawScale = gyroYawScale;
+    p.gyroPitchScale = gyroPitchScale;
+    p.gyroBias[0] = gyroBias[0];
+    p.gyroBias[1] = gyroBias[1];
+    p.gyroBias[2] = gyroBias[2];
     p.touchpadMouse = touchpadMouse;
     p.touchpadShortcuts = touchpadShortcuts;
+    p.soloInputRedirect = soloInputRedirect;
     return p;
 }
 
@@ -274,6 +302,13 @@ bool Settings::save(const std::string& path) const {
     v.set("keyboardPlayer", keyboardPlayer);
     v.set("gyroMode", gyroMode);
     v.set("gyroLevel", gyroLevel);
+    v.set("gyroYawScale", gyroYawScale);
+    v.set("gyroPitchScale", gyroPitchScale);
+    json::Value biasArr = json::Value::array();
+    biasArr.push(static_cast<double>(gyroBias[0]));
+    biasArr.push(static_cast<double>(gyroBias[1]));
+    biasArr.push(static_cast<double>(gyroBias[2]));
+    v.set("gyroBias", biasArr);
     v.set("touchpadMouse", touchpadMouse);
     v.set("touchpadShortcuts", input::touchpadShortcutsJson(touchpadShortcuts));
     v.set("micGain", micGain);
@@ -284,6 +319,7 @@ bool Settings::save(const std::string& path) const {
     v.set("previewFeatures", previewFeatures);
     v.set("syncTrophies", syncTrophies);
     v.set("usbControllers", usbControllers);
+    v.set("soloInputRedirect", soloInputRedirect);
     json::Value pt = json::Value::object();
     for (const auto& [id, sec] : titlePlaytime)
         if (sec > 0) pt.set(id, static_cast<int64_t>(sec));
@@ -315,12 +351,20 @@ bool Settings::save(const std::string& path) const {
         obj.set("padMap", input::padMapJson(p.padMap));
         obj.set("gyroMode", p.gyroMode);
         obj.set("gyroLevel", p.gyroLevel);
+        obj.set("gyroYawScale", p.gyroYawScale);
+        obj.set("gyroPitchScale", p.gyroPitchScale);
+        json::Value objBias = json::Value::array();
+        objBias.push(static_cast<double>(p.gyroBias[0]));
+        objBias.push(static_cast<double>(p.gyroBias[1]));
+        objBias.push(static_cast<double>(p.gyroBias[2]));
+        obj.set("gyroBias", objBias);
         obj.set("touchpadMouse", p.touchpadMouse);
         obj.set("touchpadShortcuts", input::touchpadShortcutsJson(p.touchpadShortcuts));
         if (!p.locale.empty()) obj.set("locale", p.locale);
         obj.set("syncTrophies", p.syncTrophies);
         if (!p.xboxTitleId.empty()) obj.set("xboxTitleId", p.xboxTitleId);
         if (!p.gameName.empty()) obj.set("gameName", p.gameName);
+        obj.set("soloInputRedirect", p.soloInputRedirect);
         pg.set(id, obj);
     }
     v.set("perGame", pg);
