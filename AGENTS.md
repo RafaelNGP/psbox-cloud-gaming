@@ -105,20 +105,41 @@ Para evitar degradação de desempenho, latência alta e manter a interação á
 
 ---
 
-## 6. Protocolo Obrigatório de Publicação de Releases (In-App Updater)
+## 6. Protocolo Obrigatório de Publicação de Releases (Padrão Tri-Plataforma Triplo)
 
-- **NUNCA crie uma release no GitHub sem anexar os assets assinados.** O in-app updater do console (`src/app/updater.cpp` e `src/app/worker.cpp`) rejeita qualquer versão que não possua tanto o pacote `.zip` quanto a assinatura criptográfica `.sig`.
-- **Assets Mandatórios em TODA Release (`vX.Y.Z`)**:
-  1. `PPSA99810.zip` (pacote limpo sem contas/tokens, empacotado sem `XC_INCLUDE_ACCOUNT`).
-  2. `PPSA99810.zip.sig` (assinatura ECDSA gerada com `~/.config/psbox-release/signing-key.pem`).
-  3. `PPSA99810.zip.sha256` (checksum para integridade).
-- **Linux: SEMPRE AppImage, NUNCA `.tar.gz`**: o pacote de Linux de toda release é `PSBox-vX.Y.Z-linux-x86_64.AppImage` + `.sha256`, gerado pelo workflow `.github/workflows/release-linux.yml` (ubuntu-24.04, glibc 2.39) com `tools/desktop/package-appimage.sh` ao publicar a release (ou à mão: `gh workflow run release-linux.yml -f tag=vX.Y.Z`). A assinatura `.sig` vem da máquina de release: `tools/desktop/sign-linux-release.sh vX.Y.Z`. Não gere o AppImage da release localmente (a glibc da máquina local é mais nova) e não publique tarball.
-- **Formato Bilíngue Obrigatório nas Release Notes**: O arquivo `notes.md` e o corpo da release no GitHub devem SEMPRE apresentar primeiro o conteúdo completo em Inglês (`<!-- LANG:EN -->`) e, em seguida, em Português (`<!-- LANG:PT -->`).
-- **Fluxo Mandatório de Publicação**:
-  1. Delegar o empacotamento e assinatura para subagente (preservando o contexto).
-  2. Gerar o pacote através de `tools/release.sh <X.Y.Z>` ou do pipeline de empacotamento oficial.
-  3. Publicar ou anexar com `gh release create vX.Y.Z PPSA99810.zip PPSA99810.zip.sig PPSA99810.zip.sha256 ...` (ou `gh release upload --clobber`).
-  4. **Verificação Obrigatória**: Sempre executar `gh release view vX.Y.Z` e confirmar que todos os 3 assets estão listados e públicos, e que o AppImage de Linux (com `.sha256` e `.sig`) está anexado, antes de considerar o release finalizado.
+- **Regra Fundamental: Zero Releases Incompletas e Zero Duplicatas**:
+  TODA release oficial (`vX.Y.Z`) no GitHub DEVE conter OBRIGATORIAMENTE os binários funcionais para as **3 plataformas suportadas**: **PS5**, **PS4** e **Linux (AppImage)**, totalizando EXATAMENTE os **10 assets mandatórios** abaixo. É terminantemente proibido publicar uma release sem contemplar qualquer um dos 3 alvos ou deixar binários duplicados/temporários do CI (`PSBox-*-linux-x86_64.*` NUNCA devem permanecer na release final):
+  1. **PlayStation 5 (Standalone Oficial)**:
+     - `PSBoxCloudGaming[PS5]-vX.Y.Z.zip` (pacote ZIP oficial para instalação manual ou via gerenciadores homebrew).
+     - `PSBoxCloudGaming[PS5]-vX.Y.Z.zip.sig` (assinatura digital ECDSA para verificação de integridade e autenticidade).
+     - `PSBoxCloudGaming[PS5]-vX.Y.Z.zip.sha256` (checksum SHA256 do pacote de PS5).
+  2. **PlayStation 5 (In-App Updater Canônico)**:
+     - `PPSA99810.zip` (pacote canônico de PS5 obrigatório para o atualizador automático in-app).
+     - `PPSA99810.zip.sig` (assinatura canônica obrigatória para validação do in-app updater).
+     - `PPSA99810.zip.sha256` (checksum SHA256 do pacote canônico de PS5).
+  3. **PlayStation 4 (FPKG)**:
+     - `PSBoxCloudGaming[PS4]-vX.Y.Z.pkg` (pacote FPKG instalável para PlayStation 4, compatível com GoldHEN Package Installer).
+     - `PSBoxCloudGaming[PS4]-vX.Y.Z.pkg.sha256` (checksum SHA256 do pacote de PS4).
+  4. **Linux Desktop / Steam Deck (AppImage)**:
+     - `PSBoxCloudGaming[Linux]-vX.Y.Z.AppImage` (pacote executável universal para distribuições Linux e Steam Deck em Desktop Mode e Game Mode).
+     - `PSBoxCloudGaming[Linux]-vX.Y.Z.AppImage.sha256` (checksum SHA256 do pacote AppImage Linux).
+- **Invariante dos Colchetes e Rótulos no GitHub (`#label`)**:
+  - O GitHub sanitiza nomes de arquivos de release substituindo `[` e `]` por pontos `.`. Para que a interface web do GitHub exiba o nome oficial com colchetes `[]`, envie SEMPRE os arquivos utilizando a sintaxe `<arquivo>#<label>` no GitHub CLI (ex: `"PSBoxCloudGaming[[]PS5]-$tag.zip#PSBoxCloudGaming[PS5]-$tag.zip"`) ou ajuste via PATCH na API de assets (`{"label": "PSBoxCloudGaming[...]"}`).
+  - Ao especificar o caminho local de arquivos com colchetes, escape o colchete de abertura no comando do `gh` CLI (`[[]PS5]`, `[[]PS4]`, `[[]Linux]`) para evitar que a biblioteca em Go interprete o nome como expressão de busca (glob).
+- **Formato Bilíngue Obrigatório nas Release Notes (`notes.md`)**:
+  - O arquivo `notes.md` e o corpo da release no GitHub devem SEMPRE apresentar as tabelas completas de manifesto em Inglês (`### 📦 Attached Files (English)`) e em Português (`### 📦 Arquivos Anexados (Português)`), listando os 10 arquivos e suas descrições exatas, seguidas pelas instruções detalhadas de instalação para as 3 plataformas (`### 🚀 How to Install` e `### 🚀 Como Instalar`).
+- **Validação Automatizada Mandatória (`tools/release-verify.sh`)**:
+  - Nenhuma release pode ser considerada pronta ou entregue sem a execução e aprovação com código 0 de:
+    ```bash
+    tools/release-verify.sh vX.Y.Z --verify-sigs
+    ```
+  - Este script audita automaticamente a presença dos 10 assets, os tamanhos mínimos, os checksums sha256, as assinaturas criptográficas e a presença das tabelas de manifesto bilíngues na release.
+- **Pipeline Unificado de Publicação**:
+  - Para orquestrar toda a publicação de forma à prova de falhas:
+    ```bash
+    tools/publish-release.sh <X.Y.Z>
+    ```
+  - O script constrói localmente os pacotes de PS5 e PS4, sobe a tag, cria a release no GitHub, aguarda a compilação do AppImage de Linux pela GitHub Action, assina criptograficamente o AppImage baixado, remove binários intermediários do CI e executa a auditoria final dos 10 assets.
 
 ---
 
@@ -137,3 +158,58 @@ Para qualquer proposta de melhoria de desempenho, redução de latência ou otim
   3. **Relatório Comparativo Formal**:
      - Apresentar tabela lado a lado com os números: **Original vs Modificado**.
      - Apenas aceitar a modificação se os dados comprovarem ganho real mensurável sem regressões visuais, de áudio ou de estabilidade.
+
+---
+
+## 8. Diretrizes de Sincronização de Conquistas e Troféus no PS5
+
+Para qualquer funcionalidade que manipule registros, sincronização ou desbloqueio de troféus no PlayStation 5:
+
+1. **Abordagem Focada e Incremental**:
+   - NUNCA execute testes de sincronização em lote sobre o catálogo completo de centenas de jogos.
+   - Sempre valide o fluxo completo em **UM único título alvo** (ex: Fortnite `PPSA01922` / `NPWR20561_00`) até comprovar a persistência no banco local do console.
+2. **Pureza Visual e Sonora**:
+   - É estritamente proibido emitir bipes/chimes no alto-falante do controle (`playPadSpeakerAudio`), vibrações (`input::setRumble`) ou caixas de diálogo com emojis/toasts de debug em troféus.
+   - A sincronização manual deve refletir apenas a barra de progresso padrão do aplicativo.
+3. **Parâmetros de Contexto do SceShellCore**:
+   - Em `sceNpTrophy2CreateContext`, NUNCA passe `serviceLabel = 0`. Use sempre `1` ou `-1` (`0xffffffff`), caso contrário o kernel rejeita o registro com erro `0x80553914`.
+4. **Tríade de Reconhecimento do Sistema**:
+   - O PS5 OS não indexa troféus de títulos inexistentes na partição de aplicativos.
+   - Para títulos puramente de nuvem, o provisionamento exige a coexistência de:
+     * Metadados em `/system_data/priv/appmeta/<TitleID>/` (`param.json`, `nptitle.dat`, `trophy2/npbind.dat`).
+     * Pacote e dados em `/user/trophy2/nobackup/conf/<NPWR>/TROPHY.UCP` e `/user/home/<uid>/trophy2/nobackup/data/<NPWR>/TRPTITLE.DAT`.
+     * Registro do título em `/system_data/priv/mms/app.db`.
+5. **Automação e Isolamento do Payload de Troféus**:
+   - O payload de unjail e patch de troféus deve ser empacotado exclusivamente como `assets/PSBox_Trophies.elf` e copiado em runtime para `/data/psbox/PSBox_Trophies.elf`.
+   - É terminantemente proibido referenciar, instalar ou deixar payloads na pasta de terceiros `/data/pldmgr/payloads/`, garantindo que o usuário não o apague acidentalmente.
+6. **Invariante Estritamente Aditiva para Jogos Locais**:
+   - NUNCA sobrescrever metadados (`appmeta`), bancos do sistema ou pacotes `TROPHY.UCP` de títulos com instalação de varejo no console (`/user/app/<PPSA>/eboot.bin`).
+   - A sincronização deve apenas somar novas conquistas obtidas em nuvem ao `TRPTITLE.DAT` existente, preservando 100% dos troféus e timestamps originais.
+   - Rotinas de limpeza de troféus (`removeAllTrophies`) devem ignorar e proteger títulos instalados localmente.
+7. **Estabilidade de Transações SQLite no SceShellCore**:
+   - Conexões de escrita com `/system_data/priv/mms/app.db` e `appinfo.db` devem SEMPRE configurar:
+     * `PRAGMA journal_mode = MEMORY;` (evita falhas de criação de arquivo `.db-journal` em partições restritas);
+     * `PRAGMA synchronous = OFF;`
+     * `sqlite3_busy_timeout(db, 5000)` para tratar contenções com o daemon `SceShellCore`.
+8. **Limite Arquitetural de 128 Troféus no PS5**:
+   - O formato Sony Trophy 2 (`TRPTITLE.DAT` / `TROPHY.UCP`) limita cada conjunto a no máximo 128 troféus (`0` Platina + `1..127` base).
+   - Para jogos com mais de 127 conquistas, a ordem dos troféus `1..127` deve permanecer rigorosamente estável para evitar falsos desbloqueios e desalinhamento de ícones.
+
+---
+
+## 9. Invariantes de Unjail, Sandbox e Ciclo de Vida do In-App Updater no PS5
+
+Para o sistema de atualização automática in-app e manipulação de binários após unjail no PlayStation 5:
+
+1. **Dissolução do Ponto `/app0` sob Namespace Desjaulado**:
+   - Ao realizar o unjail (`jailbreak`) para sincronização nativa de troféus ou chamadas privilegiadas do kernel, o `chroot` do processo é alterado para a raiz do sistema real (`/`).
+   - O ponto de montagem virtual `/app0` deixa de estar acessível no nível superior da raiz. Qualquer função de resolução de executável, validação de integridade ou reinicialização (`isInstalledCopy`, `restartApp`, `appDir`) NUNCA deve assumir que `/app0/eboot.bin` existe.
+   - A resolução deve SEMPRE escanear dinamicamente `/mnt/sandbox/` para instâncias ativas do título (`/mnt/sandbox/<TITLE_ID>*/app0/eboot.bin`), comparando inodes (`st_ino`), com fallback seguro para o diretório canônico homebrew (`/data/homebrew/<TITLE_ID>/`).
+2. **Protocolo de Hotfix e Substituição de Releases Publicadas**:
+   - Caso um bug crítico exija a substituição emergencial de binários de uma release oficial já lançada:
+     * Utilizar a flag `--force` em `tools/release.sh <VERSION> [out-dir] --force` para ignorar travas de tag pré-existente e reconstruir os pacotes de PS5 e PS4 com assinatura ECDSA e checksums válidos.
+     * Atualizar a tag Git localmente e forçar envio ao repositório remoto (`git tag -fa vX.Y.Z -m "..." && git push -f origin vX.Y.Z`).
+     * Enviar os binários corrigidos ao GitHub via `gh release upload vX.Y.Z ... --clobber` preservando rigorosamente a sintaxe de rótulos `#label` para evitar duplicatas e perda de colchetes.
+     * Executar e obter aprovação com código 0 em `tools/release-verify.sh vX.Y.Z --verify-sigs`.
+
+
