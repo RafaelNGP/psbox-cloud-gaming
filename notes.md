@@ -1,6 +1,17 @@
 <!-- LANG:EN -->
 # PSBox Cloud Gaming v1.6.3
 
+## 🏆 Native PlayStation 5 Trophy Support for Cloud Games
+- **Seamless Cloud-to-Console Trophy Integration**: Xbox achievements earned in cloud games are now natively converted, registered, and unlocked in the PlayStation 5 operating system.
+- **Full Trophy Sets & Platinum Integration**: Cloud titles receive full Sony Trophy 2 packages (`TROPHY.UCP` / `TRPTITLE.DAT`) generated automatically with real high-resolution icons, authentic trophy rarities (Bronze, Silver, Gold, Platinum), descriptions, and timestamps.
+- **Instant Real-Time Stream Unlocks**: Unlocking an achievement during active gameplay pops up the native PS5 trophy notification in real-time, just like a local retail game.
+- **Automatic History Synchronization**: A background worker scans your entire Xbox achievement history across hundreds of games, caching icons and back-syncing previous milestones without user intervention.
+- **Strict Retail Protection & Stability**: Retail/installed console games are strictly protected (additive updates only), transacting securely with SQLite (`app.db`) and running completely silent without spurious pad speaker chimes.
+
+## 🛠️ PS5 In-App Auto-Updater Hotfix (Unjailed Sandbox Resolution)
+- **Resolved Sandbox Dissolution Issue**: Fixed an issue where the in-app auto-updater failed after unjailing (`the app doesn't run from /data/homebrew/PPSA99810`) by adding dynamic `/mnt/sandbox/` enumeration and inode validation alongside canonical homebrew paths.
+- **Robust Restart Chain**: Updated `restartApp()` to gracefully reload from sandbox mount instances or homebrew fallback upon update completion.
+
 ## ⚡ Streaming Stutter Elimination on PS5 (`g_trophyThread` Batch Pause)
 - **Zero Background Sync Interference**: The background trophy worker thread (`g_trophyThread`) now completely pauses batch catalog discovery and achievement queries (`TaskType::BatchTitle`) during active cloud streaming sessions (`ctx.isStreaming()`).
 - **Immediate Real-Time Polls**: Real-time achievement checks (`TaskType::RealtimePoll`) for the currently running game continue without disruption with 0ms preemption.
@@ -16,7 +27,7 @@
 - **Complete 6-Language Localization**: Full translation parity across English, Brazilian Portuguese, Spanish, German, French, and Italian with verified string placeholders.
 
 ## 🩺 Reactive Diagnostics Restoration ("Verify Sign-In" & "Network Test")
-- **Immediate Reactive State**: Diagnósticos modals now open with instant visual feedback, pre-populating test stages and ping regions with active spinners.
+- **Immediate Reactive State**: Diagnostic modals now open with instant visual feedback, pre-populating test stages and ping regions with active spinners.
 - **Non-Dropping Command Dispatch**: Fixed command race conditions with a retry loop in `app_core.cpp`, ensuring diagnostic requests are never dropped during worker state transitions.
 - **Original Logic & Presentation Preserved**: 100% fidelity to the original diagnostic checks, STUN RFC 5389 UDP network probing, and Xbox Live authentication verification.
 
@@ -54,6 +65,17 @@
 
 <!-- LANG:PT -->
 # PSBox Cloud Gaming v1.6.3
+
+## 🏆 Suporte Nativo a Troféus do PlayStation 5 para Jogos em Nuvem
+- **Integração Total de Conquistas da Nuvem no Console**: As conquistas da Xbox Live obtidas em jogos via streaming agora são convertidas, registradas e desbloqueadas nativamente no sistema operacional do PlayStation 5.
+- **Conjuntos Completos de Troféus com Platina**: Títulos em nuvem recebem pacotes nativos Sony Trophy 2 (`TROPHY.UCP` / `TRPTITLE.DAT`) gerados automaticamente, com ícones originais em alta resolução, raridades autênticas (Bronze, Prata, Ouro e Platina), nomes, descrições e carimbos de data/hora preservados.
+- **Desbloqueio Instantâneo Durante a Gameplay**: Desbloquear uma conquista durante o streaming exibe imediatamente a notificação nativa de troféu do PS5 na tela, com a mesma experiência de um jogo de disco ou instalado.
+- **Sincronização Automática de Histórico**: Um worker de segundo plano varre todo o seu histórico de conquistas da conta Xbox em centenas de títulos, baixando artes e sincronizando marcos antigos de forma 100% transparente.
+- **Proteção Estrita de Jogos Locais**: Títulos instalados em disco/armazenamento interno são estritamente protegidos (atualização exclusivamente aditiva), gravando com segurança transacional no banco SQLite do sistema e operando com pureza de áudio.
+
+## 🛠️ Correção do Atualizador Automático In-App no PS5 (Resolução de Sandbox Desjaulado)
+- **Fim do Erro de Sandbox no Updater**: Corrigida a falha onde o atualizador automático in-app falhava após o desjaulamento (`the app doesn't run from /data/homebrew/PPSA99810`), através da busca dinâmica em `/mnt/sandbox/` e validação por inodes.
+- **Reinicialização Confiável**: Aprimorada a cadeia de reexecução em `restartApp()` para recarregar o novo executável a partir do sandbox ativo ou do diretório homebrew canônico.
 
 ## ⚡ Eliminação de Engasgos de Streaming no PS5 (Pausa de Lotes em `g_trophyThread`)
 - **Zero Interferência no Streaming**: A thread em segundo plano de troféus (`g_trophyThread`) agora pausa completamente a varredura em lote do catálogo e a busca de conquistas (`TaskType::BatchTitle`) durante sessões ativas de transmissão na nuvem (`ctx.isStreaming()`).
