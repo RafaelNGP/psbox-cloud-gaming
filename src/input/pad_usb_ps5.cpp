@@ -431,13 +431,27 @@ void probe(const std::string& path, ino_t ino) {
         gd.ugd_maxlen = sizeof config;
         if (ioctl(fd, USB_GET_FULL_DESC, &gd) == 0) {
             configLen = std::min<size_t>(gd.ugd_actlen, sizeof config);
-            iface = findUsbPadInterface(config, configLen);
-            if (vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC)) {
-                iface.protocol = UsbPadProtocol::DualShock4;
-                iface.epIn = 0x81;
-            } else if (vid == 0x045E && pid == 0x0719) {
-                iface.protocol = UsbPadProtocol::XInput;
-                iface.epIn = 0x81;
+            iface = probeUsbPadPs5(vid, pid, config, configLen);
+            if (iface.protocol == UsbPadProtocol::DualShock4 || iface.protocol == UsbPadProtocol::GenericHid) {
+                uint8_t report[512] = {};
+                uint8_t curIf = 0xFF;
+                uint16_t want = sizeof(report);
+                for (size_t off = 0; off + 2 <= configLen; off += config[off]) {
+                    const size_t l = config[off];
+                    if (l < 2 || off + l > configLen) break;
+                    if (config[off + 1] == 0x04 && l >= 9) curIf = config[off + 2];
+                    if (config[off + 1] == 0x21 && l >= 9 && curIf == iface.number) {
+                        uint16_t sz = static_cast<uint16_t>(config[off + 7] | (config[off + 8] << 8));
+                        if (sz > 0) want = std::min<uint16_t>(sz, sizeof(report));
+                        break;
+                    }
+                }
+                if (controlRequest(fd, 0x81, 0x06, 0x2200, iface.number, report, want) == 0) {
+                    iface = probeUsbPadPs5(vid, pid, config, configLen, report, want);
+                } else if (!(vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC))) {
+                    // Reject unverified generic HID devices so USB keyboards/mice are never claimed
+                    iface = UsbPadInterface{};
+                }
             }
         }
     }

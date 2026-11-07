@@ -40,15 +40,40 @@ enum class UsbPadProtocol {
 const char* usbPadProtocolName(UsbPadProtocol protocol);
 UsbPadProtocol usbPadProtocolFor(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol);
 
+// Returns true if interface class/subclass/protocol indicates a boot keyboard or mouse.
+bool isBootKeyboardOrMouse(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol);
+
+// Returns true if HID report descriptor defines a top-level collection for Mouse (0x01:0x02),
+// Pointer (0x01:0x01), or Keyboard (0x01:0x06 / page 0x07).
+bool isKeyboardOrMouseReportDescriptor(const uint8_t* reportDesc, size_t len);
+
+// Returns true if HID report descriptor defines a top-level collection for Gamepad (0x01:0x05),
+// Joystick (0x01:0x04), or Game Controls (page 0x05).
+bool isGamepadReportDescriptor(const uint8_t* reportDesc, size_t len);
+
 // The pad's interface in a configuration descriptor (as USB_GET_FULL_DESC
 // gives it): the first XInput / GIP one (alternate setting 0) and its
 // interrupt endpoints. protocol None when the device has none.
+// If reportDesc is provided, filters out keyboard and mouse HID devices.
 struct UsbPadInterface {
     UsbPadProtocol protocol = UsbPadProtocol::None;
     uint8_t number = 0;
     uint8_t epIn = 0, epOut = 0;  // endpoint addresses (epIn has bit 7); 0: none
 };
-UsbPadInterface findUsbPadInterface(const uint8_t* configDesc, size_t len);
+UsbPadInterface findUsbPadInterface(const uint8_t* configDesc, size_t len,
+                                    const uint8_t* reportDesc = nullptr, size_t reportLen = 0);
+
+// Probes a USB device against PS5 gamepad acceptance rules:
+// Rejects keyboards, mice, audio, and Bluetooth radios.
+// Accepts DualShock 4 (VID 0x054C with gamepad report / proto 0), Xbox 360 (XInput), and Xbox One (GIP).
+UsbPadInterface probeUsbPadPs5(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_t configLen,
+                              const uint8_t* reportDesc = nullptr, size_t reportLen = 0);
+
+// Probes a USB device against PS4 gamepad acceptance rules:
+// Rejects keyboards, mice (boot protocol and report descriptor).
+// Accepts DualShock 4 HID gamepads, DualShock 3, DualSense, Switch Pro, Stadia, Xbox 360, Xbox One.
+bool probeUsbPadPs4(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_t configLen,
+                    const uint8_t* reportDesc = nullptr, size_t reportLen = 0);
 
 // GIP: the acknowledgements (13 bytes each) a report asks for, one per
 // message in it with the ACK option (0x10); the pad repeats them otherwise.

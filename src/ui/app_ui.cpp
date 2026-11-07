@@ -643,7 +643,7 @@ std::string AppUi::detailWanted(uint64_t nowMs) {
     }
     if (pid.empty()) return {};
     if (detailInfo_.find(pid) != detailInfo_.end()) return {};
-    if (!detail_.description.empty() && !detail_.heroUrl.empty() && !detail_.ratingAge.empty()) return {};
+    if (detail_.description.size() >= 80 && !detail_.heroUrl.empty() && !detail_.ratingAge.empty()) return {};
     if (pid == detailAskedFor_ && nowMs - detailAskedAt_ < 5000) return {};
     detailAskedFor_ = pid;
     detailAskedAt_ = nowMs;
@@ -768,7 +768,8 @@ void AppUi::syncHeroToRowsLocked(const std::string& productId, const std::string
             if (t.productId.empty() && !productId.empty()) t.productId = productId;
             if (t.titleId.empty() && !titleId.empty()) t.titleId = titleId;
             if (!heroUrl.empty()) t.heroUrl = heroUrl;
-            if (!description.empty() && t.description.empty()) t.description = description;
+            if (!description.empty() && (t.description.empty() || description.size() > t.description.size()))
+                t.description = description;
             if (!publisher.empty() && t.publisher.empty()) t.publisher = publisher;
             if (!categories.empty() && t.categories.empty()) t.categories = categories;
         }
@@ -1002,7 +1003,8 @@ void AppUi::refreshDetail() {
     if (!detail_.productId.empty()) {
         auto info = detailInfo_.find(detail_.productId);
         if (info != detailInfo_.end()) {
-            if (detail_.description.empty() && !info->second.description.empty()) {
+            if ((detail_.description.empty() || info->second.description.size() > detail_.description.size()) &&
+                !info->second.description.empty()) {
                 detail_.description = info->second.description;
                 changed = true;
             }

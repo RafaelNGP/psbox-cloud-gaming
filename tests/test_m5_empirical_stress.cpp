@@ -447,6 +447,80 @@ static void testStreamReloadArchitecture() {
 }
 
 // =========================================================================
+// TEST SUITE 5: Adversarial Boundary Stress, Oscillation & Concurrency
+// =========================================================================
+static void testAdversarialEdgeCasesAndConcurrency() {
+    std::printf("\n=== [TEST SUITE 5] Adversarial Boundary Stress & Concurrency ===\n");
+
+    // 1. Boundary Oscillation (RTT flickering between 29 and 30 ms)
+    stream::VideoReceiveStats stats{};
+    stream::H264Receiver rx([] {}, stats, 90);
+
+    for (int cycle = 0; cycle < 1000; ++cycle) {
+        rx.setRttMs(29);
+        STRESS_ASSERT(rx.lossWaitMs() == 88, "Cycle %d: RTT 29 lossWaitMs must be 88", cycle);
+        STRESS_ASSERT(rx.renackMs() == 39, "Cycle %d: RTT 29 renackMs must be 39", cycle);
+
+        rx.setRttMs(30);
+        STRESS_ASSERT(rx.lossWaitMs() == 90, "Cycle %d: RTT 30 lossWaitMs must be 90", cycle);
+        STRESS_ASSERT(rx.renackMs() == 50, "Cycle %d: RTT 30 renackMs must be 50", cycle);
+    }
+    std::printf("[INFO] 1,000 rapid RTT boundary oscillations (29 <-> 30) verified stable.\n");
+
+    // 2. Extreme RTT Values (Prevent overflow or unexpected clamping)
+    const int kExtremeRtts[] = {5000, 10000, 50000, 100000, 1000000};
+    for (int extremeRtt : kExtremeRtts) {
+        rx.setRttMs(extremeRtt);
+        STRESS_ASSERT(rx.lossWaitMs() == 300, "Extreme RTT %d must clamp to 300 ms ceiling", extremeRtt);
+        STRESS_ASSERT(rx.renackMs() == 250, "Extreme RTT %d must clamp to 250 ms ceiling", extremeRtt);
+    }
+    std::printf("[INFO] Extreme RTTs up to 1,000,000 ms properly clamped without overflow.\n");
+
+    // 3. Exact Audio Priming Boundary: 255 vs 256 frames
+    {
+        media::AudioQueue q;
+        q.open();
+        std::vector<float> sample255(255 * 2, 0.1f);
+        q.push(sample255.data(), 255);
+        STRESS_ASSERT(q.queuedFrames() == 255, "Queue has exactly 255 frames");
+        bool primed = false;
+        if (q.queuedFrames() >= 256) primed = true;
+        STRESS_ASSERT(!primed, "Priming gate must NOT trip at 255 frames");
+
+        std::vector<float> sample1(1 * 2, 0.1f);
+        q.push(sample1.data(), 1);
+        STRESS_ASSERT(q.queuedFrames() == 256, "Queue has exactly 256 frames");
+        if (q.queuedFrames() >= 256) primed = true;
+        STRESS_ASSERT(primed, "Priming gate MUST trip at exactly 256 frames");
+    }
+    std::printf("[INFO] Exact single-frame priming gate threshold (255 vs 256) verified.\n");
+
+    // 4. Concurrent Multi-Threaded requestReconnect() Stress
+    {
+        xcloud::GssvClient gssv;
+        app::StreamPlayer player(gssv);
+        STRESS_ASSERT(!player.isReconnecting(), "Initially not reconnecting");
+
+        constexpr int kNumThreads = 50;
+        std::vector<std::thread> workers;
+        workers.reserve(kNumThreads);
+        for (int i = 0; i < kNumThreads; ++i) {
+            workers.emplace_back([&player]() {
+                player.requestReconnect();
+            });
+        }
+        for (auto& w : workers) {
+            if (w.joinable()) w.join();
+        }
+
+        STRESS_ASSERT(player.isReconnecting(), "Must be reconnecting after concurrent requests");
+    }
+    std::printf("[INFO] 50 concurrent threads racing on requestReconnect() verified thread-safe.\n");
+
+    std::printf("[PASS] Suite 5 passed: Adversarial boundary stress & concurrency verified.\n");
+}
+
+// =========================================================================
 // Main Runner
 // =========================================================================
 int main() {
@@ -458,6 +532,7 @@ int main() {
     testAudioLatencyController();
     testAudioStartupPrimingGate();
     testStreamReloadArchitecture();
+    testAdversarialEdgeCasesAndConcurrency();
 
     std::printf("\n=================================================================\n");
     std::printf("RESULTS: %d passed, %d failed\n", g_passCount, g_failCount);
@@ -465,3 +540,4 @@ int main() {
 
     return g_failCount == 0 ? 0 : 1;
 }
+

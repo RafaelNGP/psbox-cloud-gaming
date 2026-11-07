@@ -671,6 +671,7 @@ void Library::loadCatalogNames(const Changed& changed, const std::atomic<bool>* 
     for (const auto* list : {&owned_, &purchasable_})
         for (const auto& item : *list) want(item.first);
     for (const auto& id : allGames_) want(id);
+    for (const auto& id : freeInStore_) want(id);
     progress_ = {true, 0, missing.size()};
     changed();
     constexpr size_t kBatch = 100;
@@ -882,6 +883,7 @@ void Library::hydrate(const Changed& changed, const std::atomic<bool>* stop) {
     // language) need the full details.
     for (const auto& item : purchasable_) ids.push_back(item.first);
     ids.insert(ids.end(), allGames_.begin(), allGames_.end());
+    ids.insert(ids.end(), freeInStore_.begin(), freeInStore_.end());
     uint64_t t0 = platform::nowMs();
     fetchFull(ids, changed, stop);
     // The store changes descriptions and details now and then: the oldest

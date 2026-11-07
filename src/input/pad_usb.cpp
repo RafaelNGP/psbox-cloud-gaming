@@ -112,11 +112,135 @@ bool pollWhere(int player, int except, ControllerState& out) {
 
 }  // namespace
 
+bool isBootKeyboardOrMouse(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol) {
+    if (ifaceClass != 0x03) return false;
+    if (ifaceProtocol == 0x01 || ifaceProtocol == 0x02) return true;
+    if (ifaceSubclass == 0x01 && (ifaceProtocol == 0x01 || ifaceProtocol == 0x02)) return true;
+    return false;
+}
+
+namespace {
+
+struct HidCollectionInfo {
+    bool hasKeyboard = false;
+    bool hasMouse = false;
+    bool hasGamepad = false;
+};
+
+HidCollectionInfo scanHidReportCollections(const uint8_t* d, size_t n) {
+    HidCollectionInfo info;
+    if (!d || n == 0) return info;
+
+    uint16_t page = 0;
+    uint32_t usages[64] = {};
+    int nusages = 0;
+    int depth = 0;
+    uint16_t pageStack[8] = {};
+    int pageDepth = 0;
+
+    size_t i = 0;
+    while (i < n) {
+        uint8_t p = d[i];
+        if (p == 0xFE) { // Long item
+            if (i + 2 >= n) break;
+            size_t dataLen = d[i + 1];
+            i += 3 + dataLen;
+            continue;
+        }
+
+        int size = p & 0x03;
+        if (size == 3) size = 4;
+        int type = (p >> 2) & 0x03;
+        int tag = (p >> 4) & 0x0F;
+        const uint8_t* v = d + i + 1;
+        if (i + 1 + static_cast<size_t>(size) > n) break;
+        i += 1 + size;
+
+        uint32_t val = 0;
+        for (int k = 0; k < size; ++k) {
+            val |= static_cast<uint32_t>(v[k]) << (8 * k);
+        }
+
+        if (type == 1) { // Global
+            if (tag == 0) { // Usage Page
+                page = static_cast<uint16_t>(val);
+            } else if (tag == 10) { // Push
+                if (pageDepth < 8) pageStack[pageDepth++] = page;
+            } else if (tag == 11) { // Pop
+                if (pageDepth > 0) page = pageStack[--pageDepth];
+            }
+        } else if (type == 2) { // Local
+            if (tag == 0) { // Usage
+                uint32_t fullUsage = 0;
+                if (size <= 2) {
+                    fullUsage = (static_cast<uint32_t>(page) << 16) | (val & 0xFFFF);
+                } else {
+                    fullUsage = val;
+                }
+                if (nusages < 64) usages[nusages++] = fullUsage;
+            }
+        } else if (type == 0) { // Main
+            if (tag == 10) { // Collection
+                uint32_t collType = val;
+                if (depth == 0 || collType == 0x01) {
+                    if (nusages > 0) {
+                        for (int uIdx = 0; uIdx < nusages; ++uIdx) {
+                            uint32_t u = usages[uIdx];
+                            uint16_t uPage = static_cast<uint16_t>(u >> 16);
+                            uint16_t uId = static_cast<uint16_t>(u & 0xFFFF);
+                            if (uPage == 0) uPage = page;
+
+                            if (uPage == 0x01) { // Generic Desktop
+                                if (uId == 0x01 || uId == 0x02) {
+                                    info.hasMouse = true;
+                                } else if (uId == 0x06 || uId == 0x07) {
+                                    info.hasKeyboard = true;
+                                } else if (uId == 0x04 || uId == 0x05 || uId == 0x08) {
+                                    info.hasGamepad = true;
+                                }
+                            } else if (uPage == 0x07) { // Keyboard/Keypad
+                                info.hasKeyboard = true;
+                            } else if (uPage == 0x05) { // Game Controls
+                                info.hasGamepad = true;
+                            }
+                        }
+                    } else {
+                        if (page == 0x07) info.hasKeyboard = true;
+                        else if (page == 0x05) info.hasGamepad = true;
+                    }
+                }
+                depth++;
+                nusages = 0;
+            } else if (tag == 12) { // End Collection
+                if (depth > 0) depth--;
+                nusages = 0;
+            } else {
+                nusages = 0;
+            }
+        }
+    }
+    return info;
+}
+
+}  // namespace
+
+bool isKeyboardOrMouseReportDescriptor(const uint8_t* reportDesc, size_t len) {
+    if (!reportDesc || len == 0) return false;
+    HidCollectionInfo info = scanHidReportCollections(reportDesc, len);
+    return info.hasKeyboard || info.hasMouse;
+}
+
+bool isGamepadReportDescriptor(const uint8_t* reportDesc, size_t len) {
+    if (!reportDesc || len == 0) return false;
+    HidCollectionInfo info = scanHidReportCollections(reportDesc, len);
+    return info.hasGamepad && !info.hasKeyboard && !info.hasMouse;
+}
+
 UsbPadProtocol usbPadProtocolFor(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol) {
     if (ifaceClass == 0x03) {
         // Standard HID: DualShock 4 is subclass 0, protocol 0.
-        // Skip boot keyboards (protocol 1) and mice (protocol 2) so they are never claimed as gamepads.
-        if (ifaceSubclass == 0x01 && (ifaceProtocol == 0x01 || ifaceProtocol == 0x02)) {
+        // Skip keyboards (protocol 1) and mice (protocol 2) so they are never claimed as gamepads.
+        if (isBootKeyboardOrMouse(ifaceClass, ifaceSubclass, ifaceProtocol)) {
             return UsbPadProtocol::None;
         }
         return UsbPadProtocol::DualShock4;
@@ -130,7 +254,24 @@ UsbPadProtocol usbPadProtocolFor(uint8_t ifaceClass, uint8_t ifaceSubclass, uint
     return UsbPadProtocol::None;
 }
 
-UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len) {
+UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len, const uint8_t* reportDesc, size_t reportLen) {
+    if (reportDesc && reportLen > 0) {
+        if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen) || !isGamepadReportDescriptor(reportDesc, reportLen)) {
+            return UsbPadInterface{};
+        }
+    }
+    bool hasBootKbdOrMouse = false;
+    for (size_t off = 0; d && off + 2 <= len; off += d[off]) {
+        const size_t l = d[off];
+        if (l < 2 || off + l > len) break;
+        if (d[off + 1] == 0x04 && l >= 9 && isBootKeyboardOrMouse(d[off + 5], d[off + 6], d[off + 7])) {
+            hasBootKbdOrMouse = true;
+            break;
+        }
+    }
+    const bool hasVerifiedGamepadReport =
+        reportDesc && reportLen > 0 && isGamepadReportDescriptor(reportDesc, reportLen) && !isKeyboardOrMouseReportDescriptor(reportDesc, reportLen);
+
     UsbPadInterface pad;
     bool inPad = false;  // the endpoints that follow are the pad interface's
     for (size_t off = 0; d && off + 2 <= len; off += d[off]) {
@@ -138,7 +279,11 @@ UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len) {
         if (l < 2 || off + l > len) break;
         if (d[off + 1] == 0x04 && l >= 9) {  // an interface
             if (inPad && pad.epIn) return pad;
-            pad = {usbPadProtocolFor(d[off + 5], d[off + 6], d[off + 7]), d[off + 2], 0, 0};
+            UsbPadProtocol proto = usbPadProtocolFor(d[off + 5], d[off + 6], d[off + 7]);
+            if (d[off + 5] == 0x03 && hasBootKbdOrMouse && !hasVerifiedGamepadReport) {
+                proto = UsbPadProtocol::None;
+            }
+            pad = {proto, d[off + 2], 0, 0};
             inPad = pad.protocol != UsbPadProtocol::None && d[off + 3] == 0;
         } else if (d[off + 1] == 0x05 && l >= 7 && inPad && (d[off + 3] & 0x03) == 0x03) {  // an interrupt endpoint
             const uint8_t addr = d[off + 2];
@@ -146,7 +291,139 @@ UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len) {
             if (!ep) ep = addr;
         }
     }
-    return inPad && pad.epIn ? pad : UsbPadInterface{};
+    if (inPad && pad.epIn) {
+        if ((pad.protocol == UsbPadProtocol::DualShock4 || pad.protocol == UsbPadProtocol::GenericHid) &&
+            reportDesc && reportLen > 0) {
+            if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen) || !isGamepadReportDescriptor(reportDesc, reportLen)) {
+                return UsbPadInterface{};
+            }
+        }
+        return pad;
+    }
+    return UsbPadInterface{};
+}
+
+UsbPadInterface probeUsbPadPs5(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_t configLen,
+                              const uint8_t* reportDesc, size_t reportLen) {
+    if (vid == 0x0e8d || (vid == 0x054C && pid == 0x0CE6)) {
+        return UsbPadInterface{};
+    }
+
+    if (reportDesc && reportLen > 0) {
+        if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) {
+            return UsbPadInterface{};
+        }
+    }
+
+    bool hasBootKbdOrMouse = false;
+    for (size_t off = 0; configDesc && off + 2 <= configLen; off += configDesc[off]) {
+        const size_t l = configDesc[off];
+        if (l < 2 || off + l > configLen) break;
+        if (configDesc[off + 1] == 0x04 && l >= 9 &&
+            isBootKeyboardOrMouse(configDesc[off + 5], configDesc[off + 6], configDesc[off + 7])) {
+            hasBootKbdOrMouse = true;
+            break;
+        }
+    }
+
+    UsbPadInterface iface = findUsbPadInterface(configDesc, configLen, reportDesc, reportLen);
+
+    if (!hasBootKbdOrMouse && vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC)) {
+        if (reportDesc && reportLen > 0 && isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) {
+            return UsbPadInterface{};
+        }
+        iface.protocol = UsbPadProtocol::DualShock4;
+        iface.number = 0;
+        if (!iface.epIn) iface.epIn = 0x81;
+    } else if (!hasBootKbdOrMouse && vid == 0x045E && pid == 0x0719) {
+        iface.protocol = UsbPadProtocol::XInput;
+        iface.number = 0;
+        if (!iface.epIn) iface.epIn = 0x81;
+    }
+
+    if (iface.protocol == UsbPadProtocol::DualShock4 || iface.protocol == UsbPadProtocol::GenericHid) {
+        if (reportDesc && reportLen > 0) {
+            if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen) || !isGamepadReportDescriptor(reportDesc, reportLen)) {
+                return UsbPadInterface{};
+            }
+        }
+    }
+
+    return iface;
+}
+
+bool probeUsbPadPs4(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_t configLen,
+                    const uint8_t* reportDesc, size_t reportLen) {
+    if (reportDesc && reportLen > 0) {
+        if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) {
+            return false;
+        }
+    }
+
+    bool hasBootKbdOrMouse = false;
+    for (size_t off = 0; configDesc && off + 2 <= configLen; off += configDesc[off]) {
+        const size_t l = configDesc[off];
+        if (l < 2 || off + l > configLen) break;
+        if (configDesc[off + 1] == 0x04 && l >= 9 &&
+            isBootKeyboardOrMouse(configDesc[off + 5], configDesc[off + 6], configDesc[off + 7])) {
+            hasBootKbdOrMouse = true;
+            break;
+        }
+    }
+
+    if (!hasBootKbdOrMouse && vid == 0x045E) {
+        if (pid == 0x028E || pid == 0x02D1 || pid == 0x02DD || pid == 0x02E3 || pid == 0x02EA ||
+            pid == 0x0B00 || pid == 0x0B0A || pid == 0x0B12 || pid == 0x0719) {
+            return true;
+        }
+    }
+
+    if (!hasBootKbdOrMouse && vid == 0x054C && (pid == 0x0268 || pid == 0x0CE6 || pid == 0x0DF2)) return true;
+    if (!hasBootKbdOrMouse && vid == 0x057E && (pid == 0x2009 || pid == 0x2006 || pid == 0x2007 || pid == 0x200E ||
+                          pid == 0x2017 || pid == 0x2019 || pid == 0x201E)) return true;
+    if (!hasBootKbdOrMouse && vid == 0x18D1 && pid == 0x9400) return true;
+
+    if (!hasBootKbdOrMouse && (vid == 0x054C || vid == 0x146B || vid == 0x1532 || vid == 0x0F0D || vid == 0x2C22 || vid == 0x0C12)) {
+        if (reportDesc && reportLen > 0) {
+            if (isGamepadReportDescriptor(reportDesc, reportLen)) return true;
+            if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) return false;
+        } else if (pid == 0x05C4 || pid == 0x09CC) {
+            return true;
+        }
+    }
+
+    bool found = false;
+    for (size_t off = 0; configDesc && off + 2 <= configLen; off += configDesc[off]) {
+        const size_t l = configDesc[off];
+        if (l < 2 || off + l > configLen) break;
+        if (configDesc[off + 1] == 0x04 && l >= 9) {
+            uint8_t ifClass = configDesc[off + 5];
+            uint8_t ifSubClass = configDesc[off + 6];
+            uint8_t ifProto = configDesc[off + 7];
+
+            if (ifClass == 0xFF) {
+                if ((ifSubClass == 0x5D && (ifProto == 0x01 || ifProto == 0x81 || ifProto == 0x00)) ||
+                    (ifSubClass == 0x47 && ifProto == 0xD0)) {
+                    found = true;
+                }
+            } else if (ifClass == 0x03) {
+                if (isBootKeyboardOrMouse(ifClass, ifSubClass, ifProto)) {
+                    continue;
+                }
+                if (hasBootKbdOrMouse && (!reportDesc || reportLen == 0)) {
+                    continue;
+                }
+                if (reportDesc && reportLen > 0) {
+                    if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen) || !isGamepadReportDescriptor(reportDesc, reportLen)) {
+                        continue;
+                    }
+                }
+                found = true;
+            }
+        }
+    }
+
+    return found;
 }
 
 std::vector<std::array<uint8_t, 13>> gipAcksFor(const uint8_t* data, size_t len) {

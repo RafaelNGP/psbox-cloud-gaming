@@ -239,27 +239,29 @@ bool detectXboxByDescriptor(libusb_device* dev, DetectedPad& out) {
         }
     }
 
-    if (found) {
-        // Scan for composite keyboard interface
-        for (int i = 0; i < cfg->bNumInterfaces; ++i) {
-            const struct libusb_interface* intf = &cfg->interface[i];
-            for (int a = 0; a < intf->num_altsetting; ++a) {
-                const struct libusb_interface_descriptor* alt = &intf->altsetting[a];
-                if (alt->bInterfaceClass == 0x03 && alt->bInterfaceSubClass == 1 && alt->bInterfaceProtocol == 1) {
-                    out.kbdInterfaceNum = alt->bInterfaceNumber;
-                    break;
-                }
-            }
-        }
-    }
-
     freeConfigDescriptor(cfg);
     return found;
 }
 
-bool detectGenericHidEndpoints(libusb_device* dev, DetectedPad& out) {
+bool detectGenericHidEndpoints(libusb_device* dev, DetectedPad& out, bool allowCompositeKbdMouse = false) {
     struct libusb_config_descriptor* cfg = nullptr;
     if (getActiveConfigDescriptor(dev, &cfg) != 0 || !cfg) return false;
+
+    bool hasBootKbdOrMouse = false;
+    for (int i = 0; i < cfg->bNumInterfaces; ++i) {
+        const struct libusb_interface* intf = &cfg->interface[i];
+        for (int a = 0; a < intf->num_altsetting; ++a) {
+            const struct libusb_interface_descriptor* alt = &intf->altsetting[a];
+            if (isBootKeyboardOrMouse(alt->bInterfaceClass, alt->bInterfaceSubClass, alt->bInterfaceProtocol)) {
+                hasBootKbdOrMouse = true;
+                break;
+            }
+        }
+    }
+    if (hasBootKbdOrMouse && !allowCompositeKbdMouse) {
+        freeConfigDescriptor(cfg);
+        return false;
+    }
 
     bool found = false;
     for (int i = 0; i < cfg->bNumInterfaces && !found; ++i) {
@@ -267,7 +269,7 @@ bool detectGenericHidEndpoints(libusb_device* dev, DetectedPad& out) {
         for (int a = 0; a < intf->num_altsetting && !found; ++a) {
             const struct libusb_interface_descriptor* alt = &intf->altsetting[a];
             if (alt->bInterfaceClass != 0x03) continue; // HID
-            if (alt->bInterfaceSubClass == 1 && alt->bInterfaceProtocol == 1) continue; // Skip keyboard
+            if (isBootKeyboardOrMouse(alt->bInterfaceClass, alt->bInterfaceSubClass, alt->bInterfaceProtocol)) continue; // Skip boot keyboard & mouse
 
             uint8_t epIn = 0, epOut = 0;
             for (int k = 0; k < alt->bNumEndpoints; ++k) {
@@ -288,20 +290,6 @@ bool detectGenericHidEndpoints(libusb_device* dev, DetectedPad& out) {
             out.epOut = epOut;
             out.kbdInterfaceNum = 0xFF;
             found = true;
-        }
-    }
-
-    if (found) {
-        for (int i = 0; i < cfg->bNumInterfaces; ++i) {
-            const struct libusb_interface* intf = &cfg->interface[i];
-            for (int a = 0; a < intf->num_altsetting; ++a) {
-                const struct libusb_interface_descriptor* alt = &intf->altsetting[a];
-                if (alt->bInterfaceClass == 0x03 && alt->bInterfaceSubClass == 1 && alt->bInterfaceProtocol == 1 &&
-                    alt->bInterfaceNumber != out.interfaceNum) {
-                    out.kbdInterfaceNum = alt->bInterfaceNumber;
-                    break;
-                }
-            }
         }
     }
 
@@ -476,8 +464,14 @@ struct Device {
 
 std::mutex g_mutex;
 std::vector<std::unique_ptr<Device>> g_devices;
+std::set<uint64_t> g_ignored;
 std::thread g_scanner;
 std::atomic<bool> g_running{false};
+
+uint64_t deviceKey(uint8_t bus, uint8_t addr, uint16_t vid, uint16_t pid) {
+    return (static_cast<uint64_t>(bus) << 40) | (static_cast<uint64_t>(addr) << 32) |
+           (static_cast<uint64_t>(vid) << 16) | static_cast<uint64_t>(pid);
+}
 
 int freeSlot() {
     for (int s = 0; s < kMaxUsbPads; ++s) {
@@ -590,9 +584,18 @@ void sendInitHandshake(Device& d) {
         if (p_sceUsbdControlTransfer) {
             uint8_t reportDesc[512] = {};
             int r = p_sceUsbdControlTransfer(d.handle, 0x81, 0x06, 0x2200, d.interfaceNum, reportDesc, sizeof(reportDesc), 200);
-            if (r > 0 && parseHidDescriptor(d.hidCtx, reportDesc, static_cast<size_t>(r), d.vid, d.pid)) {
-                d.hidConfigured = true;
-                XC_LOGI("usb pad %d: Generic HID descriptor parsed (%d bytes)", d.slot, r);
+            if (r > 0) {
+                if (isKeyboardOrMouseReportDescriptor(reportDesc, static_cast<size_t>(r)) ||
+                    !isGamepadReportDescriptor(reportDesc, static_cast<size_t>(r))) {
+                    XC_LOGI("usb pad %d: Generic HID interface %u is keyboard/mouse or non-gamepad, detaching", d.slot, d.interfaceNum);
+                    d.stop = true;
+                    d.dead = true;
+                    return;
+                }
+                if (parseHidDescriptor(d.hidCtx, reportDesc, static_cast<size_t>(r), d.vid, d.pid)) {
+                    d.hidConfigured = true;
+                    XC_LOGI("usb pad %d: Generic HID descriptor parsed (%d bytes)", d.slot, r);
+                }
             }
         }
     }
@@ -744,9 +747,6 @@ void closeDevice(Device& d) {
     if (d.thread.joinable()) d.thread.join();
     if (d.attached) usbPadDetached(d.slot);
     if (d.handle) {
-        if (d.kbdInterfaceNum != 0xFF && p_sceUsbdReleaseInterface) {
-            p_sceUsbdReleaseInterface(d.handle, d.kbdInterfaceNum);
-        }
         if (p_sceUsbdReleaseInterface) {
             p_sceUsbdReleaseInterface(d.handle, d.interfaceNum);
         }
@@ -762,6 +762,7 @@ void scan() {
     if (!usbPadsEnabled()) {
         for (auto& d : g_devices) closeDevice(*d);
         g_devices.clear();
+        g_ignored.clear();
         return;
     }
 
@@ -790,6 +791,7 @@ void scan() {
     int32_t count = p_sceUsbdGetDeviceList(&list);
     if (count <= 0 || !list) return;
 
+    std::set<uint64_t> presentKeys;
     for (int i = 0; i < count; ++i) {
         libusb_device* dev = list[i];
         if (!dev) continue;
@@ -799,6 +801,10 @@ void scan() {
 
         struct libusb_device_descriptor desc{};
         if (p_sceUsbdGetDeviceDescriptor(dev, &desc) != 0) continue;
+
+        const uint64_t key = deviceKey(bus, addr, desc.idVendor, desc.idProduct);
+        presentKeys.insert(key);
+        if (g_ignored.count(key) != 0) continue;
 
         // Skip if already managed (by bus/address or VID/PID/interface if bus/addr unavailable)
         bool alreadyOpen = false;
@@ -816,7 +822,10 @@ void scan() {
         if (alreadyOpen) continue;
 
         DetectedPad det;
-        if (!identifyController(dev, desc, det)) continue;
+        if (!identifyController(dev, desc, det)) {
+            g_ignored.insert(key);
+            continue;
+        }
 
         int slot = freeSlot();
         if (slot < 0) {
@@ -827,14 +836,23 @@ void scan() {
         libusb_device_handle* h = nullptr;
         if (p_sceUsbdOpen(dev, &h) != 0 || !h) {
             XC_LOGW("usb pad: sceUsbdOpen failed for %s (%04x:%04x)", det.name.c_str(), desc.idVendor, desc.idProduct);
+            g_ignored.insert(key);
             continue;
         }
 
-        // Detach secondary composite keyboard if present (prevents OS input hijack)
-        if (det.kbdInterfaceNum != 0xFF) {
-            if (p_sceUsbdDetachKernelDriver) p_sceUsbdDetachKernelDriver(h, det.kbdInterfaceNum);
-            if (p_sceUsbdClaimInterface) p_sceUsbdClaimInterface(h, det.kbdInterfaceNum);
-            XC_LOGI("usb pad: detached secondary composite keyboard interface %d", det.kbdInterfaceNum);
+        // For GenericHid, verify HID report descriptor BEFORE detaching kernel driver so keyboards/mice
+        // are never severed from Orbis libSceKeyboard / libSceMouse.
+        if (det.protocol == UsbPadProtocol::GenericHid && p_sceUsbdControlTransfer) {
+            uint8_t reportDesc[512] = {};
+            int r = p_sceUsbdControlTransfer(h, 0x81, 0x06, 0x2200, det.interfaceNum, reportDesc, sizeof(reportDesc), 200);
+            if (r > 0 && (isKeyboardOrMouseReportDescriptor(reportDesc, static_cast<size_t>(r)) ||
+                          !isGamepadReportDescriptor(reportDesc, static_cast<size_t>(r)))) {
+                XC_LOGI("usb pad: ignoring non-gamepad HID device (%04x:%04x, if %u)",
+                        desc.idVendor, desc.idProduct, det.interfaceNum);
+                p_sceUsbdClose(h);
+                g_ignored.insert(key);
+                continue;
+            }
         }
 
         // Set alt setting if needed (e.g. Xbox One GIP alt 1)
@@ -846,6 +864,7 @@ void scan() {
         if (p_sceUsbdClaimInterface && p_sceUsbdClaimInterface(h, det.interfaceNum) != 0) {
             XC_LOGW("usb pad: claim interface %d failed for %s", det.interfaceNum, det.name.c_str());
             p_sceUsbdClose(h);
+            g_ignored.insert(key);
             continue;
         }
 
@@ -862,10 +881,15 @@ void scan() {
         d->altSetting = det.altSetting;
         d->epIn = det.epIn;
         d->epOut = det.epOut;
-        d->kbdInterfaceNum = det.kbdInterfaceNum;
+        d->kbdInterfaceNum = 0xFF;
         d->thread = std::thread(readLoop, d.get());
 
         g_devices.push_back(std::move(d));
+    }
+
+    for (auto it = g_ignored.begin(); it != g_ignored.end();) {
+        if (presentKeys.count(*it) == 0) it = g_ignored.erase(it);
+        else ++it;
     }
 
     p_sceUsbdFreeDeviceList(list);
@@ -883,6 +907,7 @@ void scanLoop() {
     std::lock_guard<std::mutex> lock(g_mutex);
     for (auto& d : g_devices) closeDevice(*d);
     g_devices.clear();
+    g_ignored.clear();
     XC_LOGI("usb pad: PS4 USB scan loop terminated");
 }
 

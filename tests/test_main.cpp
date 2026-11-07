@@ -773,11 +773,21 @@ static void testDetailsHydrationAndPlaytimeBadge() {
     app.handle(in); // Opens Details
 
     // Detail tile must have description, rating, publisher, categories, heroUrl hydrated!
+    // And since description is < 80 chars (static fallback length), detailWanted() must still request full Store hydration!
+    CHECK(app.detailWanted(1000) == "PROD_FULL_DATA");
+
+    // Once setDetailInfo delivers a full description (>= 80 chars), detailWanted() returns empty and Detail tile upgrades to the full description
+    const std::string longDesc =
+        "This is the full localized Store API description of the game with more than eighty characters of detailed text.";
+    app.setDetailInfo("PROD_FULL_DATA", longDesc, "Awesome Studio", {"Action", "Adventure"},
+                      "https://example.com/hero.jpg", "14+", "ClassInd", {"Violência"});
+    CHECK(app.detailWanted(7000).empty());
+
     ui::NavInput acceptInDetails;
     acceptInDetails.accept = true;
     ui::UiEvent ev = app.handle(acceptInDetails);
     CHECK(ev.action == ui::Action::Play);
-    CHECK(ev.game.description == "Full detailed description of the game.");
+    CHECK(ev.game.description == longDesc);
     CHECK(ev.game.publisher == "Awesome Studio");
     CHECK(ev.game.ratingAge == "14+");
     CHECK(ev.game.ratingSystem == "ClassInd");
@@ -9852,6 +9862,184 @@ static void testMilestone5TransmissionQualityAndStreamReload() {
     }
 }
 
+static void testMilestone6UsbKeyboardMouseIsolation() {
+    using namespace xc::input;
+
+    // 1. Boot protocol keyboard and mouse interface filtering
+    CHECK(isBootKeyboardOrMouse(0x03, 0x01, 0x01));   // Boot Keyboard
+    CHECK(isBootKeyboardOrMouse(0x03, 0x00, 0x01));   // Non-boot subclass Keyboard
+    CHECK(isBootKeyboardOrMouse(0x03, 0x01, 0x02));   // Boot Mouse
+    CHECK(isBootKeyboardOrMouse(0x03, 0x00, 0x02));   // Non-boot subclass Mouse
+    CHECK(!isBootKeyboardOrMouse(0x03, 0x00, 0x00));  // Standard HID Gamepad (e.g. DualShock 4)
+    CHECK(!isBootKeyboardOrMouse(0xFF, 0x5D, 0x01));  // XInput
+    CHECK(!isBootKeyboardOrMouse(0xFF, 0x47, 0xD0));  // GIP
+
+    // 2. HID report descriptor collection classification
+    // 2a. Standard HID Keyboard report descriptor (Usage Page 0x01 Generic Desktop, Usage 0x06 Keyboard, Collection Application)
+    const uint8_t kbdReportDesc[] = {
+        0x05, 0x01,        // Usage Page (Generic Desktop)
+        0x09, 0x06,        // Usage (Keyboard)
+        0xA1, 0x01,        // Collection (Application)
+        0x05, 0x07,        //   Usage Page (Keyboard/Keypad)
+        0x19, 0xE0,        //   Usage Minimum (224)
+        0x29, 0xE7,        //   Usage Maximum (231)
+        0x15, 0x00,        //   Logical Minimum (0)
+        0x25, 0x01,        //   Logical Maximum (1)
+        0x75, 0x01,        //   Report Size (1)
+        0x95, 0x08,        //   Report Count (8)
+        0x81, 0x02,        //   Input (Data,Var,Abs)
+        0xC0               // End Collection
+    };
+    CHECK(isKeyboardOrMouseReportDescriptor(kbdReportDesc, sizeof(kbdReportDesc)));
+    CHECK(!isGamepadReportDescriptor(kbdReportDesc, sizeof(kbdReportDesc)));
+
+    // 2b. Standard HID Mouse report descriptor (Usage Page 0x01 Generic Desktop, Usage 0x02 Mouse, Collection Application)
+    const uint8_t mouseReportDesc[] = {
+        0x05, 0x01,        // Usage Page (Generic Desktop)
+        0x09, 0x02,        // Usage (Mouse)
+        0xA1, 0x01,        // Collection (Application)
+        0x09, 0x01,        //   Usage (Pointer)
+        0xA1, 0x00,        //   Collection (Physical)
+        0x05, 0x09,        //     Usage Page (Button)
+        0x19, 0x01,        //     Usage Minimum (1)
+        0x29, 0x05,        //     Usage Maximum (5)
+        0x15, 0x00,        //     Logical Minimum (0)
+        0x25, 0x01,        //     Logical Maximum (1)
+        0x95, 0x05,        //     Report Count (5)
+        0x75, 0x01,        //     Report Size (1)
+        0x81, 0x02,        //     Input (Data,Var,Abs)
+        0x05, 0x01,        //     Usage Page (Generic Desktop)
+        0x09, 0x30,        //     Usage (X)
+        0x09, 0x31,        //     Usage (Y)
+        0x15, 0x81,        //     Logical Minimum (-127)
+        0x25, 0x7F,        //     Logical Maximum (127)
+        0x75, 0x08,        //     Report Size (8)
+        0x95, 0x02,        //     Report Count (2)
+        0x81, 0x06,        //     Input (Data,Var,Rel)
+        0xC0,              //   End Collection
+        0xC0               // End Collection
+    };
+    CHECK(isKeyboardOrMouseReportDescriptor(mouseReportDesc, sizeof(mouseReportDesc)));
+    CHECK(!isGamepadReportDescriptor(mouseReportDesc, sizeof(mouseReportDesc)));
+
+    // 2c. Composite Keyboard + Mouse HID report descriptor (2.4GHz wireless combo receiver)
+    const uint8_t compositeKbdMouseReportDesc[] = {
+        0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01, 0x05, 0x07, 0x19, 0x00, 0x29, 0x65, 0x81, 0x00, 0xC0,
+        0x05, 0x01, 0x09, 0x02, 0xA1, 0x01, 0x85, 0x02, 0x09, 0x01, 0xA1, 0x00, 0x05, 0x09, 0x81, 0x02, 0xC0, 0xC0
+    };
+    CHECK(isKeyboardOrMouseReportDescriptor(compositeKbdMouseReportDesc, sizeof(compositeKbdMouseReportDesc)));
+    CHECK(!isGamepadReportDescriptor(compositeKbdMouseReportDesc, sizeof(compositeKbdMouseReportDesc)));
+
+    // 2d. Gaming Keyboard with macro Joystick collection (0x01:0x06 + 0x01:0x04) — must be classified as keyboard/mouse, not gamepad
+    const uint8_t gamingKbdWithMacroJoystickDesc[] = {
+        0x05, 0x01, 0x09, 0x06, 0xA1, 0x01, 0x85, 0x01, 0x05, 0x07, 0x81, 0x02, 0xC0,
+        0x05, 0x01, 0x09, 0x04, 0xA1, 0x01, 0x85, 0x03, 0x05, 0x09, 0x81, 0x02, 0xC0
+    };
+    CHECK(isKeyboardOrMouseReportDescriptor(gamingKbdWithMacroJoystickDesc, sizeof(gamingKbdWithMacroJoystickDesc)));
+    CHECK(!isGamepadReportDescriptor(gamingKbdWithMacroJoystickDesc, sizeof(gamingKbdWithMacroJoystickDesc)));
+
+    // 2e. Valid Gamepad HID report descriptor (Usage Page 0x01, Usage 0x05 Gamepad, with nested Physical Pointer 0x01)
+    const uint8_t gamepadReportDesc[] = {
+        0x05, 0x01,        // Usage Page (Generic Desktop)
+        0x09, 0x05,        // Usage (Game Pad)
+        0xA1, 0x01,        // Collection (Application)
+        0x09, 0x01,        //   Usage (Pointer) — nested inside Application collection
+        0xA1, 0x00,        //   Collection (Physical)
+        0x09, 0x30,        //     Usage (X)
+        0x09, 0x31,        //     Usage (Y)
+        0x15, 0x00,        //     Logical Minimum (0)
+        0x26, 0xFF, 0x00,  //     Logical Maximum (255)
+        0x75, 0x08,        //     Report Size (8)
+        0x95, 0x02,        //     Report Count (2)
+        0x81, 0x02,        //     Input (Data,Var,Abs)
+        0xC0,              //   End Collection
+        0x05, 0x09,        //   Usage Page (Button)
+        0x19, 0x01,        //   Usage Minimum (1)
+        0x29, 0x0E,        //   Usage Maximum (14)
+        0x15, 0x00,        //   Logical Minimum (0)
+        0x25, 0x01,        //   Logical Maximum (1)
+        0x75, 0x01,        //   Report Size (1)
+        0x95, 0x0E,        //   Report Count (14)
+        0x81, 0x02,        //   Input (Data,Var,Abs)
+        0xC0               // End Collection
+    };
+    CHECK(!isKeyboardOrMouseReportDescriptor(gamepadReportDesc, sizeof(gamepadReportDesc)));
+    CHECK(isGamepadReportDescriptor(gamepadReportDesc, sizeof(gamepadReportDesc)));
+
+    // 3. Configuration Descriptors across findUsbPadInterface, probeUsbPadPs5, and probeUsbPadPs4
+    const uint8_t bootKbdConfig[] = {
+        0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x00, 0xA0, 0x32,
+        0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01, 0x01, 0x00,  // HID Boot Keyboard (03/01/01)
+        0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0A,
+    };
+    const uint8_t bootMouseConfig[] = {
+        0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x00, 0xA0, 0x32,
+        0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01, 0x02, 0x00,  // HID Boot Mouse (03/01/02)
+        0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0A,
+    };
+    const uint8_t compositeGamingKbdMouseConfig[] = {
+        0x09, 0x02, 0x4E, 0x00, 0x03, 0x01, 0x00, 0xA0, 0xFA,
+        0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01, 0x01, 0x00,  // if 0: Boot Keyboard (03/01/01)
+        0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x01,
+        0x09, 0x04, 0x01, 0x00, 0x01, 0x03, 0x01, 0x02, 0x00,  // if 1: Boot Mouse (03/01/02)
+        0x07, 0x05, 0x82, 0x03, 0x08, 0x00, 0x01,
+        0x09, 0x04, 0x02, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00,  // if 2: Generic HID NKRO/Media (03/00/00)
+        0x07, 0x05, 0x83, 0x03, 0x10, 0x00, 0x01,
+    };
+    const uint8_t genericHidConfig[] = {
+        0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0xA0, 0xFA,
+        0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00,  // HID 03/00/00
+        0x07, 0x05, 0x84, 0x03, 0x40, 0x00, 0x05,
+        0x07, 0x05, 0x03, 0x03, 0x40, 0x00, 0x05,
+    };
+    const uint8_t xboxGipConfig[] = {
+        0x09, 0x02, 0x20, 0x00, 0x01, 0x01, 0x00, 0xA0, 0xFA,
+        0x09, 0x04, 0x00, 0x00, 0x02, 0xFF, 0x47, 0xD0, 0x00,  // GIP FF/47/D0
+        0x07, 0x05, 0x02, 0x03, 0x40, 0x00, 0x04,
+        0x07, 0x05, 0x82, 0x03, 0x40, 0x00, 0x04,
+    };
+    const uint8_t xboxXInputConfig[] = {
+        0x09, 0x02, 0x20, 0x00, 0x01, 0x01, 0x00, 0xA0, 0xFA,
+        0x09, 0x04, 0x00, 0x00, 0x02, 0xFF, 0x5D, 0x01, 0x00,  // XInput FF/5D/01
+        0x07, 0x05, 0x81, 0x03, 0x20, 0x00, 0x01,
+        0x07, 0x05, 0x01, 0x03, 0x20, 0x00, 0x08,
+    };
+
+    // Boot Keyboard & Boot Mouse rejected everywhere
+    CHECK(findUsbPadInterface(bootKbdConfig, sizeof(bootKbdConfig)).protocol == UsbPadProtocol::None);
+    CHECK(findUsbPadInterface(bootMouseConfig, sizeof(bootMouseConfig)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs5(0x046D, 0xC31C, bootKbdConfig, sizeof(bootKbdConfig)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs5(0x046D, 0xC077, bootMouseConfig, sizeof(bootMouseConfig)).protocol == UsbPadProtocol::None);
+    CHECK(!probeUsbPadPs4(0x046D, 0xC31C, bootKbdConfig, sizeof(bootKbdConfig)));
+    CHECK(!probeUsbPadPs4(0x046D, 0xC077, bootMouseConfig, sizeof(bootMouseConfig)));
+
+    // Composite Gaming Keyboard + Mouse (even with Razer VID 0x1532 and secondary 03/00/00 interface) rejected everywhere
+    CHECK(findUsbPadInterface(compositeGamingKbdMouseConfig, sizeof(compositeGamingKbdMouseConfig)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs5(0x1532, 0x0221, compositeGamingKbdMouseConfig, sizeof(compositeGamingKbdMouseConfig)).protocol == UsbPadProtocol::None);
+    CHECK(!probeUsbPadPs4(0x1532, 0x0221, compositeGamingKbdMouseConfig, sizeof(compositeGamingKbdMouseConfig)));
+
+    // Non-boot Generic HID (03/00/00) with Keyboard or Mouse report descriptor rejected everywhere
+    CHECK(findUsbPadInterface(genericHidConfig, sizeof(genericHidConfig), kbdReportDesc, sizeof(kbdReportDesc)).protocol == UsbPadProtocol::None);
+    CHECK(findUsbPadInterface(genericHidConfig, sizeof(genericHidConfig), mouseReportDesc, sizeof(mouseReportDesc)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs5(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), kbdReportDesc, sizeof(kbdReportDesc)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs5(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), mouseReportDesc, sizeof(mouseReportDesc)).protocol == UsbPadProtocol::None);
+    CHECK(!probeUsbPadPs4(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), kbdReportDesc, sizeof(kbdReportDesc)));
+    CHECK(!probeUsbPadPs4(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), mouseReportDesc, sizeof(mouseReportDesc)));
+
+    // Valid Gamepads accepted appropriately on PS5 and PS4
+    CHECK(findUsbPadInterface(genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)).protocol == UsbPadProtocol::DualShock4);
+    CHECK(probeUsbPadPs5(0x054C, 0x09CC, genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)).protocol == UsbPadProtocol::DualShock4);
+    CHECK(probeUsbPadPs4(0x054C, 0x09CC, genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)));
+    CHECK(probeUsbPadPs5(0x045E, 0x0B12, xboxGipConfig, sizeof(xboxGipConfig)).protocol == UsbPadProtocol::Gip);
+    CHECK(probeUsbPadPs4(0x045E, 0x0B12, xboxGipConfig, sizeof(xboxGipConfig)));
+    CHECK(probeUsbPadPs5(0x045E, 0x028E, xboxXInputConfig, sizeof(xboxXInputConfig)).protocol == UsbPadProtocol::XInput);
+    CHECK(probeUsbPadPs4(0x045E, 0x028E, xboxXInputConfig, sizeof(xboxXInputConfig)));
+
+    // DualSense (054C:0CE6) skipped on PS5 (native ScePad) and accepted on PS4 (USB driver)
+    CHECK(probeUsbPadPs5(0x054C, 0x0CE6, genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)).protocol == UsbPadProtocol::None);
+    CHECK(probeUsbPadPs4(0x054C, 0x0CE6, genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)));
+}
+
 int main() {
     testPs4VideoPipelineAndSse2Converter();
     testTrophySystem();
@@ -9958,6 +10146,7 @@ int main() {
     testFreeAccountPlayability();
     testDetailsHydrationAndPlaytimeBadge();
     testMilestone5TransmissionQualityAndStreamReload();
+    testMilestone6UsbKeyboardMouseIsolation();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;
