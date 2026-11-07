@@ -279,7 +279,7 @@ void signInAndLoad(auth::AuthManager& am, xcloud::GssvClient& gssv) {
     platform::notify(ui::trf(ui::Str::SignedInAs, am.profile().gamertag), "signed in (notification)");
     static bool updateChecked = false;
     static platform::Thread s_updateThread;
-    if (!updateChecked && (g_autoplay.title.empty() || !g_autoplay.updateFeed.empty())) {
+    if (!updateChecked && (g_autoplay.title.empty() || g_autoplay.title == "UPDATE" || !g_autoplay.updateFeed.empty())) {
         updateChecked = true;
         platform::startThread(s_updateThread, [] {
             platform::setThreadAffinity(platform::ThreadRole::Worker, "xcloud_upd");

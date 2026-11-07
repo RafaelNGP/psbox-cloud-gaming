@@ -930,10 +930,12 @@ static std::string storedZip(const std::vector<std::pair<std::string, std::strin
 static void testUpdater() {
     using namespace xc::app;
     CHECK(contentVersionOf("v0.8.1") == "00.801.000" && contentVersionOf("1.10.0").empty());
-    CHECK(contentVersionOf("v1.6.3") == "01.603.000");
+    CHECK(contentVersionOf("v1.6.3") == "01.603.000" && contentVersionOf("v2.0.0") == "02.000.000" && contentVersionOf("v0.0.1") == "00.001.000");
     CHECK(isNewerVersion("v1.6.3", "1.6.2") && !isNewerVersion("v1.6.3", "1.6.3") && !isNewerVersion("1.6.2", "v1.6.3"));
+    CHECK(isNewerVersion("v1.7.0", "1.6.99") && !isNewerVersion("", "1.6.2") && !isNewerVersion("1.6.2", ""));
     CHECK(updatablePath("eboot.bin") && updatablePath("sce_sys/param.json") && updatablePath("assets/fonts/a.ttf"));
     CHECK(updatablePath("assets/PSBox_Trophies.elf") && updatablePath("sce_module/libc.prx"));
+    CHECK(updatablePath("assets/media_showcase/01_home_screen.png") && updatablePath("licenses/Anime4K-MIT.txt"));
     CHECK(!updatablePath("../eboot.bin") && !updatablePath("/data/x") && !updatablePath("a//b") && !updatablePath("a/./b"));
     CHECK(!updatablePath("account.json") && !updatablePath("settings.json") && !updatablePath("imgcache/x"));
     CHECK(!updatablePath("update.old/eboot.bin") && !updatablePath("update.journal") && !updatablePath("frame.ppm"));

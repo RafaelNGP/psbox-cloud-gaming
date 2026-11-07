@@ -11,6 +11,8 @@
 #include "util/log.h"
 
 #include <cstdlib>
+#include <cstring>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <csignal>
 #include <unistd.h>
@@ -107,6 +109,18 @@ bool isInstalledCopy(const std::string& dir) {
     // via the sandbox mount (/mnt/sandbox/PPSA99810_000/app0) or standard homebrew folder.
     if (::stat("/mnt/sandbox/PPSA99810_000/app0/eboot.bin", &running) == 0 && here.st_ino == running.st_ino) {
         return true;
+    }
+    if (DIR* d = ::opendir("/mnt/sandbox")) {
+        while (dirent* e = ::readdir(d)) {
+            if (std::strstr(e->d_name, "PPSA99810") != nullptr) {
+                std::string p = std::string("/mnt/sandbox/") + e->d_name + "/app0/eboot.bin";
+                if (::stat(p.c_str(), &running) == 0 && here.st_ino == running.st_ino) {
+                    ::closedir(d);
+                    return true;
+                }
+            }
+        }
+        ::closedir(d);
     }
     return dir == "/data/homebrew/PPSA99810";
 }
