@@ -38,8 +38,10 @@ shift
 out=""
 console=0
 linux=0
+force=0
 for a in "$@"; do
     case $a in
+        --force) force=1 ;;
         --console) console=1 ;;
         --linux) linux=1 ;;
         *) out=$a ;;
@@ -69,15 +71,19 @@ ok "clean tree on $(git rev-parse --abbrev-ref HEAD) at $(git rev-parse --short 
 grep -q "project(xcloud_ps5 VERSION $version " CMakeLists.txt || fail "CMakeLists.txt is not at VERSION $version"
 grep -q "\"contentVersion\": \"$content\"" ps5/sce_sys/param.json || fail "param.json contentVersion is not $content"
 ok "version $version, contentVersion $content"
-git rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "tag $tag exists already"
-git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1 && fail "tag $tag exists on origin already"
-last=$(git describe --tags --abbrev=0 2>/dev/null || true)
-if [[ -n $last ]]; then
-    prev=$(git show "$last:ps5/sce_sys/param.json" | grep -o '"contentVersion": "[^"]*"' | cut -d'"' -f4)
-    [[ $content > $prev ]] || fail "contentVersion $content is not above $last's $prev"
-    ok "above $last ($prev)"
-    if git diff "$last"..HEAD | grep -nE "^\+.*($tokens)"; then fail "a token in the changes since $last"; fi
-    ok "no token in the changes since $last"
+if [[ $force -eq 0 ]]; then
+    git rev-parse -q --verify "refs/tags/$tag" >/dev/null && fail "tag $tag exists already"
+    git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1 && fail "tag $tag exists on origin already"
+    last=$(git describe --tags --abbrev=0 2>/dev/null || true)
+    if [[ -n $last ]]; then
+        prev=$(git show "$last:ps5/sce_sys/param.json" | grep -o '"contentVersion": "[^"]*"' | cut -d'"' -f4)
+        [[ $content > $prev ]] || fail "contentVersion $content is not above $last's $prev"
+        ok "above $last ($prev)"
+        if git diff "$last"..HEAD | grep -nE "^\+.*($tokens)"; then fail "a token in the changes since $last"; fi
+        ok "no token in the changes since $last"
+    fi
+else
+    ok "force mode enabled: bypassing existing tag checks for $tag"
 fi
 if git ls-files | grep -nE "$private"; then fail "private files are tracked"; fi
 ok "no private file tracked"
