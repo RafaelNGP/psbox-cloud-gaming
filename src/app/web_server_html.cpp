@@ -225,7 +225,20 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  overflow: hidden;
+  overflow: visible;
+  padding-left: 28px;
+  padding-right: 28px;
+  box-sizing: border-box;
+}
+#mod_stick_left::before {
+  content: '';
+  position: absolute;
+  top: -10px;
+  bottom: -10px;
+  left: -40px;
+  right: 0;
+  pointer-events: auto;
+  touch-action: none;
 }
 .gamepad-container {
   position: relative;
@@ -511,8 +524,8 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   }
 }
 
-/* Landscape Layout Positions (Exact Layout Studio Alignment) */
-@media (orientation: landscape), (max-height: 520px) {
+//* Landscape Layout Positions (Exact Layout Studio Alignment) */
+@media (orientation: landscape) and (min-width: 521px) {
   .gamepad-status-bar {
     display: none !important;
   }
@@ -522,7 +535,10 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
     display: flex;
     justify-content: center;
     align-items: flex-start;
-    overflow: hidden;
+    overflow: visible;
+    padding-left: 28px;
+    padding-right: 28px;
+    box-sizing: border-box;
   }
   #gamepadArea {
     width: 915px !important;
@@ -547,7 +563,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   #gamepadArea #mod_stick_right { left: 545px; top: 240px; width: 166px; height: 166px; transform: scale(1.2); }
 }
 
-/* Fullscreen Mode (Landscape) */
+/* Fullscreen Mode */
 #gamepadCard.gamepad-fullscreen, #gamepadCard:fullscreen, #gamepadCard:-webkit-full-screen {
   position: fixed !important;
   inset: 0 !important;
@@ -578,42 +594,80 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 #gamepadCard:-webkit-full-screen .fs-only-exit {
   display: inline-flex !important;
 }
-#gamepadCard.gamepad-fullscreen .gamepad-viewport-wrapper,
-#gamepadCard:fullscreen .gamepad-viewport-wrapper,
-#gamepadCard:-webkit-full-screen .gamepad-viewport-wrapper {
-  width: calc(915px * var(--gp-fs-scale, 0.85)) !important;
-  height: calc(412px * var(--gp-fs-scale, 0.85)) !important;
-  max-width: 100% !important;
-  max-height: 100% !important;
-  display: flex !important;
-  align-items: flex-start !important;
-  justify-content: center !important;
-  overflow: hidden !important;
-  position: relative !important;
+
+/* Fullscreen Mode - Portrait */
+@media (orientation: portrait), (max-width: 520px) {
+  #gamepadCard.gamepad-fullscreen .gamepad-viewport-wrapper,
+  #gamepadCard:fullscreen .gamepad-viewport-wrapper,
+  #gamepadCard:-webkit-full-screen .gamepad-viewport-wrapper {
+    width: calc(412px * var(--gp-fs-scale, 0.82)) !important;
+    height: calc(680px * var(--gp-fs-scale, 0.82)) !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    overflow: visible !important;
+    position: relative !important;
+    padding-left: 28px !important;
+    padding-right: 28px !important;
+    box-sizing: border-box !important;
+  }
+  #gamepadCard.gamepad-fullscreen #gamepadArea,
+  #gamepadCard:fullscreen #gamepadArea,
+  #gamepadCard:-webkit-full-screen #gamepadArea {
+    width: 412px !important;
+    min-width: 412px !important;
+    max-width: 412px !important;
+    flex-shrink: 0 !important;
+    height: 680px !important;
+    transform: scale(var(--gp-fs-scale, 0.82)) !important;
+    transform-origin: top center !important;
+  }
 }
-#gamepadCard.gamepad-fullscreen #gamepadArea,
-#gamepadCard:fullscreen #gamepadArea,
-#gamepadCard:-webkit-full-screen #gamepadArea {
-  width: 915px !important;
-  min-width: 915px !important;
-  max-width: 915px !important;
-  flex-shrink: 0 !important;
-  height: 412px !important;
-  transform: scale(var(--gp-fs-scale, 0.85)) !important;
-  transform-origin: top center !important;
+
+/* Fullscreen Mode - Landscape */
+@media (orientation: landscape) and (min-width: 521px) {
+  #gamepadCard.gamepad-fullscreen .gamepad-viewport-wrapper,
+  #gamepadCard:fullscreen .gamepad-viewport-wrapper,
+  #gamepadCard:-webkit-full-screen .gamepad-viewport-wrapper {
+    width: calc(915px * var(--gp-fs-scale, 0.85)) !important;
+    height: calc(412px * var(--gp-fs-scale, 0.85)) !important;
+    max-width: 100% !important;
+    max-height: 100% !important;
+    display: flex !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    overflow: visible !important;
+    position: relative !important;
+    padding-left: 28px !important;
+    padding-right: 28px !important;
+    box-sizing: border-box !important;
+  }
+  #gamepadCard.gamepad-fullscreen #gamepadArea,
+  #gamepadCard:fullscreen #gamepadArea,
+  #gamepadCard:-webkit-full-screen #gamepadArea {
+    width: 915px !important;
+    min-width: 915px !important;
+    max-width: 915px !important;
+    flex-shrink: 0 !important;
+    height: 412px !important;
+    transform: scale(var(--gp-fs-scale, 0.85)) !important;
+    transform-origin: top center !important;
+  }
+  #gamepadCard.gamepad-fullscreen #mod_btn_lt { left: 10px !important; top: 10px !important; width: 94px !important; height: 54px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_btn_lb { left: 110px !important; top: 11px !important; width: 76px !important; height: 52px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_btn_ls { left: 192px !important; top: 11px !important; width: 54px !important; height: 52px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_player_bar { left: 381px !important; top: 12px !important; width: 152px !important; height: 44px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_center_sys { left: 342px !important; top: 66px !important; width: 230px !important; height: 56px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_btn_rs { left: 669px !important; top: 11px !important; width: 54px !important; height: 52px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_btn_rb { left: 729px !important; top: 11px !important; width: 76px !important; height: 52px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_btn_rt { left: 811px !important; top: 10px !important; width: 94px !important; height: 54px !important; transform: scale(1.0) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_stick_left { left: 32px !important; top: 97px !important; width: 166px !important; height: 166px !important; transform: scale(1.3) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_abxy { left: 712px !important; top: 97px !important; width: 176px !important; height: 176px !important; transform: scale(1.3) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_dpad { left: 205px !important; top: 242px !important; width: 160px !important; height: 160px !important; transform: scale(1.05) !important; }
+  #gamepadCard.gamepad-fullscreen #mod_stick_right { left: 545px !important; top: 240px !important; width: 166px !important; height: 166px !important; transform: scale(1.2) !important; }
 }
-#gamepadCard.gamepad-fullscreen #mod_btn_lt { left: 10px !important; top: 10px !important; width: 94px !important; height: 54px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_btn_lb { left: 110px !important; top: 11px !important; width: 76px !important; height: 52px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_btn_ls { left: 192px !important; top: 11px !important; width: 54px !important; height: 52px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_player_bar { left: 381px !important; top: 12px !important; width: 152px !important; height: 44px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_center_sys { left: 342px !important; top: 66px !important; width: 230px !important; height: 56px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_btn_rs { left: 669px !important; top: 11px !important; width: 54px !important; height: 52px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_btn_rb { left: 729px !important; top: 11px !important; width: 76px !important; height: 52px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_btn_rt { left: 811px !important; top: 10px !important; width: 94px !important; height: 54px !important; transform: scale(1.0) !important; }
-#gamepadCard.gamepad-fullscreen #mod_stick_left { left: 32px !important; top: 97px !important; width: 166px !important; height: 166px !important; transform: scale(1.3) !important; }
-#gamepadCard.gamepad-fullscreen #mod_abxy { left: 712px !important; top: 97px !important; width: 176px !important; height: 176px !important; transform: scale(1.3) !important; }
-#gamepadCard.gamepad-fullscreen #mod_dpad { left: 205px !important; top: 242px !important; width: 160px !important; height: 160px !important; transform: scale(1.05) !important; }
-#gamepadCard.gamepad-fullscreen #mod_stick_right { left: 545px !important; top: 240px !important; width: 166px !important; height: 166px !important; transform: scale(1.2) !important; }
 
 @media (max-width: 600px) {
   .nav-tabs { grid-template-columns: repeat(3, 1fr); }
@@ -623,7 +677,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   #tab-gamepad #gamepadCard { padding-left: 2px; padding-right: 2px; }
 }
 
-@media (orientation: landscape), (max-height: 520px) {
+@media (orientation: landscape) and (min-width: 521px) {
   .nav-tabs {
     grid-template-columns: repeat(6, 1fr);
     gap: 4px;
@@ -1226,6 +1280,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 <div id="toast" class="toast">Alterações salvas com sucesso!</div>
 
 <script>
+let isInitializing = true;
 const padFunctions = [
   "A (Sul / Cruz)", "B (Leste / Círculo)", "X (Oeste / Quadrado)", "Y (Norte / Triângulo)",
   "LB (L1)", "RB (R1)", "LT (L2)", "RT (R2)", "LS (L3)", "RS (R3)",
@@ -1659,6 +1714,7 @@ function resetKeyMap() {
 }
 
 function saveSettings() {
+  if (isInitializing) return;
   const padMap = [];
   for (let i = 0; i < 16; i++) {
     const sel = document.getElementById('pad_fn_' + i);
@@ -1702,9 +1758,11 @@ function onLightBarModeChange() {
 }
 
 function markSettingsChanged() {
+  if (isInitializing) return;
 }
 
 function saveGeneralSettings() {
+  if (isInitializing) return;
   const rawBitrate = parseInt(document.getElementById('inputBitrate').value, 10);
   const fpsEl = document.getElementById('selectFpsLimit');
   const payload = {
@@ -1741,6 +1799,7 @@ function updateCasLabel(val) {
 }
 
 function sendStreamParam(param, val) {
+  if (isInitializing) return;
   const body = {};
   body[param] = val;
   fetch('/api/stream', {
@@ -2112,11 +2171,19 @@ function applyLoadedSettings(s) {
   renderAllTouchpadGrids(s.touchpadShortcuts);
 }
 
+function syncFromHost() {
+  loadAllSettingsFromServer();
+}
+
 function loadAllSettingsFromServer() {
-  fetch('/api/settings').then(r => r.json()).then(applyLoadedSettings).catch(() => {
+  fetch('/api/settings').then(r => r.json()).then(s => {
+    applyLoadedSettings(s);
+    setTimeout(() => { isInitializing = false; }, 250);
+  }).catch(() => {
     renderPadMap();
     renderKeyMap();
     renderAllTouchpadGrids(currentSettings.touchpadShortcuts);
+    setTimeout(() => { isInitializing = false; }, 250);
   });
 }
 loadAllSettingsFromServer();
@@ -2159,8 +2226,8 @@ function toggleGamepadFullscreen() {
     } else if (card.webkitRequestFullscreen) {
       try { card.webkitRequestFullscreen(); } catch (_) {}
     }
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock('landscape').catch(() => {});
+    if (screen.orientation && screen.orientation.unlock) {
+      try { screen.orientation.unlock(); } catch (_) {}
     }
   } else {
     card.classList.remove('gamepad-fullscreen');
@@ -2266,6 +2333,15 @@ function saveStudioLayout() {
 }
 
 function applyStudioLayout() {
+  const isLandscape = window.innerWidth > window.innerHeight;
+  if (!isLandscape) {
+    document.querySelectorAll('.gamepad-module').forEach(m => {
+      m.style.removeProperty('left');
+      m.style.removeProperty('top');
+      m.style.removeProperty('transform');
+    });
+    return;
+  }
   if (!studioLayout || !studioLayout.modules) return;
   for (const [modId, conf] of Object.entries(studioLayout.modules)) {
     const el = document.getElementById(modId);
@@ -2458,7 +2534,8 @@ function initStudioDraggableModules() {
       const dy = (clientY - startY) / scale;
       const maxW = area.offsetWidth || 915;
       const maxH = area.offsetHeight || 412;
-      const newX = Math.max(0, Math.min(maxW - 40, origLeft + dx));
+      const minX = modId === 'mod_stick_left' ? -25 : 0;
+      const newX = Math.max(minX, Math.min(maxW - 40, origLeft + dx));
       const newY = Math.max(0, Math.min(maxH - 30, origTop + dy));
       mod.style.setProperty('left', Math.round(newX) + 'px', 'important');
       mod.style.setProperty('top', Math.round(newY) + 'px', 'important');
@@ -2594,8 +2671,10 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   const zone = document.getElementById(zoneId);
   const head = document.getElementById(headId);
   if (!zone || !head) return;
+  const modParent = zone.closest('.gamepad-module');
 
   let activeTouchId = null;
+  let activePointerId = null;
 
   function updateStick(clientX, clientY) {
     if (isStudioEditing) return;
@@ -2626,23 +2705,29 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
     padState[stickKeyX] = 0.0;
     padState[stickKeyY] = 0.0;
     activeTouchId = null;
+    activePointerId = null;
     sendPadState(false);
   }
 
-  zone.addEventListener('touchstart', (e) => {
+  const onTouchStart = (e) => {
     if (isStudioEditing) return;
     e.preventDefault();
     if (activeTouchId === null && e.changedTouches.length > 0) {
       activeTouchId = e.changedTouches[0].identifier;
       updateStick(e.changedTouches[0].clientX, e.changedTouches[0].clientY);
     }
-  }, { passive: false });
+  };
 
-  zone.addEventListener('touchmove', (e) => {
-    if (isStudioEditing) return;
-    e.preventDefault();
+  zone.addEventListener('touchstart', onTouchStart, { passive: false });
+  if (modParent && modParent !== zone) {
+    modParent.addEventListener('touchstart', onTouchStart, { passive: false });
+  }
+
+  window.addEventListener('touchmove', (e) => {
+    if (isStudioEditing || activeTouchId === null) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === activeTouchId) {
+        e.preventDefault();
         updateStick(e.changedTouches[i].clientX, e.changedTouches[i].clientY);
         break;
       }
@@ -2650,6 +2735,7 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
   }, { passive: false });
 
   const onTouchEnd = (e) => {
+    if (activeTouchId === null) return;
     for (let i = 0; i < e.changedTouches.length; i++) {
       if (e.changedTouches[i].identifier === activeTouchId) {
         resetStick();
@@ -2657,8 +2743,39 @@ function setupStick(zoneId, headId, stickKeyX, stickKeyY) {
       }
     }
   };
-  zone.addEventListener('touchend', onTouchEnd, { passive: false });
-  zone.addEventListener('touchcancel', onTouchEnd, { passive: false });
+  window.addEventListener('touchend', onTouchEnd, { passive: false });
+  window.addEventListener('touchcancel', onTouchEnd, { passive: false });
+
+  // Pointer events with setPointerCapture for smooth dragging to x = 0 (left screen edge)
+  const onPointerDown = (e) => {
+    if (isStudioEditing) return;
+    if (e.pointerType === 'touch') return;
+    if (activePointerId === null) {
+      activePointerId = e.pointerId;
+      try { zone.setPointerCapture(e.pointerId); } catch (_) {}
+      updateStick(e.clientX, e.clientY);
+    }
+  };
+
+  zone.addEventListener('pointerdown', onPointerDown);
+  if (modParent && modParent !== zone) {
+    modParent.addEventListener('pointerdown', onPointerDown);
+  }
+
+  window.addEventListener('pointermove', (e) => {
+    if (isStudioEditing || activePointerId === null) return;
+    if (e.pointerId === activePointerId) {
+      updateStick(e.clientX, e.clientY);
+    }
+  });
+
+  const onPointerUp = (e) => {
+    if (activePointerId !== null && e.pointerId === activePointerId) {
+      resetStick();
+    }
+  };
+  window.addEventListener('pointerup', onPointerUp);
+  window.addEventListener('pointercancel', onPointerUp);
 
   // Mouse fallback
   let isMouseDown = false;
@@ -2727,9 +2844,16 @@ function updateGamepadScale() {
     const h = window.innerHeight;
     const availW = container.clientWidth ? Math.max(200, container.clientWidth - 8) : (w - 28);
     const availH = container.clientHeight ? Math.max(150, container.clientHeight - 8) : (h - 20);
-    const scale = Math.min(1.2, Math.max(0.4, Math.min(availW / 915, availH / 412)));
-    document.documentElement.style.setProperty('--gp-fs-scale', scale.toFixed(3));
-    document.documentElement.style.setProperty('--gp-scale', scale.toFixed(3));
+    if (!isLandscape) {
+      const scale = Math.min(1.2, Math.max(0.4, Math.min(availW / 412, availH / 680)));
+      document.documentElement.style.setProperty('--gp-fs-scale', scale.toFixed(3));
+      document.documentElement.style.setProperty('--gp-scale', scale.toFixed(3));
+    } else {
+      const scale = Math.min(1.2, Math.max(0.4, Math.min(availW / 915, availH / 412)));
+      document.documentElement.style.setProperty('--gp-fs-scale', scale.toFixed(3));
+      document.documentElement.style.setProperty('--gp-scale', scale.toFixed(3));
+    }
+    applyStudioLayout();
     return;
   }
 
@@ -2750,6 +2874,7 @@ function updateGamepadScale() {
     const scale = Math.min(1, Math.max(0.35, Math.min(targetW / 915, targetH / 412)));
     document.documentElement.style.setProperty('--gp-scale', scale.toFixed(3));
   }
+  applyStudioLayout();
 }
 window.addEventListener('resize', updateGamepadScale);
 window.addEventListener('orientationchange', () => setTimeout(updateGamepadScale, 50));

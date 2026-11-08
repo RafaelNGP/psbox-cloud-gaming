@@ -491,129 +491,198 @@ bool coreStartup() {
             {
                 std::lock_guard<std::mutex> lock(g_settingsMutex);
                 if (root.has("voiceRouting")) {
-                    g_settings.voiceRouting = static_cast<int>(std::clamp<int64_t>(root["voiceRouting"].asInt(g_settings.voiceRouting), 0, 1));
-                    media::audioSetVoiceRouting(g_settings.voiceRouting);
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["voiceRouting"].asInt(g_settings.voiceRouting), 0, 1));
+                    if (val != g_settings.voiceRouting) {
+                        g_settings.voiceRouting = val;
+                        media::audioSetVoiceRouting(g_settings.voiceRouting);
+                        changed = true;
+                    }
                 }
                 if (root.has("maxBitrateMbps")) {
                     int raw = static_cast<int>(root["maxBitrateMbps"].asInt(g_settings.maxBitrateMbps));
-                    g_settings.maxBitrateMbps = (raw == -1 || raw >= 100) ? -1 : static_cast<int>(std::clamp(raw, 0, 50));
-                    changed = true;
+                    int val = (raw == -1 || raw >= 100) ? -1 : static_cast<int>(std::clamp(raw, 0, 50));
+                    if (val != g_settings.maxBitrateMbps) {
+                        g_settings.maxBitrateMbps = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("fpsLimit")) {
                     int val = static_cast<int>(root["fpsLimit"].asInt(g_settings.fpsLimit));
-                    if (val == 0 || val == 30 || val == 60 || val == 120) {
+                    if ((val == 0 || val == 30 || val == 60 || val == 120) && val != g_settings.fpsLimit) {
                         g_settings.fpsLimit = val;
                         changed = true;
                     }
                 }
                 if (root.has("highRefresh")) {
-                    g_settings.highRefresh = root["highRefresh"].asBool(g_settings.highRefresh);
-                    changed = true;
+                    bool val = root["highRefresh"].asBool(g_settings.highRefresh);
+                    if (val != g_settings.highRefresh) {
+                        g_settings.highRefresh = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("deadzoneLeft")) {
-                    g_settings.deadzoneLeft = static_cast<int>(std::clamp<int64_t>(root["deadzoneLeft"].asInt(g_settings.deadzoneLeft), 0, 50));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["deadzoneLeft"].asInt(g_settings.deadzoneLeft), 0, 50));
+                    if (val != g_settings.deadzoneLeft) {
+                        g_settings.deadzoneLeft = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("deadzoneRight")) {
-                    g_settings.deadzoneRight = static_cast<int>(std::clamp<int64_t>(root["deadzoneRight"].asInt(g_settings.deadzoneRight), 0, 50));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["deadzoneRight"].asInt(g_settings.deadzoneRight), 0, 50));
+                    if (val != g_settings.deadzoneRight) {
+                        g_settings.deadzoneRight = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("lightBarMode")) {
-                    g_settings.lightBarMode = static_cast<int>(std::clamp<int64_t>(root["lightBarMode"].asInt(g_settings.lightBarMode), 0, 2));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["lightBarMode"].asInt(g_settings.lightBarMode), 0, 2));
+                    if (val != g_settings.lightBarMode) {
+                        g_settings.lightBarMode = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("lightBarColour") && root["lightBarColour"].isString()) {
                     std::string hexStr = root["lightBarColour"].str();
                     if (hexStr.size() == 7 && hexStr[0] == '#') {
                         uint32_t rgb = static_cast<uint32_t>(std::strtoul(hexStr.c_str() + 1, nullptr, 16));
-                        g_settings.lightBarColour = 0xFF000000u | (rgb >> 16 & 0xFF) | (rgb & 0xFF00) | (rgb & 0xFF) << 16;
-                        changed = true;
+                        uint32_t val = 0xFF000000u | (rgb >> 16 & 0xFF) | (rgb & 0xFF00) | (rgb & 0xFF) << 16;
+                        if (val != g_settings.lightBarColour) {
+                            g_settings.lightBarColour = val;
+                            changed = true;
+                        }
                     }
                 }
                 if (root.has("triggerStrength")) {
-                    g_settings.triggerStrength = static_cast<int>(std::clamp<int64_t>(root["triggerStrength"].asInt(g_settings.triggerStrength), 0, 4));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["triggerStrength"].asInt(g_settings.triggerStrength), 0, 4));
+                    if (val != g_settings.triggerStrength) {
+                        g_settings.triggerStrength = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("triggerProfile")) {
-                    g_settings.triggerProfile = static_cast<int>(std::clamp<int64_t>(root["triggerProfile"].asInt(g_settings.triggerProfile), 0, 2));
-                    input::setTriggerProfile(g_settings.triggerProfile);
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["triggerProfile"].asInt(g_settings.triggerProfile), 0, 2));
+                    if (val != g_settings.triggerProfile) {
+                        g_settings.triggerProfile = val;
+                        input::setTriggerProfile(g_settings.triggerProfile);
+                        changed = true;
+                    }
                 }
                 if (root.has("audioHaptics")) {
-                    g_settings.audioHaptics = static_cast<int>(std::clamp<int64_t>(root["audioHaptics"].asInt(g_settings.audioHaptics), 0, 3));
-                    media::setAudioHapticsLevel(g_settings.audioHaptics);
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["audioHaptics"].asInt(g_settings.audioHaptics), 0, 3));
+                    if (val != g_settings.audioHaptics) {
+                        g_settings.audioHaptics = val;
+                        media::setAudioHapticsLevel(g_settings.audioHaptics);
+                        changed = true;
+                    }
                 }
                 if (root.has("queueReadyAlert")) {
-                    g_settings.queueReadyAlert = root["queueReadyAlert"].asBool(g_settings.queueReadyAlert);
-                    changed = true;
+                    bool val = root["queueReadyAlert"].asBool(g_settings.queueReadyAlert);
+                    if (val != g_settings.queueReadyAlert) {
+                        g_settings.queueReadyAlert = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("previewFeatures")) {
-                    g_settings.previewFeatures = root["previewFeatures"].asBool(g_settings.previewFeatures);
-                    changed = true;
+                    bool val = root["previewFeatures"].asBool(g_settings.previewFeatures);
+                    if (val != g_settings.previewFeatures) {
+                        g_settings.previewFeatures = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("usbControllers") || root.has("usb_controllers") || root.has("enable_onefamily")) {
                     bool val = root.has("usbControllers") ? root["usbControllers"].asBool(g_settings.usbControllers)
                              : root.has("usb_controllers") ? root["usb_controllers"].asBool(g_settings.usbControllers)
                              : root["enable_onefamily"].asBool(g_settings.usbControllers);
-                    g_settings.usbControllers = val;
-                    input::setUsbPadsEnabled(val);
-                    changed = true;
+                    if (val != g_settings.usbControllers) {
+                        g_settings.usbControllers = val;
+                        input::setUsbPadsEnabled(val);
+                        changed = true;
+                    }
                 }
                 if (root.has("videoDecoder")) {
-                    g_settings.videoDecoder = static_cast<int>(std::clamp<int64_t>(root["videoDecoder"].asInt(g_settings.videoDecoder), 0, 1));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["videoDecoder"].asInt(g_settings.videoDecoder), 0, 1));
+                    if (val != g_settings.videoDecoder) {
+                        g_settings.videoDecoder = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("padMap")) {
                     input::PadMap newPad;
                     if (input::readPadMap(root["padMap"], newPad)) {
-                        g_settings.padMap = newPad;
-                        changed = true;
+                        if (newPad != g_settings.padMap) {
+                            g_settings.padMap = newPad;
+                            changed = true;
+                        }
                     }
                 }
                 if (root.has("keyMap")) {
-                    g_settings.keyMap = keyMapFromJson(root["keyMap"], g_settings.keyMap);
-                    changed = true;
+                    auto newKeyMap = keyMapFromJson(root["keyMap"], g_settings.keyMap);
+                    if (newKeyMap != g_settings.keyMap) {
+                        g_settings.keyMap = newKeyMap;
+                        changed = true;
+                    }
                 }
                 if (root.has("touchpadShortcuts")) {
                     input::TouchpadShortcuts newTs;
                     if (input::readTouchpadShortcuts(root["touchpadShortcuts"], newTs)) {
-                        g_settings.touchpadShortcuts = newTs;
-                        for (auto& [k, prof] : g_settings.perGame) {
-                            prof.touchpadShortcuts = newTs;
+                        if (newTs != g_settings.touchpadShortcuts) {
+                            g_settings.touchpadShortcuts = newTs;
+                            for (auto& [k, prof] : g_settings.perGame) {
+                                prof.touchpadShortcuts = newTs;
+                            }
+                            changed = true;
                         }
-                        changed = true;
                     }
                 }
                 if (root.has("padSpeakerVolume")) {
-                    g_settings.padSpeakerVolume = static_cast<int>(std::clamp<int64_t>(root["padSpeakerVolume"].asInt(g_settings.padSpeakerVolume), 0, 100));
-                    padSpeakerVol = g_settings.padSpeakerVolume;
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["padSpeakerVolume"].asInt(g_settings.padSpeakerVolume), 0, 100));
+                    if (val != g_settings.padSpeakerVolume) {
+                        g_settings.padSpeakerVolume = val;
+                        padSpeakerVol = g_settings.padSpeakerVolume;
+                        changed = true;
+                    }
                 }
                 if (root.has("sharpness")) {
-                    g_settings.sharpness = static_cast<int>(std::clamp<int64_t>(root["sharpness"].asInt(g_settings.sharpness), 0, 3));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["sharpness"].asInt(g_settings.sharpness), 0, 3));
+                    if (val != g_settings.sharpness) {
+                        g_settings.sharpness = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("upscaler")) {
-                    g_settings.upscaler = static_cast<int>(std::clamp<int64_t>(root["upscaler"].asInt(g_settings.upscaler), 0, 3));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["upscaler"].asInt(g_settings.upscaler), 0, 3));
+                    if (val != g_settings.upscaler) {
+                        g_settings.upscaler = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("deband")) {
-                    g_settings.deband = static_cast<int>(std::clamp<int64_t>(root["deband"].asInt(g_settings.deband), 0, 3));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["deband"].asInt(g_settings.deband), 0, 3));
+                    if (val != g_settings.deband) {
+                        g_settings.deband = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("gyroMode")) {
-                    g_settings.gyroMode = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(g_settings.gyroMode), 0, 2));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(g_settings.gyroMode), 0, 2));
+                    if (val != g_settings.gyroMode) {
+                        g_settings.gyroMode = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("gyroLevel")) {
-                    g_settings.gyroLevel = static_cast<int>(std::clamp<int64_t>(root["gyroLevel"].asInt(g_settings.gyroLevel), 1, 10));
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroLevel"].asInt(g_settings.gyroLevel), 1, 10));
+                    if (val != g_settings.gyroLevel) {
+                        g_settings.gyroLevel = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("touchpadMouse")) {
-                    g_settings.touchpadMouse = root["touchpadMouse"].asBool(g_settings.touchpadMouse);
-                    changed = true;
+                    bool val = root["touchpadMouse"].asBool(g_settings.touchpadMouse);
+                    if (val != g_settings.touchpadMouse) {
+                        g_settings.touchpadMouse = val;
+                        changed = true;
+                    }
                 }
                 if (changed) {
                     g_settings.save(settingsPath());
@@ -747,39 +816,57 @@ bool coreStartup() {
 
                 if (update.has("sharpness")) {
                     int val = static_cast<int>(std::clamp<int64_t>(update["sharpness"].asInt(g_settings.sharpness), 0, 3));
-                    if (hasCustom) g_settings.perGame[key].sharpness = val;
-                    else g_settings.sharpness = val;
-                    changed = true;
+                    int currentVal = hasCustom ? g_settings.perGame[key].sharpness : g_settings.sharpness;
+                    if (val != currentVal) {
+                        if (hasCustom) g_settings.perGame[key].sharpness = val;
+                        else g_settings.sharpness = val;
+                        changed = true;
+                    }
                 }
                 if (update.has("upscaler")) {
                     int val = static_cast<int>(std::clamp<int64_t>(update["upscaler"].asInt(g_settings.upscaler), 0, 3));
-                    if (hasCustom) g_settings.perGame[key].upscaler = val;
-                    else g_settings.upscaler = val;
-                    changed = true;
+                    int currentVal = hasCustom ? g_settings.perGame[key].upscaler : g_settings.upscaler;
+                    if (val != currentVal) {
+                        if (hasCustom) g_settings.perGame[key].upscaler = val;
+                        else g_settings.upscaler = val;
+                        changed = true;
+                    }
                 }
                 if (update.has("deband")) {
                     int val = static_cast<int>(std::clamp<int64_t>(update["deband"].asInt(g_settings.deband), 0, 3));
-                    if (hasCustom) g_settings.perGame[key].deband = val;
-                    else g_settings.deband = val;
-                    changed = true;
+                    int currentVal = hasCustom ? g_settings.perGame[key].deband : g_settings.deband;
+                    if (val != currentVal) {
+                        if (hasCustom) g_settings.perGame[key].deband = val;
+                        else g_settings.deband = val;
+                        changed = true;
+                    }
                 }
                 if (update.has("padSpeakerVolume")) {
-                    g_settings.padSpeakerVolume = static_cast<int>(std::clamp<int64_t>(update["padSpeakerVolume"].asInt(g_settings.padSpeakerVolume), 0, 100));
-                    padSpeakerVol = g_settings.padSpeakerVolume;
-                    changed = true;
+                    int val = static_cast<int>(std::clamp<int64_t>(update["padSpeakerVolume"].asInt(g_settings.padSpeakerVolume), 0, 100));
+                    if (val != g_settings.padSpeakerVolume) {
+                        g_settings.padSpeakerVolume = val;
+                        padSpeakerVol = g_settings.padSpeakerVolume;
+                        changed = true;
+                    }
                 }
                 if (update.has("triggerProfile")) {
                     int val = static_cast<int>(std::clamp<int64_t>(update["triggerProfile"].asInt(g_settings.triggerProfile), 0, 2));
-                    if (hasCustom) g_settings.perGame[key].triggerProfile = val;
-                    else g_settings.triggerProfile = val;
-                    changed = true;
+                    int currentVal = hasCustom ? g_settings.perGame[key].triggerProfile : g_settings.triggerProfile;
+                    if (val != currentVal) {
+                        if (hasCustom) g_settings.perGame[key].triggerProfile = val;
+                        else g_settings.triggerProfile = val;
+                        changed = true;
+                    }
                 }
                 if (update.has("touchpadShortcuts")) {
                     input::TouchpadShortcuts newTs;
                     if (input::readTouchpadShortcuts(update["touchpadShortcuts"], newTs)) {
-                        if (hasCustom) g_settings.perGame[key].touchpadShortcuts = newTs;
-                        else g_settings.touchpadShortcuts = newTs;
-                        changed = true;
+                        const auto& currTs = hasCustom ? g_settings.perGame[key].touchpadShortcuts : g_settings.touchpadShortcuts;
+                        if (newTs != currTs) {
+                            if (hasCustom) g_settings.perGame[key].touchpadShortcuts = newTs;
+                            else g_settings.touchpadShortcuts = newTs;
+                            changed = true;
+                        }
                     }
                 }
                 if (changed) {
