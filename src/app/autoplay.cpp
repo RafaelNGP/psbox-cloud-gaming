@@ -2011,6 +2011,7 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             pads[1].connected = true;
             pads[1].name = "8BitDo Ultimate wireless Controller for PC";
             menu.setPads(pads);
+            menu.setTab(ui::MenuTab::Controls);
             ui::Canvas menuCanvas = menu.renderMenu(info);
             std::string ppm = "P6\n" + std::to_string(menuCanvas.width()) + " " + std::to_string(menuCanvas.height()) + "\n255\n";
             for (size_t i = 0; i < static_cast<size_t>(menuCanvas.width() * menuCanvas.height()); ++i) {
@@ -2020,8 +2021,32 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
                 ppm += static_cast<char>((p >> 16) & 0xFF);
             }
             platform::writeFileAtomic(platform::dataDir() + "/stream_menu_usb.ppm", ppm);
+            ++step;
+        } else if (step == 3 && now - since > 8000) {
+            ui::StreamMenu menu(g_ui->fonts());
+            menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.3f, false);
+            menu.setTab(ui::MenuTab::Controls);
+            menu.openGyroDialog();
+            menu.update(now);
+            ui::StreamInfo info;
+            info.region = "Brazil South";
+            info.fps = 60.0;
+            info.width = 1920;
+            info.height = 1080;
+            ui::Canvas fullCanvas(1920, 1080);
+            fullCanvas.clear(ui::rgba(16, 20, 26, 255));
+            menu.drawGyroDialog(fullCanvas);
+            std::string ppm = "P6\n" + std::to_string(fullCanvas.width()) + " " + std::to_string(fullCanvas.height()) + "\n255\n";
+            ppm.reserve(ppm.size() + static_cast<size_t>(fullCanvas.width() * fullCanvas.height() * 3));
+            for (size_t i = 0; i < static_cast<size_t>(fullCanvas.width() * fullCanvas.height()); ++i) {
+                uint32_t p = fullCanvas.data()[i];
+                ppm += static_cast<char>(p & 0xFF);
+                ppm += static_cast<char>((p >> 8) & 0xFF);
+                ppm += static_cast<char>((p >> 16) & 0xFF);
+            }
+            platform::writeFileAtomic(platform::dataDir() + "/stream_menu_gyro.ppm", ppm);
             g_autoplay.streamMenuTest = false;
-            XC_LOGI("AUTOPLAY END: stream menu test");
+            XC_LOGI("AUTOPLAY END: stream menu test with gyro dialog");
             ++step;
         }
     }
