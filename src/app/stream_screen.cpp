@@ -206,7 +206,7 @@ void StreamScreen::executeTouchpadAction_(input::TouchpadAction act, const char*
             refreshSettingsUiLocked();
         }
         overlaySeq_ = 0;
-        platform::notify(showStats_ ? "Telemetria ativada" : "Telemetria desativada",
+        platform::notify(ui::tr(showStats_ ? ui::Str::TelemetryOnToast : ui::Str::TelemetryOffToast),
                          showStats_ ? "stats on" : "stats off");
         XC_LOGI("touchpad %s: toggle stats -> %d", triggerName, showStats_ ? 1 : 0);
         break;
@@ -216,7 +216,7 @@ void StreamScreen::executeTouchpadAction_(input::TouchpadAction act, const char*
             g_player->setMicMuted(muted);
             menu_.setMicMuted(muted || g_player->isMicHardwareMuted());
             overlaySeq_ = 0;
-            platform::notify(muted ? "Microfone silenciado" : "Microfone ativado",
+            platform::notify(ui::tr(muted ? ui::Str::MicMutedToast : ui::Str::MicUnmutedToast),
                              muted ? "mic muted" : "mic unmuted");
             XC_LOGI("touchpad %s: toggle mic mute -> %d", triggerName, muted ? 1 : 0);
         }
@@ -365,7 +365,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 refreshSettingsUiLocked();
             }
             overlaySeq_ = 0;
-            platform::notify(showStats_ ? "Telemetria ativada" : "Telemetria desativada",
+            platform::notify(ui::tr(showStats_ ? ui::Str::TelemetryOnToast : ui::Str::TelemetryOffToast),
                              showStats_ ? "stats on" : "stats off");
         }
         prevL3R3_ = l3r3;

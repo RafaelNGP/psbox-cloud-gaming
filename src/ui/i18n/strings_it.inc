@@ -457,4 +457,36 @@ constexpr Column kItalian = {
     "Generale",                                       // MenuTabGeneral
     "Scheda",                                         // MenuTabLabel
     "Schede",                                         // MenuTabsLabel
+    "Impostazioni salvate",                           // SettingsSavedToast
+    "Impostazioni di gioco salvate",                  // GameSettingsSavedToast
+    "PSBox: connessioni sicure non disponibili",      // SecureConnUnavailableToast
+    "Sincronizzazione trofei non riuscita: %s",       // TrophySyncFailedToast
+    "Telemetria attivata",                            // TelemetryOnToast
+    "Telemetria disattivata",                         // TelemetryOffToast
+    "Microfono silenziato",                           // MicMutedToast
+    "Microfono attivo",                               // MicUnmutedToast
+    "Calibrazione giroscopio",                        // GyroCalibrationTitle
+    "Posizionare il controller su una superficie piana e stabile durante la calibrazione.", // GyroCalibratingPrompt
+    "Calibrazione sensori in corso... (%s)",          // GyroCalibratingProgress
+    "Misurazione stabilità e calibrazione sensori...", // GyroCalibratingDesc
+    "Calibrazione completata con successo",           // GyroCalibratedSuccess
+    "Compensazione deriva applicata al giroscopio.",  // GyroCalibratedSuccessDesc
+    "Impostazioni salvate nel profilo.",              // GyroCalibratedSaved
+    "Calibrazione non riuscita - Rilevato movimento", // GyroCalibratedFailed
+    "Il controller è stato mosso durante la lettura.", // GyroCalibratedFailedDesc
+    "Tenere fermo il controller e riprovare.",        // GyroCalibratedRetry
+    "Calibra giroscopio",                             // GyroCalibrateAction
+    "Sensibilità orizzontale: %s%%",                  // GyroYawSens
+    "Sensibilità verticale: %s%%",                    // GyroPitchSens
+    "Posizione giroscopio",                           // GyroSensorPos
+    "Input ricevuto dal gioco",                       // GyroGameOutput
+    "Sensibilità generale",                           // GyroSensitivityIntensity
+    "Sensibilità orizzontale",                        // GyroYawSensitivity
+    "Sensibilità verticale",                          // GyroPitchSensitivity
+    "Calibrazione giroscopio",                        // GyroCalibration
+    "Calibrazione in corso... %s%%",                  // GyroCalibratingPct
+    "Calibrato con successo!",                        // GyroCalibratedSuccessShort
+    "Non riuscito: Tenere fermo",                     // GyroCalibratedFailedShort
+    "Modalità Demo (Automatica)",                     // GyroDemoMode
+    "Muovere il controller per testare; usare i tasti freccia per regolare la sensibilità.", // GyroTestHelp
 };

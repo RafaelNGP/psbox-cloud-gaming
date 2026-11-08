@@ -435,7 +435,7 @@ bool coreStartup() {
                 if (g_ui->screen() != ui::Screen::Streaming && g_ui->screen() != ui::Screen::Launching) {
                     g_ui->setLoading(false, totalTitles, totalTitles);
                     if (!err.empty()) {
-                        std::string failMsg = "Trophy sync error: " + err;
+                        std::string failMsg = ui::trf(ui::Str::TrophySyncFailedToast, err);
                         g_ui->showToast(failMsg);
                     } else {
                         std::string toast = ui::trf(ui::Str::TrophiesSyncedToast, std::to_string(totalTrophies), std::to_string(totalTitles));
@@ -709,9 +709,10 @@ bool coreStartup() {
                     g_player->setFpsLimit(g_settings.fpsLimit);
                     g_player->setMaxBitrate(g_settings.maxBitrateMbps);
                 }
-                platform::notify("Configurações atualizadas (WebUI)");
+                std::string savedToast = ui::tr(ui::Str::SettingsSavedToast);
+                platform::notify(savedToast);
                 if (g_ui && !shell::caps().console) {
-                    g_ui->showToast("Configurações atualizadas");
+                    g_ui->showToast(savedToast);
                 }
             }
             return true;
@@ -889,7 +890,7 @@ bool coreStartup() {
                 if (g_core && g_core->streamScreen) {
                     g_core->streamScreen->syncFromSettings();
                 }
-                platform::notify("Configurações do jogo atualizadas (WebUI)");
+                platform::notify(ui::tr(ui::Str::GameSettingsSavedToast));
             }
             return true;
         },
@@ -956,7 +957,7 @@ bool coreStartup() {
 
     if (!net::initTls(g_autoplay.badCa ? platform::assetDir() + "/missing.pem" : platform::caBundlePath())) {
         // The step that failed, and where the log is: what a bug report needs.
-        platform::notify("PSBox: secure connections unavailable");
+        platform::notify(ui::tr(ui::Str::SecureConnUnavailableToast));
         g_ui->showError("Secure connections could not be set up: " + net::tlsInitError() + ". Log: " +
                         platform::dataDir() + "/xcloud.log");
         if (g_autoplay.badCa) XC_LOGI("AUTOPLAY END: TLS setup error shown");

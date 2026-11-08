@@ -34,7 +34,6 @@ struct SceKernelSwVersion {
 };
 int sceKernelGetSystemSwVersion(SceKernelSwVersion* version);
 int sceSystemServiceLoadExec(const char* path, char* const argv[]);
-int sceKernelSendNotificationRequest(int device, void* request, size_t size, int blocking);
 int sceNetInit(void);
 int sceNetPoolCreate(const char* name, int size, int flags);
 int sceNetResolverCreate(const char* name, int memid, int flags);
@@ -426,14 +425,7 @@ void notify(const std::string& text) { notify(text, text); }
 
 void notify(const std::string& text, const std::string& forLog) {
     XC_LOGI("NOTIFY: %s", forLog.c_str());
-    if (toastsEnabled() && forLog != "signed in (notification)") toasts().push(text, nowMs());
-    // Same request layout as PS5_Vulkan's demo renderer.
-    struct NotificationRequest {
-        uint8_t reserved[45];
-        char message[3075];
-    } req{};
-    std::snprintf(req.message, sizeof req.message, "%s", text.c_str());
-    sceKernelSendNotificationRequest(0, &req, sizeof req, 0);
+    if (toastsEnabled()) toasts().push(text, nowMs());
 }
 
 namespace {

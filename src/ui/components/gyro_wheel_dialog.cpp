@@ -320,10 +320,10 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     // Legend below wheel
     int ly = static_cast<int>(cy + R + 28);
     c.fillCircle(cx - 140.0f, ly + 9.0f, 7.0f, kRawSensorColor);
-    fonts.regular.draw(c, "Posição do giroscópio", static_cast<int>(cx - 124.0f), ly, 18, kGray);
+    fonts.regular.draw(c, tr(Str::GyroSensorPos), static_cast<int>(cx - 124.0f), ly, 18, kGray);
 
     c.fillCircle(cx + 40.0f, ly + 9.0f, 9.0f, kGameOutputColor);
-    fonts.regular.draw(c, "O que o jogo recebe", static_cast<int>(cx + 56.0f), ly, 18, kGray);
+    fonts.regular.draw(c, tr(Str::GyroGameOutput), static_cast<int>(cx + 56.0f), ly, 18, kGray);
 
     // -------------------------------------------------------------
     // RIGHT SIDE: Lateral Adjustment Sliders & Controls
@@ -362,25 +362,25 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     };
 
     // Item 0: Sensitivity (1..10)
-    drawRow(Item::Intensity, "Sensibilidade (Intensidade)", fmt("%d / 10", level_));
+    drawRow(Item::Intensity, tr(Str::GyroSensitivityIntensity), fmt("%d / 10", level_));
 
     // Item 1: Horizontal (Yaw) scale
-    drawRow(Item::YawScale, "Sensibilidade Horizontal (Yaw)", fmt("%d %%", yawScale_));
+    drawRow(Item::YawScale, tr(Str::GyroYawSensitivity), fmt("%d %%", yawScale_));
 
     // Item 2: Vertical (Pitch) scale
-    drawRow(Item::PitchScale, "Sensibilidade Vertical (Pitch)", fmt("%d %%", pitchScale_));
+    drawRow(Item::PitchScale, tr(Str::GyroPitchSensitivity), fmt("%d %%", pitchScale_));
 
     // Item 3: Calibration button / progress
-    std::string calLabel = "Calibrar Giroscópio (Parado)";
+    std::string calLabel = tr(Str::GyroCalibrateAction);
     if (isCalibrating()) {
         int pct = static_cast<int>(calibrationProgress() * 100.0f);
-        calLabel = fmt("Calibrando... %d %%", pct);
+        calLabel = trf(Str::GyroCalibratingPct, std::to_string(pct));
     } else if (calSuccess_) {
-        calLabel = "Calibrado com Sucesso!";
+        calLabel = tr(Str::GyroCalibratedSuccessShort);
     } else if (calFailed_) {
-        calLabel = "Falhou: Mantenha imóvel";
+        calLabel = tr(Str::GyroCalibratedFailedShort);
     }
-    drawRow(Item::Calibrate, "Calibração Estática de Drift", calLabel, true);
+    drawRow(Item::Calibrate, tr(Str::GyroCalibration), calLabel, true);
 
     // If calibrating, show a dedicated progress bar below
     if (isCalibrating()) {
@@ -391,10 +391,10 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     }
 
     // Item 4: Demo / Auto-movement toggle
-    drawRow(Item::DemoMode, "Modo Demonstração (Automático)", demoMode_ ? "ATIVADO" : "DESATIVADO");
+    drawRow(Item::DemoMode, tr(Str::GyroDemoMode), demoMode_ ? tr(Str::Activated) : tr(Str::Deactivated));
 
     // Help text at bottom
-    fonts.regular.draw(c, "Mova o controle para testar; use as setas para ajustar sensibilidade horizontal/vertical.",
+    fonts.regular.draw(c, tr(Str::GyroTestHelp),
                        panel.x + 48, panel.y + panel.h - 70, 18, kDim);
 
     // Footer Hints

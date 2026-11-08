@@ -46,11 +46,11 @@ static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
         }
     }
 
-    Rect panel = drawModalFn(c, 1080, 520, "Gyroscope Pro Calibration");
+    Rect panel = drawModalFn(c, 1080, 520, tr(Str::GyroCalibrationTitle));
 
     int textX = panel.x + 56;
     int textY = panel.y + 110;
-    fonts.regular.draw(c, "Place controller on a flat, stationary surface during calibration.",
+    fonts.regular.draw(c, tr(Str::GyroCalibratingPrompt),
                        textX, textY, 24, rgba(230, 230, 230));
     textY += 45;
 
@@ -72,23 +72,23 @@ static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
     textY += 48;
 
     if (s_gyroCalibrator.state == input::GyroCalibrator::State::Calibrating) {
-        std::string status = "Sampling pad 0 at 120 Hz... (" + std::to_string(s_gyroCalibrator.sampleCount) +
-                             "/" + std::to_string(s_gyroCalibrator.targetSamples) + ")";
+        std::string status = trf(Str::GyroCalibratingProgress, std::to_string(s_gyroCalibrator.sampleCount) +
+                                 "/" + std::to_string(s_gyroCalibrator.targetSamples));
         fonts.semibold.draw(c, status, textX, textY, 22, kWhite);
         textY += 32;
-        fonts.regular.draw(c, "Measuring static angular velocity drift and rotational variance...", textX, textY, 20, kGray);
+        fonts.regular.draw(c, tr(Str::GyroCalibratingDesc), textX, textY, 20, kGray);
     } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Succeeded) {
-        fonts.bold.draw(c, "Calibração Concluída com Sucesso", textX, textY, 26, rgba(74, 222, 128));
+        fonts.bold.draw(c, tr(Str::GyroCalibratedSuccess), textX, textY, 26, rgba(74, 222, 128));
         textY += 38;
-        fonts.regular.draw(c, "Compensação estática de drift aplicada ao giroscópio.", textX, textY, 22, rgba(200, 230, 200));
+        fonts.regular.draw(c, tr(Str::GyroCalibratedSuccessDesc), textX, textY, 22, rgba(200, 230, 200));
         textY += 32;
-        fonts.regular.draw(c, "Configurações salvas automaticamente no perfil.", textX, textY, 20, kGray);
+        fonts.regular.draw(c, tr(Str::GyroCalibratedSaved), textX, textY, 20, kGray);
     } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Failed) {
-        fonts.bold.draw(c, "Falha na Calibração - Movimento Detectado", textX, textY, 26, rgba(248, 113, 113));
+        fonts.bold.draw(c, tr(Str::GyroCalibratedFailed), textX, textY, 26, rgba(248, 113, 113));
         textY += 38;
-        fonts.regular.draw(c, "O controle moveu-se durante a leitura dos sensores.", textX, textY, 22, rgba(254, 202, 202));
+        fonts.regular.draw(c, tr(Str::GyroCalibratedFailedDesc), textX, textY, 22, rgba(254, 202, 202));
         textY += 32;
-        fonts.regular.draw(c, "Mantenha o controle imóvel em uma superfície plana e tente novamente.", textX, textY, 20, kGray);
+        fonts.regular.draw(c, tr(Str::GyroCalibratedRetry), textX, textY, 20, kGray);
     }
 
     c.fillRect({0, kH - 80, kW, 80}, kBg);
@@ -621,9 +621,9 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
             tr(Str::Off),
             tr(Str::GyroAlways),
             tr(Str::GyroAiming),
-            "Calibrate Gyro (Pad 0)",
-            "Horizontal (Yaw) Sensitivity: " + std::to_string(s_gyroYawScale) + "%",
-            "Vertical (Pitch) Sensitivity: " + std::to_string(s_gyroPitchScale) + "%"
+            tr(Str::GyroCalibrateAction),
+            trf(Str::GyroYawSens, std::to_string(s_gyroYawScale)),
+            trf(Str::GyroPitchSens, std::to_string(s_gyroPitchScale))
         };
     } else if (row == 17) {
         out = {tr(Str::RunCheck)};

@@ -185,7 +185,7 @@ void signInAndLoad(auth::AuthManager& am, xcloud::GssvClient& gssv) {
     if (!am.signIn(gssv, onCode, err, &g_cancel)) {
         XC_LOGE("sign-in failed: %s", err.c_str());
         if (g_ui->screen() == ui::Screen::Home) {
-            platform::notify("Offline mode: sign-in failed (" + err + ")");
+            platform::notify(ui::tr(ui::Str::OfflineMode));
             g_ui->setLoading(false, 0, 0);
             if (!g_autoplay.title.empty()) XC_LOGI("AUTOPLAY END: sign-in failed");
             return;
@@ -442,7 +442,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
             if (g_ui->screen() == ui::Screen::Splash || g_ui->screen() == ui::Screen::SignIn) {
                 g_ui->showHome();
             }
-            platform::notify("Offline mode: using cached library");
+            platform::notify(ui::tr(ui::Str::OfflineMode));
             g_ui->setLoading(false, 0, 0);
             return;
         }

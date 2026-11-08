@@ -10718,6 +10718,60 @@ static void testM3PlatformAndBitrateUi() {
     }
 }
 
+static void testM4DebugNoticesExterminationAndToasts() {
+    // 1. Verify localized strings for M4 exist and have content across all 6 languages
+    for (int l = 0; l < static_cast<int>(ui::Language::Count); ++l) {
+        ui::setLanguage(static_cast<ui::Language>(l));
+        CHECK(std::strlen(ui::tr(ui::Str::SettingsSavedToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GameSettingsSavedToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::SecureConnUnavailableToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::TelemetryOnToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::TelemetryOffToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::MicMutedToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::MicUnmutedToast)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibrationTitle)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibratingPrompt)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibratedSuccess)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibratedFailed)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibrateAction)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroSensorPos)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroGameOutput)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroSensitivityIntensity)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroYawSensitivity)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroPitchSensitivity)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroCalibration)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroDemoMode)) > 0);
+        CHECK(std::strlen(ui::tr(ui::Str::GyroTestHelp)) > 0);
+    }
+
+    // 2. Gyro options and labels must not contain engineering/debug jargon (e.g. "Pad 0", "120 Hz")
+    {
+        ui::setLanguage(ui::Language::PortugueseBR);
+        std::string cal = ui::tr(ui::Str::GyroCalibrateAction);
+        std::string yaw = ui::trf(ui::Str::GyroYawSens, "100");
+        std::string pitch = ui::trf(ui::Str::GyroPitchSens, "100");
+        std::string prog = ui::trf(ui::Str::GyroCalibratingProgress, "10/100");
+        std::vector<std::string> opts = {cal, yaw, pitch, prog};
+        for (const auto& opt : opts) {
+            CHECK(opt.find("Pad 0") == std::string::npos);
+            CHECK(opt.find("pad 0") == std::string::npos);
+            CHECK(opt.find("120 Hz") == std::string::npos);
+            CHECK(opt.find("rotational variance") == std::string::npos);
+        }
+        CHECK(cal == "Calibrar Giroscópio");
+    }
+
+    // 3. Toasts queue integration with platform::notify
+    {
+        platform::enableToasts(true);
+        platform::toasts().clear();
+        platform::notify("Test In-App Toast");
+        auto vis = platform::toasts().visible(platform::nowMs());
+        CHECK(!vis.empty());
+        CHECK(vis.back() == "Test In-App Toast");
+    }
+}
+
 int main() {
     testPs4VideoPipelineAndSse2Converter();
     testTrophySystem();
@@ -10828,6 +10882,7 @@ int main() {
     testMilestone5TransmissionQualityAndStreamReload();
     testMilestone6UsbKeyboardMouseIsolation();
     testM3PlatformAndBitrateUi();
+    testM4DebugNoticesExterminationAndToasts();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;
