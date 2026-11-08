@@ -30,6 +30,9 @@ struct RawPad {
     float gyro[3] = {0, 0, 0};   // rad/s: x pitch, y yaw, z roll
     float accel[3] = {0, 0, 0};  // g
     bool hasAccel = false;       // accel was read (gyro aiming takes the pad as flat otherwise)
+    float orientation[4] = {0, 0, 0, 1}; // hardware-fused orientation quaternion (x, y, z, w)
+    bool hasOrientation = false; // true when hardware provides fused orientation quat
+    float gyroDt = 0.0f;         // optional test override for poll interval (seconds; 0 = measure clock)
     bool touching = false, touchSecond = false;
     float touchX = 0, touchY = 0;  // 0..1 from the top left
 };

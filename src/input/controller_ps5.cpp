@@ -11,6 +11,7 @@
 #include "util/log.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstring>
 
@@ -112,6 +113,7 @@ struct Slot {
 };
 Slot g_slots[kMaxPads];
 bool g_rumbleLogged = false;
+bool g_motionLogged[kMaxPads] = {};
 
 inline float normStick(uint8_t val) {
     // 0..255 -> -1.0 .. 1.0
@@ -137,6 +139,7 @@ bool openPad(int slot, int32_t userId) {
         XC_LOGW("scePadSetMotionSensorState: 0x%08x", static_cast<unsigned>(rc));
     pad.userId = userId;
     pad.handle = h;
+    g_motionLogged[slot] = false;
     if (sceUserServiceGetUserName(userId, pad.name, sizeof pad.name) != 0) pad.name[0] = 0;
     slotOpened(slot);
     XC_LOGI("pad %d opened (handle %d, rumble mode 0x%08x)", slot, h, static_cast<unsigned>(mode));
@@ -158,6 +161,7 @@ void closePad(int slot) {
     pad.handle = -1;
     pad.userId = -1;
     pad.name[0] = 0;
+    g_motionLogged[slot] = false;
 }
 
 }  // namespace
@@ -204,6 +208,36 @@ bool readPad(int slot, RawPad& out) {
     std::copy(pad.angularVelocity, pad.angularVelocity + 3, out.gyro);
     std::copy(pad.acceleration, pad.acceleration + 3, out.accel);
     out.hasAccel = true;
+    const float q0 = pad.orientation[0], q1 = pad.orientation[1],
+                q2 = pad.orientation[2], q3 = pad.orientation[3];
+    const float qNormSq = q0 * q0 + q1 * q1 + q2 * q2 + q3 * q3;
+    if (std::isfinite(q0) && std::isfinite(q1) && std::isfinite(q2) && std::isfinite(q3) &&
+        qNormSq > 0.5f && qNormSq < 1.5f) {
+        const float invQ = 1.0f / std::sqrt(qNormSq);
+        out.orientation[0] = q0 * invQ;
+        out.orientation[1] = q1 * invQ;
+        out.orientation[2] = q2 * invQ;
+        out.orientation[3] = q3 * invQ;
+        out.hasOrientation = true;
+    } else {
+        out.hasOrientation = false;
+    }
+    if (!g_motionLogged[slot]) {
+        g_motionLogged[slot] = true;
+        // Compare q * (0,1,0) * q^* vs q^* * (0,1,0) * q against accel to verify body/world sign on live hardware.
+        const float qy_bw_x = 2.0f * (q0 * q1 + q2 * q3);
+        const float qy_bw_y = 1.0f - 2.0f * (q0 * q0 + q2 * q2);
+        const float qy_bw_z = 2.0f * (q1 * q2 - q0 * q3);
+        const float qy_wb_x = 2.0f * (q0 * q1 - q2 * q3);
+        const float qy_wb_y = qy_bw_y;
+        const float qy_wb_z = 2.0f * (q1 * q2 + q0 * q3);
+        XC_LOGI("ps5 pad %d motion init: ori=(%.4f,%.4f,%.4f,%.4f) normSq=%.4f valid=%d "
+                "accel=(%.3f,%.3f,%.3f) gyro=(%.4f,%.4f,%.4f) qY=(%.3f,%.3f,%.3f) q*Y=(%.3f,%.3f,%.3f)",
+                slot, q0, q1, q2, q3, qNormSq, out.hasOrientation ? 1 : 0,
+                pad.acceleration[0], pad.acceleration[1], pad.acceleration[2],
+                pad.angularVelocity[0], pad.angularVelocity[1], pad.angularVelocity[2],
+                qy_wb_x, qy_wb_y, qy_wb_z, qy_bw_x, qy_bw_y, qy_bw_z);
+    }
 
     // The DualSense touchpad reports 0..1919 x 0..1079.
     if (pad.touchData.touchNum > 0) {

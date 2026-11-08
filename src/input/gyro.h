@@ -15,12 +15,27 @@ constexpr int kGyroLevels = 10;  // intensity 1..kGyroLevels
 enum GyroMode { kGyroOff, kGyroAlways, kGyroAiming };  // kGyroAiming: while L2 is held
 
 struct GyroState {
-    float x = 0, y = 0;            // the push given, eased
+    float x = 0, y = 0;            // the push given, eased (normalized effective drive)
     float up[3] = {0, 1, 0};       // the room's up in the pad's axes, eased
+    float baseUp[3] = {0, 1, 0};   // room's up in anchor body axes
     float bias[3] = {0, 0, 0};     // zero-drift static calibration offset
     float yawScale = 1.0f;         // decoupled horizontal multiplier
     float pitchScale = 0.8f;       // decoupled vertical multiplier
+    bool upInitialized = false;    // fast initial convergence for gravity vector
+    bool baseUpInitialized = false; // whether baseUp captured from initial valid accel
+    bool aimingActive = false;     // whether posture tracking is currently anchored (L2 aim)
+    bool hasBaseQuat = false;      // whether baseQuat was captured from hardware
+    float baseQuat[4] = {0, 0, 0, 1}; // reference orientation quat at aim start (x, y, z, w)
+    float softQuat[4] = {0, 0, 0, 1}; // software SO(3) tracked posture quat when no hardware quat
+    float targetAngle[2] = {0, 0}; // cumulative target angle: [0] yaw, [1] pitch (rad)
+    float injected[2] = {0, 0};    // cumulative effective camera stick displacement: [0] x (yaw), [1] y (pitch)
 };
+
+// Anchors the reference orientation (and initial gravity up vector if provided) for closed-loop posture tracking.
+void anchorGyroPosture(GyroState& s, const float* orientationQuat = nullptr, const float* accel = nullptr);
+
+// Resets posture tracking state when aiming ends.
+void resetGyroPosture(GyroState& s);
 
 struct GyroCalibrator {
     enum class State { Idle, Calibrating, Succeeded, Failed };
@@ -94,7 +109,10 @@ struct GyroCalibrator {
 // `rawW`: the pad's angular velocity (rad/s; x pitch, y yaw, z roll), `accel`
 // what its accelerometer reads (g; nullptr: held flat) -> the push to add
 // to the right stick (pad convention: +x right, +y down).
-void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& s, float& x, float& y);
+// `orientationQuat`: optional hardware-fused quaternion [x, y, z, w] (nullptr for software fallback).
+// `dt`: polling time step in seconds (defaults to 0.004f = 250 Hz).
+void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& s, float& x, float& y,
+                 const float* orientationQuat = nullptr, float dt = 0.004f);
 
 // Global gyro calibration & hardware probing
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale);

@@ -77,6 +77,7 @@ struct Pad {
     bool lightStarted = false;
     std::atomic<uint64_t> activeAt{0};  // the last poll with a button or stick in use (ms)
     GyroState gyro;  // gyro aiming's eased push
+    uint64_t lastGyroUs = 0;  // timestamp of last active gyro sample (us)
 };
 Pad g_pads[kMaxPads];
 std::atomic<float> g_deadzone[2] = {0.15f, 0.15f};
@@ -320,10 +321,27 @@ bool pollPad(int index, ControllerState& out) {
 
     // Gyro aiming: in a game (menu closed), always or while L2 aims.
     int gyroMode = g_gyroMode.load(std::memory_order_relaxed);
-    bool gyroOn = g_gyroActive && (gyroMode == kGyroAlways || (gyroMode == kGyroAiming && out.triggerL2 > 0.3f));
+    bool gyroAimingTrigger = (gyroMode == kGyroAiming && out.triggerL2 > 0.3f);
+    bool gyroAlwaysOn = (gyroMode == kGyroAlways);
+    bool gyroOn = g_gyroActive && (gyroAlwaysOn || gyroAimingTrigger);
     if (gyroOn) {
+        float dt = pad.gyroDt;
+        if (dt <= 0.0f || !std::isfinite(dt)) {
+            uint64_t nowUs = platform::nowUs();
+            dt = (slot.lastGyroUs > 0 && nowUs > slot.lastGyroUs)
+                     ? std::clamp(static_cast<float>(nowUs - slot.lastGyroUs) / 1e6f, 0.001f, 0.050f)
+                     : 0.016667f;
+            slot.lastGyroUs = nowUs;
+        }
+        // Closed-loop posture tracking: anchor reference orientation when entering aiming
+        // or when manually slewing with the right thumbstick (post-deadzone).
+        if (std::hypot(out.rightStickX, out.rightStickY) > 0.10f || !slot.gyro.aimingActive) {
+            anchorGyroPosture(slot.gyro, pad.hasOrientation ? pad.orientation : nullptr,
+                              pad.hasAccel ? pad.accel : nullptr);
+        }
         float gx, gy;
-        gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed), slot.gyro, gx, gy);
+        gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed),
+                    slot.gyro, gx, gy, pad.hasOrientation ? pad.orientation : nullptr, dt);
         float x = out.rightStickX + gx, y = out.rightStickY + gy, m = std::hypot(x, y);
         if (m > 1.0f) x /= m, y /= m;
         out.rightStickX = x;
@@ -332,13 +350,11 @@ bool pollPad(int index, ControllerState& out) {
         bool sideways = std::abs(gx) > 0.5f && std::abs(gx) > std::abs(gy);
         int& logged = sideways ? g_gyroLoggedX : g_gyroLogged;
         if (logged < 4 && std::max(std::abs(gx), std::abs(gy)) > 0.5f)
-            XC_LOGI("gyro: pitch %.2f yaw %.2f roll %.2f rad/s, gravity %.2f,%.2f,%.2f -> stick %.2f,%.2f", pad.gyro[0],
-                    pad.gyro[1], pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], gx, gy), ++logged;
+            XC_LOGI("gyro: pitch %.2f yaw %.2f roll %.2f rad/s, gravity %.2f,%.2f,%.2f -> stick %.2f,%.2f (dt %.4f)", pad.gyro[0],
+                    pad.gyro[1], pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], gx, gy, dt), ++logged;
     } else {
-        slot.gyro.x = slot.gyro.y = 0.0f;
-        slot.gyro.up[0] = 0.0f;
-        slot.gyro.up[1] = 1.0f;
-        slot.gyro.up[2] = 0.0f;
+        slot.lastGyroUs = 0;
+        resetGyroPosture(slot.gyro);
     }
 
     if (pad.touching) {

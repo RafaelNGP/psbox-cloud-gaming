@@ -2984,7 +2984,364 @@ static void testGyroProZeroDriftAndDecoupledSensitivity() {
         CHECK(std::abs(it->second.gyroBias[0] - 0.033f) < 0.0001f);
 
         unlink(tmpPath.c_str());
+        xc::input::resetGlobalGyroCalibration();
     }
+}
+
+static void testGyroClosedLoopPostureTrackingAndZeroDrift() {
+    using namespace xc::input;
+    resetGlobalGyroCalibration();
+
+    // Camera-effective deflection above the 12% deadzone lifted in gyroToStick().
+    auto addEffStick = [](float x, float y, float dt, float& sumX, float& sumY) {
+        constexpr float kLift = 0.12f;
+        float mag = std::hypot(x, y);
+        if (mag > kLift) {
+            float eff = std::clamp((mag - kLift) / (1.0f - kLift), 0.0f, 1.0f);
+            sumX += (x / mag) * eff * dt;
+            sumY += (y / mag) * eff * dt;
+        }
+    };
+
+    // 1. Software closed-loop posture tracking: zero residual drift on neutral return after asymmetric sweep
+    {
+        GyroState s{};
+        anchorGyroPosture(s, nullptr);
+        CHECK(s.aimingActive);
+        CHECK(!s.hasBaseQuat);
+
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        constexpr float dt = 0.004f;
+        float totalStickInjected = 0.0f;
+        float unusedY = 0.0f;
+
+        // Phase 1: Rapid flick to the right (+1.0 rad/s yaw for 125 steps = 0.5s -> +0.5 rad physical turn)
+        float x = 0.0f, y = 0.0f;
+        const float wFastRight[3] = {0.0f, 1.0f, 0.0f};
+        for (int i = 0; i < 125; ++i) {
+            gyroToStick(wFastRight, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, totalStickInjected, unusedY);
+        }
+        // Turning right pushes stick left (x < -0.3f)
+        CHECK(x < -0.3f);
+        CHECK(totalStickInjected < -0.3f);
+
+        // Phase 2: Stationary pause at the turned posture (25 steps)
+        const float wStill[3] = {0.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 25; ++i) {
+            gyroToStick(wStill, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, totalStickInjected, unusedY);
+        }
+
+        // Phase 3: Slow return to the left (-0.5 rad/s yaw for 250 steps = 1.0s -> -0.5 rad physical turn)
+        // Net physical angle = +0.5 rad - 0.5 rad = 0.000000 rad (exact physical return to starting posture)
+        const float wSlowLeft[3] = {0.0f, -0.5f, 0.0f};
+        for (int i = 0; i < 250; ++i) {
+            gyroToStick(wSlowLeft, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, totalStickInjected, unusedY);
+        }
+
+        // Phase 4: Settle at starting neutral posture (150 steps)
+        for (int i = 0; i < 150; ++i) {
+            gyroToStick(wStill, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, totalStickInjected, unusedY);
+        }
+
+        // The closed-loop posture engine must drive accumulated camera-effective stick injection back to ZERO
+        CHECK(std::abs(totalStickInjected) < 1e-4f);
+        CHECK(x == 0.0f);
+        CHECK(y == 0.0f);
+        CHECK(std::abs(s.targetAngle[0]) < 1e-4f);
+        CHECK(std::abs(s.injected[0]) < 1e-4f);
+    }
+
+    // 2. Hardware orientation quaternion closed-loop posture tracking: exact relative 3D rotation and zero drift
+    {
+        GyroState s{};
+        // Start at identity orientation quat (x=0, y=0, z=0, w=1)
+        const float q0[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+        anchorGyroPosture(s, q0);
+        CHECK(s.aimingActive);
+        CHECK(s.hasBaseQuat);
+
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        constexpr float dt = 0.004f;
+        float unusedX = 0.0f;
+        float totalStickInjectedY = 0.0f;
+
+        // Pitch up by 20 degrees: theta = 20 deg = 0.349066 rad.
+        // Quaternion for rotation around X: q = [sin(theta/2), 0, 0, cos(theta/2)]
+        constexpr float theta = 0.349066f;
+        const float wPitchUp[3] = {theta / 0.5f, 0.0f, 0.0f};
+        const float wPitchDown[3] = {-theta / 1.0f, 0.0f, 0.0f};
+
+        float x = 0.0f, y = 0.0f;
+        float minY = 0.0f;
+        for (int i = 0; i < 125; ++i) {
+            float frac = static_cast<float>(i + 1) / 125.0f;
+            float curAngle = theta * frac;
+            float q[4] = {std::sin(curAngle * 0.5f), 0.0f, 0.0f, std::cos(curAngle * 0.5f)};
+            gyroToStick(wPitchUp, accel, 5, s, x, y, q, dt);
+            addEffStick(x, y, dt, unusedX, totalStickInjectedY);
+            if (y < minY) minY = y;
+        }
+        // Tilting top up aims stick up (pad convention +y is down, so aim up is y < 0)
+        CHECK(minY < -0.1f);
+        CHECK(totalStickInjectedY < -0.1f);
+
+        // Pause 25 steps at tilted posture
+        const float wZero[3] = {0.0f, 0.0f, 0.0f};
+        const float qTiltedUp[4] = {std::sin(theta * 0.5f), 0.0f, 0.0f, std::cos(theta * 0.5f)};
+        for (int i = 0; i < 25; ++i) {
+            gyroToStick(wZero, accel, 5, s, x, y, qTiltedUp, dt);
+            addEffStick(x, y, dt, unusedX, totalStickInjectedY);
+        }
+
+        // Return controller to original starting orientation q0
+        for (int i = 0; i < 250; ++i) {
+            float frac = static_cast<float>(i + 1) / 250.0f;
+            float curAngle = theta * (1.0f - frac);
+            float q[4] = {std::sin(curAngle * 0.5f), 0.0f, 0.0f, std::cos(curAngle * 0.5f)};
+            gyroToStick(wPitchDown, accel, 5, s, x, y, q, dt);
+            addEffStick(x, y, dt, unusedX, totalStickInjectedY);
+        }
+
+        // Settle at neutral posture
+        for (int i = 0; i < 150; ++i) {
+            gyroToStick(wZero, accel, 5, s, x, y, q0, dt);
+            addEffStick(x, y, dt, unusedX, totalStickInjectedY);
+        }
+
+        CHECK(std::abs(totalStickInjectedY) < 1e-4f);
+        CHECK(x == 0.0f);
+        CHECK(y == 0.0f);
+        CHECK(std::abs(s.targetAngle[1]) < 1e-4f);
+        CHECK(std::abs(s.injected[1]) < 1e-4f);
+    }
+
+    // 3. Bidirectional rotational symmetry
+    {
+        GyroState sLeft{}, sRight{};
+        anchorGyroPosture(sLeft, nullptr);
+        anchorGyroPosture(sRight, nullptr);
+
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        constexpr float dt = 0.004f;
+        const float wLeft[3] = {0.0f, 0.8f, 0.0f};
+        const float wRight[3] = {0.0f, -0.8f, 0.0f};
+
+        for (int i = 0; i < 50; ++i) {
+            float xl = 0, yl = 0, xr = 0, yr = 0;
+            gyroToStick(wLeft, accel, 5, sLeft, xl, yl, nullptr, dt);
+            gyroToStick(wRight, accel, 5, sRight, xr, yr, nullptr, dt);
+            // Symmetrical opposite response
+            CHECK(std::abs(xl + xr) < 1e-5f);
+            CHECK(std::abs(yl) < 1e-5f);
+            CHECK(std::abs(yr) < 1e-5f);
+        }
+
+        GyroState sUp{}, sDown{};
+        anchorGyroPosture(sUp, nullptr);
+        anchorGyroPosture(sDown, nullptr);
+
+        const float wUp[3] = {0.6f, 0.0f, 0.0f};
+        const float wDown[3] = {-0.6f, 0.0f, 0.0f};
+
+        for (int i = 0; i < 50; ++i) {
+            float xu = 0, yu = 0, xd = 0, yd = 0;
+            gyroToStick(wUp, accel, 5, sUp, xu, yu, nullptr, dt);
+            gyroToStick(wDown, accel, 5, sDown, xd, yd, nullptr, dt);
+            CHECK(std::abs(yu + yd) < 1e-5f);
+            CHECK(std::abs(xu) < 1e-5f);
+            CHECK(std::abs(xd) < 1e-5f);
+        }
+    }
+
+    // 4. Stabilized software gravity filter without abrupt sign inversion
+    {
+        GyroState s{};
+        float x = 0, y = 0;
+        const float wStationary[3] = {0.0f, 0.0f, 0.0f};
+
+        // Initial sample: pad level (accel = [0, 1, 0])
+        float accelLevel[3] = {0.0f, 1.0f, 0.0f};
+        gyroToStick(wStationary, accelLevel, 5, s, x, y);
+        CHECK(s.upInitialized);
+        CHECK(std::abs(s.up[1] - 1.0f) < 1e-4f);
+
+        // Forward pitch where accel[1] becomes negative (tilted down forward, accel[1] = -0.3f, accel[2] = 0.954f)
+        float accelForwardTilt[3] = {0.0f, -0.3f, 0.954f};
+        for (int i = 0; i < 100; ++i) {
+            gyroToStick(wStationary, accelForwardTilt, 5, s, x, y);
+        }
+        // Must NOT flip sign to positive +0.3; must smoothly decrease without discontinuous 180-deg reversal
+        CHECK(s.up[1] < 1.0f);
+        CHECK(s.up[1] > -0.35f);
+        CHECK(s.up[2] > 0.0f);
+    }
+
+    // 5. Smooth non-linear lift continuity: no deadband step discontinuities
+    {
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        float prevOutMag = 0.0f;
+        float maxJump = 0.0f;
+
+        // Sweep yaw velocity continuously in tiny steps from 0.0 to 0.1 rad/s
+        for (int i = 1; i <= 200; ++i) {
+            float vel = static_cast<float>(i) * 0.0005f; // 0.0005 .. 0.1 rad/s
+            GyroState sweepState{};
+            sweepState.aimingActive = false; // test raw lift curve
+            float x = 0, y = 0;
+            float rawW[3] = {0.0f, vel, 0.0f};
+            for (int k = 0; k < 20; ++k) {
+                gyroToStick(rawW, accel, 5, sweepState, x, y);
+            }
+            float outMag = std::abs(x);
+            float jump = std::abs(outMag - prevOutMag);
+            if (jump > maxJump) maxJump = jump;
+            prevOutMag = outMag;
+        }
+
+        // The maximum step jump across tiny 0.0005 rad/s increments must be smooth (< 0.01f),
+        // proving there is NO abrupt 0.12f step cliff.
+        CHECK(maxJump < 0.01f);
+    }
+
+    // 6. Multi-cycle flick zero-drift: |\sum \vec{S}_eff \cdot dt| < 10^-4 across 20 successive aim cycles
+    {
+        GyroState s{};
+        anchorGyroPosture(s, nullptr);
+        CHECK(s.aimingActive);
+
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        constexpr float dt = 0.004f;
+        float cumulativeInjectedX = 0.0f;
+        float cumulativeInjectedY = 0.0f;
+        float x = 0.0f, y = 0.0f;
+
+        for (int cycle = 1; cycle <= 20; ++cycle) {
+            // Rapid flick right: +2.0 rad/s yaw for 25 steps (0.1s -> +0.2 rad)
+            const float wFlick[3] = {0.0f, 2.0f, 0.0f};
+            for (int i = 0; i < 25; ++i) {
+                gyroToStick(wFlick, accel, 6, s, x, y, nullptr, dt);
+                addEffStick(x, y, dt, cumulativeInjectedX, cumulativeInjectedY);
+            }
+
+            // Controlled return left: -0.5 rad/s yaw for 100 steps (0.4s -> -0.2 rad return)
+            const float wReturn[3] = {0.0f, -0.5f, 0.0f};
+            for (int i = 0; i < 100; ++i) {
+                gyroToStick(wReturn, accel, 6, s, x, y, nullptr, dt);
+                addEffStick(x, y, dt, cumulativeInjectedX, cumulativeInjectedY);
+            }
+
+            // Settle at center: 100 steps (0.4s)
+            const float wStill[3] = {0.0f, 0.0f, 0.0f};
+            for (int i = 0; i < 100; ++i) {
+                gyroToStick(wStill, accel, 6, s, x, y, nullptr, dt);
+                addEffStick(x, y, dt, cumulativeInjectedX, cumulativeInjectedY);
+            }
+        }
+
+        CHECK(std::abs(cumulativeInjectedX) < 1e-4f);
+        CHECK(std::abs(cumulativeInjectedY) < 1e-4f);
+        CHECK(x == 0.0f);
+        CHECK(y == 0.0f);
+    }
+
+    // 7. Slow fine-aiming (0.08 rad/s) clears the 12% deadzone without lag or return drift
+    {
+        GyroState s{};
+        anchorGyroPosture(s, nullptr);
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        constexpr float dt = 1.0f / 60.0f;
+        float sumX = 0.0f, sumY = 0.0f;
+        float x = 0.0f, y = 0.0f;
+        const float wFine[3] = {0.0f, 0.08f, 0.0f};
+        for (int i = 0; i < 30; ++i) {
+            gyroToStick(wFine, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, sumX, sumY);
+        }
+        // Output must exceed 0.12f so small wrist corrections actually move the game reticle
+        CHECK(x < -0.15f);
+        const float wBack[3] = {0.0f, -0.08f, 0.0f};
+        for (int i = 0; i < 30; ++i) {
+            gyroToStick(wBack, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, sumX, sumY);
+        }
+        const float wStill[3] = {0.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 60; ++i) {
+            gyroToStick(wStill, accel, 5, s, x, y, nullptr, dt);
+            addEffStick(x, y, dt, sumX, sumY);
+        }
+        CHECK(std::abs(sumX) < 1e-4f);
+        CHECK(x == 0.0f && y == 0.0f);
+    }
+
+    // 8. Tilted pad (40 deg forward pitch): world-vertical yaw has full 1.0x gain without cos(tilt) attenuation or pitch bleed
+    {
+        constexpr float tilt = 40.0f * 3.14159265f / 180.0f;
+        float baseUp[3] = {0.0f, std::cos(tilt), std::sin(tilt)};
+        GyroState s{};
+        anchorGyroPosture(s, nullptr, baseUp);
+        constexpr float dt = 1.0f / 60.0f;
+        constexpr float yawTurn = 0.35f;
+        const float wWorldYaw[3] = {0.0f, yawTurn * baseUp[1] / 0.5f, yawTurn * baseUp[2] / 0.5f};
+        float x = 0.0f, y = 0.0f;
+        for (int i = 0; i < 30; ++i) {
+            gyroToStick(wWorldYaw, baseUp, 5, s, x, y, nullptr, dt);
+        }
+        CHECK(std::abs(s.targetAngle[0] - yawTurn) < 1e-3f);
+        CHECK(std::abs(s.targetAngle[1]) < 1e-4f);
+    }
+
+    // 9a. Commuting 3D closed loop (Pitch -> Yaw -> Unyaw -> Unpitch) at 60 Hz returns both axes to 0
+    {
+        GyroState s{};
+        float accel[3] = {0.0f, 1.0f, 0.0f};
+        anchorGyroPosture(s, nullptr, accel);
+        constexpr float dt = 1.0f / 60.0f;
+        float sumX = 0.0f, sumY = 0.0f;
+        float x = 0.0f, y = 0.0f;
+        const float wP[3] = {1.2f, 0.0f, 0.0f};
+        const float wY[3] = {0.0f, 1.6f, 0.0f};
+        const float wYn[3] = {0.0f, -1.6f, 0.0f};
+        const float wPn[3] = {-1.2f, 0.0f, 0.0f};
+        const float w0[3] = {0.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 15; ++i) { gyroToStick(wP, accel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 20; ++i) { gyroToStick(wY, accel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 20; ++i) { gyroToStick(wYn, accel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 15; ++i) { gyroToStick(wPn, accel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 60; ++i) { gyroToStick(w0, accel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        CHECK(std::abs(sumX) < 5e-4f);
+        CHECK(std::abs(sumY) < 5e-4f);
+        CHECK(x == 0.0f && y == 0.0f);
+    }
+
+    // 9b. Physical non-commuting 3D closed loop (Pitch +0.3 -> World Yaw +0.533 while tilted -> Unpitch -0.3 -> World Unyaw -0.533)
+    {
+        GyroState s{};
+        float accelLevel[3] = {0.0f, 1.0f, 0.0f};
+        anchorGyroPosture(s, nullptr, accelLevel);
+        constexpr float dt = 1.0f / 60.0f;
+        constexpr float theta = 0.3f;
+        float accelTilted[3] = {0.0f, std::cos(theta), -std::sin(theta)};
+        float sumX = 0.0f, sumY = 0.0f;
+        float x = 0.0f, y = 0.0f;
+        const float wP[3] = {1.2f, 0.0f, 0.0f};
+        const float wWorldY[3] = {0.0f, 1.6f * std::cos(theta), -1.6f * std::sin(theta)};
+        const float wPn[3] = {-1.2f, 0.0f, 0.0f};
+        const float wYn[3] = {0.0f, -1.6f, 0.0f};
+        const float w0[3] = {0.0f, 0.0f, 0.0f};
+        for (int i = 0; i < 15; ++i) { gyroToStick(wP, accelTilted, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 20; ++i) { gyroToStick(wWorldY, accelTilted, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 15; ++i) { gyroToStick(wPn, accelLevel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 20; ++i) { gyroToStick(wYn, accelLevel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        for (int i = 0; i < 60; ++i) { gyroToStick(w0, accelLevel, 6, s, x, y, nullptr, dt); addEffStick(x, y, dt, sumX, sumY); }
+        CHECK(std::abs(sumX) < 5e-4f);
+        CHECK(std::abs(sumY) < 5e-4f);
+        CHECK(x == 0.0f && y == 0.0f);
+    }
+    resetGlobalGyroCalibration();
 }
 
 // The desktop's stand-ins for the PS5 backends: nothing connected, the
@@ -10233,6 +10590,7 @@ int main() {
     testTokenRefresh();
     testGyro();
     testGyroProZeroDriftAndDecoupledSensitivity();
+    testGyroClosedLoopPostureTrackingAndZeroDrift();
     testReport();
     testCrashGuard();
     testBuiltinCa();
