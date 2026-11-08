@@ -1923,8 +1923,9 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
 
             ui::StreamMenu menu(g_ui->fonts());
             menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.65f, false);
+            menu.setMaxBitrateMbps(50);
             menu.setGyro(2, 7);  // gyro aiming while aiming, intensity 7, its row selected
-            for (int i = 0; i < 10; ++i) {
+            for (int i = 0; i < 4; ++i) {
                 ui::NavInput down;
                 down.down = true;
                 menu.handle(down);
@@ -2011,6 +2012,7 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             pads[1].name = "8BitDo Ultimate wireless Controller for PC";
             menu.setPads(pads);
             menu.setTab(ui::MenuTab::Controls);
+            menu.setAudioHaptics(2);
             ui::Canvas menuCanvas = menu.renderMenu(info);
             std::string ppm = "P6\n" + std::to_string(menuCanvas.width()) + " " + std::to_string(menuCanvas.height()) + "\n255\n";
             for (size_t i = 0; i < static_cast<size_t>(menuCanvas.width() * menuCanvas.height()); ++i) {
@@ -2022,6 +2024,44 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             platform::writeFileAtomic(platform::dataDir() + "/stream_menu_usb.ppm", ppm);
             ++step;
         } else if (step == 3 && now - since > 8000) {
+            ui::StreamMenu menu(g_ui->fonts());
+            menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.3f, false);
+            menu.setTab(ui::MenuTab::Controls);
+            menu.openStickDialog(15, 15, "test");
+            menu.update(now);
+            ui::Canvas fullCanvas(1920, 1080);
+            fullCanvas.clear(ui::rgba(16, 20, 26, 255));
+            menu.drawStickDialog(fullCanvas);
+            std::string ppm = "P6\n" + std::to_string(fullCanvas.width()) + " " + std::to_string(fullCanvas.height()) + "\n255\n";
+            ppm.reserve(ppm.size() + static_cast<size_t>(fullCanvas.width() * fullCanvas.height() * 3));
+            for (size_t i = 0; i < static_cast<size_t>(fullCanvas.width() * fullCanvas.height()); ++i) {
+                uint32_t p = fullCanvas.data()[i];
+                ppm += static_cast<char>(p & 0xFF);
+                ppm += static_cast<char>((p >> 8) & 0xFF);
+                ppm += static_cast<char>((p >> 16) & 0xFF);
+            }
+            platform::writeFileAtomic(platform::dataDir() + "/stream_menu_sticks.ppm", ppm);
+            ++step;
+        } else if (step == 4 && now - since > 10000) {
+            ui::StreamMenu menu(g_ui->fonts());
+            menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.3f, false);
+            menu.setTab(ui::MenuTab::Controls);
+            menu.openTriggerDialog(3, 2, 3, true, 1, true, "test");
+            menu.update(now);
+            ui::Canvas fullCanvas(1920, 1080);
+            fullCanvas.clear(ui::rgba(16, 20, 26, 255));
+            menu.drawTriggerDialog(fullCanvas);
+            std::string ppm = "P6\n" + std::to_string(fullCanvas.width()) + " " + std::to_string(fullCanvas.height()) + "\n255\n";
+            ppm.reserve(ppm.size() + static_cast<size_t>(fullCanvas.width() * fullCanvas.height() * 3));
+            for (size_t i = 0; i < static_cast<size_t>(fullCanvas.width() * fullCanvas.height()); ++i) {
+                uint32_t p = fullCanvas.data()[i];
+                ppm += static_cast<char>(p & 0xFF);
+                ppm += static_cast<char>((p >> 8) & 0xFF);
+                ppm += static_cast<char>((p >> 16) & 0xFF);
+            }
+            platform::writeFileAtomic(platform::dataDir() + "/stream_menu_triggers.ppm", ppm);
+            ++step;
+        } else if (step == 5 && now - since > 12000) {
             ui::StreamMenu menu(g_ui->fonts());
             menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.3f, false);
             menu.setTab(ui::MenuTab::Controls);
@@ -2045,7 +2085,7 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             }
             platform::writeFileAtomic(platform::dataDir() + "/stream_menu_gyro.ppm", ppm);
             g_autoplay.streamMenuTest = false;
-            XC_LOGI("AUTOPLAY END: stream menu test with gyro dialog");
+            XC_LOGI("AUTOPLAY END: stream menu test with dialogs");
             ++step;
         }
     }
