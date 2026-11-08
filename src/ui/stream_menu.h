@@ -11,10 +11,14 @@
 #include "ui/pad_icons.h"
 #include "input/gyro.h"
 #include "ui/components/gyro_wheel_dialog.h"
+#include "ui/components/stick_tester_dialog.h"
+#include "ui/components/trigger_tester_dialog.h"
 #include "ui/components/telemetry_overlay.h"
 #include "ui/components/web_control_card.h"
 
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace xc::ui {
 
@@ -49,7 +53,7 @@ enum StatsIndicator : uint32_t {
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, PadSpeakerVolume,
-    TouchpadShortcuts, Player, SmartGlassToggle, ReloadStream,
+    TouchpadShortcuts, Player, AudioHaptics, ReloadStream,
     VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
 };
 
@@ -81,7 +85,7 @@ public:
     void open(int resolution, bool stats, int sharpness = 0, int deband = 1, int upscaler = 0, bool homeConsole = false,
               bool allow1440 = true, bool hasCustomProfile = false, int triggerStrength = 2, int deadzone = 15,
               bool circleConfirms = false, float micLevel = 0.0f, bool micMuted = false, int padSpeakerVolume = 100);
-    void close() { open_ = false; statsCustomizing_ = false; touchpadCustomizing_ = false; gyroDialog_.close(); }
+    void close() { open_ = false; statsCustomizing_ = false; touchpadCustomizing_ = false; gyroDialog_.close(); stickDialog_.close(); triggerDialog_.close(); }
     bool isOpen() const { return open_; }
     MenuAction handle(const NavInput& in);
 
@@ -97,7 +101,7 @@ public:
     bool isCustomizingTouchpad() const { return touchpadCustomizing_; }
     const input::TouchpadShortcuts& touchpadShortcuts() const { return touchpadShortcuts_; }
     void setTouchpadShortcuts(const input::TouchpadShortcuts& ts) { touchpadShortcuts_ = ts; }
-    void setFrametimes(const std::vector<float>& ft) const { frametimes_ = ft; }
+    void setFrametimes(const std::vector<float>& ft) const { frametimes_ = ft; telemetry_.setFrametimes(ft); }
     int sharpness() const { return sharpness_; }
     int deband() const { return deband_; }
     int upscaler() const { return upscaler_; }
@@ -105,14 +109,29 @@ public:
     void setHasCustomProfile(bool custom) { hasCustomProfile_ = custom; }
     int triggerStrength() const { return triggerStrength_; }
     void setTriggerStrength(int strength) { triggerStrength_ = strength; }
+    int triggerHz() const { return triggerHz_; }
+    int triggerResistance() const { return triggerResistance_; }
+    bool triggerPulses() const { return triggerPulses_; }
+    int triggerProfile() const { return triggerProfile_; }
+    void setTriggerConfig(int strength, int hz, int resistance, bool pulses, int profile) {
+        triggerStrength_ = strength;
+        triggerHz_ = hz;
+        triggerResistance_ = resistance;
+        triggerPulses_ = pulses;
+        triggerProfile_ = profile;
+    }
     int deadzone() const { return deadzone_; }
-    void setDeadzone(int deadzone) { deadzone_ = deadzone; }
+    int deadzoneLeft() const { return deadzone_; }
+    int deadzoneRight() const { return deadzoneRight_; }
+    void setDeadzone(int deadzone) { deadzone_ = deadzoneRight_ = deadzone; }
+    void setDeadzones(int left, int right) { deadzone_ = left; deadzoneRight_ = right; }
+    void setGameKey(const std::string& key) { gameKey_ = key; }
+    int audioHaptics() const { return audioHaptics_; }
+    void setAudioHaptics(int lvl) { audioHaptics_ = std::clamp(lvl, 0, 3); }
     bool circleConfirms() const { return circleConfirms_; }
     void setCircleConfirms(bool cc) { circleConfirms_ = cc; }
     int padSpeakerVolume() const { return padSpeakerVolume_; }
     void setPadSpeakerVolume(int vol) { padSpeakerVolume_ = vol; }
-    bool smartGlassOpen() const { return smartGlassOpen_; }
-    void setSmartGlassOpen(bool open) { smartGlassOpen_ = open; }
 
     int videoDecoder() const { return videoDecoder_; }
     void setVideoDecoder(int d) { videoDecoder_ = d; }
@@ -145,6 +164,32 @@ public:
     void openGyroDialog(const std::string& gameKey = "") { gyroDialog_.open(0, gameKey); }
     void closeGyroDialog() { gyroDialog_.close(); }
     void drawGyroDialog(Canvas& c) { gyroDialog_.draw(c, fonts_, 0, 0, c.width(), c.height()); }
+
+    // StickTesterDialog integration
+    bool isStickDialogOpen() const { return stickDialog_.isOpen(); }
+    void openStickDialog(int deadzoneLeft = 15, int deadzoneRight = 15, const std::string& gameKey = "") {
+        stickDialog_.open(deadzoneLeft, deadzoneRight, gameKey);
+    }
+    void closeStickDialog() { stickDialog_.close(); }
+    void drawStickDialog(Canvas& c) const {
+        stickDialog_.draw(c, fonts_, 0, 0, c.width(), c.height(), circleConfirms_);
+    }
+    const StickTesterDialog& stickDialog() const { return stickDialog_; }
+    StickTesterDialog& stickDialog() { return stickDialog_; }
+
+    // TriggerTesterDialog integration
+    bool isTriggerDialogOpen() const { return triggerDialog_.isOpen(); }
+    void openTriggerDialog(int strength = 2, int hz = 1, int resistance = 2, bool pulses = false,
+                           int profile = 0, bool adaptive = true, const std::string& gameKey = "") {
+        triggerDialog_.open(strength, hz, resistance, pulses, profile, adaptive, gameKey);
+    }
+    void closeTriggerDialog() { triggerDialog_.close(); }
+    void drawTriggerDialog(Canvas& c) const {
+        triggerDialog_.draw(c, fonts_, 0, 0, c.width(), c.height(), circleConfirms_);
+    }
+    const TriggerTesterDialog& triggerDialog() const { return triggerDialog_; }
+    TriggerTesterDialog& triggerDialog() { return triggerDialog_; }
+
     void update(uint64_t nowMs);
 
     bool micMuted() const { return micMuted_; }
@@ -191,7 +236,6 @@ public:
         FpsLimiterItem,
         BitrateLimiterItem,
         VrrItem,
-        SmartGlassItem,
         ReloadStreamItem,
         Leave,
 
@@ -199,6 +243,7 @@ public:
         PlayerItem,
         ConfirmItem,
         Triggers,
+        AudioHapticsItem,
         DeadzoneItem,
         PadSpeakerVolumeItem,
         TouchpadShortcutsItem,
@@ -235,7 +280,13 @@ private:
     bool homeConsole_ = false, allow1440_ = true;
     bool hasCustomProfile_ = false;
     int triggerStrength_ = 2;
+    int triggerHz_ = 1;
+    int triggerResistance_ = 2;
+    bool triggerPulses_ = false;
+    int triggerProfile_ = 0;
     int deadzone_ = 15;
+    int deadzoneRight_ = 15;
+    std::string gameKey_;
     int gyroMode_ = 0, gyroLevel_ = 5;
     int gyroYawScale_ = 100, gyroPitchScale_ = 80;
     float gyroBias_[3] = {0.0f, 0.0f, 0.0f};
@@ -249,10 +300,12 @@ private:
     int padSpeakerVolume_ = 100;
     PadSlots pads_{};
     int usbOwnerPlayer_ = -1;
-    bool smartGlassOpen_ = false;
+    int audioHaptics_ = 0;
     mutable std::vector<float> frametimes_;
 
     GyroWheelDialog gyroDialog_;
+    StickTesterDialog stickDialog_;
+    TriggerTesterDialog triggerDialog_;
     mutable TelemetryOverlay telemetry_;
 };
 

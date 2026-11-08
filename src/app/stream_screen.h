@@ -87,8 +87,14 @@ private:
     bool hasCustomProfile_ = false;
     std::string gameKey_;
     int triggerStrength_ = 2;
+    int triggerHz_ = 1;
+    int triggerResistance_ = 2;
+    bool triggerPulses_ = false;
     int triggerProfile_ = 0;
     int deadzone_ = 15;
+    int deadzoneRight_ = 15;
+    int audioHaptics_ = 0;
+    bool triggerTesting_ = false;
     bool circleConfirms_ = false;
     input::KeyMap keyMap_ = input::defaultKeyMap();  // this game's keys (the keyboard as a controller)
     input::PadMap padMap_ = input::defaultPadMap();  // this game's controller buttons, toward the game only
@@ -109,6 +115,7 @@ private:
     std::vector<uint8_t> keysInGame_;  // keys the game was told are down
     bool wasStreaming_ = false;
     uint64_t lastMenuRedrawMs_ = 0;
+    uint64_t lastStatsRedrawMs_ = 0;
     uint64_t toastsShown_ = 0;    // platform::toasts()'s version in the overlay
     bool mouseCaptured_ = false;  // as last asked of input::kbmSetCaptured
     bool prevL3R3_ = false;       // L3 + R3 HUD telemetry shortcut

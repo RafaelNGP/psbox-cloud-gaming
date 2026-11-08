@@ -37,10 +37,10 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
                item == Upscaler || item == Sharpness || item == Deband ||
                item == Resolution || item == VideoDecoderItem || item == FpsLimiterItem ||
                item == BitrateLimiterItem || item == VrrItem ||
-               item == SmartGlassItem || item == ReloadStreamItem || item == Leave;
+               item == ReloadStreamItem || item == Leave;
     } else { // Controls
         return item == PlayerItem || item == ConfirmItem || item == Triggers ||
-               item == DeadzoneItem || item == PadSpeakerVolumeItem ||
+               item == AudioHapticsItem || item == DeadzoneItem || item == PadSpeakerVolumeItem ||
                item == TouchpadShortcutsItem || item == GyroItem;
     }
 }
@@ -56,11 +56,11 @@ bool StreamMenu::itemShown(int item) const {
     case Sharpness: return caps_.sharpen;
     case Deband: return caps_.deband;
     case Triggers: return caps_.triggerRumble || caps_.adaptiveTriggers;
+    case AudioHapticsItem: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case GyroItem: return caps_.gyro;
     case PadSpeakerVolumeItem: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case TouchpadShortcutsItem: return caps_.touchpad;
     case PlayerItem: return usbOwnerPlayer_ >= 0;
-    case SmartGlassItem: return true;
     default: return true;
     }
 }
@@ -87,7 +87,7 @@ void StreamMenu::setProfileValues(int resolution, int sharpness, int deband, int
     deband_ = deband;
     upscaler_ = upscaler;
     triggerStrength_ = triggerStrength;
-    deadzone_ = deadzone;
+    deadzone_ = deadzoneRight_ = deadzone;
     circleConfirms_ = circleConfirms;
     hasCustomProfile_ = hasCustomProfile;
 }
@@ -104,7 +104,7 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     upscaler_ = upscaler;
     hasCustomProfile_ = hasCustomProfile;
     triggerStrength_ = triggerStrength;
-    deadzone_ = deadzone;
+    deadzone_ = deadzoneRight_ = deadzone;
     circleConfirms_ = circleConfirms;
     micLevel_ = micLevel;
     micMuted_ = micMuted;
@@ -118,12 +118,20 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     touchpadCustomizing_ = false;
     touchpadCustomIndex_ = 0;
     gyroDialog_.close();
+    stickDialog_.close();
+    triggerDialog_.close();
 }
 
 void StreamMenu::update(uint64_t nowMs) {
     if (!open_) return;
     if (gyroDialog_.isOpen()) {
         gyroDialog_.update(nowMs);
+    }
+    if (stickDialog_.isOpen()) {
+        stickDialog_.update(nowMs);
+    }
+    if (triggerDialog_.isOpen()) {
+        triggerDialog_.update(nowMs);
     }
 }
 
@@ -141,6 +149,29 @@ MenuAction StreamMenu::handle(const NavInput& in) {
                 gyroBias_[0] = b[0]; gyroBias_[1] = b[1]; gyroBias_[2] = b[2];
             }
             return MenuAction::Gyro;
+        }
+        return MenuAction::None;
+    }
+
+    if (stickDialog_.isOpen()) {
+        stickDialog_.handleInput(in);
+        deadzone_ = stickDialog_.deadzoneLeft();
+        deadzoneRight_ = stickDialog_.deadzoneRight();
+        if (!stickDialog_.isOpen()) {
+            return MenuAction::Deadzone;
+        }
+        return MenuAction::None;
+    }
+
+    if (triggerDialog_.isOpen()) {
+        triggerDialog_.handleInput(in);
+        triggerStrength_ = triggerDialog_.strength();
+        triggerHz_ = triggerDialog_.hz();
+        triggerResistance_ = triggerDialog_.resistance();
+        triggerPulses_ = triggerDialog_.pulses();
+        triggerProfile_ = triggerDialog_.profile();
+        if (!triggerDialog_.isOpen()) {
+            return MenuAction::Triggers;
         }
         return MenuAction::None;
     }
@@ -286,25 +317,39 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         deband_ = in.left ? (deband_ + 3) % 4 : (deband_ + 1) % 4;
         return MenuAction::Deband;
     }
-    if (selected_ == Triggers && (in.left || in.right || in.accept)) {
+    if (selected_ == Triggers && (in.left || in.right)) {
         triggerStrength_ = in.left ? (triggerStrength_ + 4) % 5 : (triggerStrength_ + 1) % 5;
         return MenuAction::Triggers;
     }
+    if (selected_ == Triggers && in.accept) {
+        triggerDialog_.open(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_,
+                            triggerProfile_, caps_.adaptiveTriggers, gameKey_);
+        return MenuAction::None;
+    }
+    if (selected_ == AudioHapticsItem && (in.left || in.right || in.accept)) {
+        audioHaptics_ = in.left ? (audioHaptics_ + 3) % 4 : (audioHaptics_ + 1) % 4;
+        return MenuAction::AudioHaptics;
+    }
     if (selected_ == DeadzoneItem && (in.left || in.right)) {
-        if (in.left && deadzone_ > 0) deadzone_ -= 5;
-        else if (in.right && deadzone_ < 30) deadzone_ += 5;
+        if (in.left && deadzone_ > 0) deadzone_ = std::max(0, deadzone_ - 5);
+        else if (in.right && deadzone_ < 30) deadzone_ = std::min(30, deadzone_ + 5);
+        deadzoneRight_ = deadzone_;
         return MenuAction::Deadzone;
+    }
+    if (selected_ == DeadzoneItem && in.accept) {
+        stickDialog_.open(deadzone_, deadzoneRight_, gameKey_);
+        return MenuAction::None;
     }
     if (selected_ == ConfirmItem && (in.left || in.right || in.accept)) {
         circleConfirms_ = !circleConfirms_;
         return MenuAction::ConfirmButton;
     }
     if (selected_ == GyroItem && (in.left || in.right)) {
-        gyroMode_ = (gyroMode_ == 0) ? 1 : 0;
+        gyroMode_ = in.right ? (gyroMode_ + 1) % 3 : (gyroMode_ + 2) % 3;
         return MenuAction::Gyro;
     }
     if (selected_ == GyroItem && in.accept) {
-        gyroDialog_.open(0, "");
+        gyroDialog_.open(0, gameKey_);
         return MenuAction::None;
     }
     if (selected_ == PadSpeakerVolumeItem && (in.left || in.right)) {
@@ -317,10 +362,6 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         touchpadCustomizing_ = true;
         touchpadCustomIndex_ = 0;
         return MenuAction::TouchpadShortcuts;
-    }
-    if (selected_ == SmartGlassItem && (in.accept || in.left || in.right)) {
-        smartGlassOpen_ = !smartGlassOpen_;
-        return MenuAction::SmartGlassToggle;
     }
     if (selected_ == Stats && (in.left || in.right)) {
         stats_ = !stats_;
@@ -346,7 +387,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
 }
 
 Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
-    const int canvasW = (smartGlassOpen_ && !statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
+    const int canvasW = (!statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
     Canvas c(canvasW, kMenuH);
     std::fill(c.data(), c.data() + static_cast<size_t>(canvasW) * kMenuH, 0u);
     c.fillRect({0, 0, kMenuW, kMenuH}, kPanel, 0);
@@ -503,9 +544,9 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         fonts_.bold.draw(c, "L1", bx + 8, fonts_.bold.centeredY(tabY + 4, 24, 14), 14, kWhite);
         bx += 42;
 
-        // Geral Tab
+        // General Tab
         bool genActive = (activeTab_ == MenuTab::General);
-        const char* tabGen = "Geral";
+        const char* tabGen = tr(Str::MenuTabGeneral);
         int gw = fonts_.semibold.measure(tabGen, 18) + 24;
         Rect genRect{bx, tabY, gw, tabH};
         if (genActive) {
@@ -520,9 +561,9 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, rgba(80, 80, 80));
         bx += 16;
 
-        // Controles Tab
+        // Controls Tab
         bool ctrlActive = (activeTab_ == MenuTab::Controls);
-        const char* tabCtrl = "Controles";
+        const char* tabCtrl = tr(Str::Controllers);
         int cw = fonts_.semibold.measure(tabCtrl, 18) + 24;
         Rect ctrlRect{bx, tabY, cw, tabH};
         if (ctrlActive) {
@@ -576,11 +617,11 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                             : i == Upscaler            ? tr(Str::MenuUpscaler)
                             : i == ConfirmItem         ? tr(Str::ConfirmButton)
                             : i == Triggers            ? tr(Str::TriggerRumble)
+                            : i == AudioHapticsItem    ? tr(Str::AudioHaptics)
                             : i == DeadzoneItem        ? tr(Str::Deadzone)
                             : i == PadSpeakerVolumeItem ? tr(Str::PadSpeakerVolume)
                             : i == TouchpadShortcutsItem ? tr(Str::TouchpadShortcuts)
                             : i == GyroItem            ? tr(Str::Gyro)
-                            : i == SmartGlassItem      ? "SmartGlass Web Gamepad"
                             : i == ReloadStreamItem    ? tr(Str::ReloadStream)
                             : homeConsole_             ? tr(Str::MenuEndStream)
                                                        : tr(Str::MenuLeave);
@@ -649,8 +690,15 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = tr(kStrengths[std::clamp(triggerStrength_, 0, 4)]);
             if (sel) value = "< " + value + " >";
         }
+        if (i == AudioHapticsItem) {
+            static constexpr Str kHapticsLevels[] = {Str::Off, Str::SharpLow, Str::SharpMedium, Str::SharpHigh};
+            value = tr(kHapticsLevels[std::clamp(audioHaptics_, 0, 3)]);
+            if (sel) value = "< " + value + " >";
+        }
         if (i == DeadzoneItem) {
-            value = std::to_string(deadzone_) + " %";
+            value = (deadzone_ == deadzoneRight_)
+                  ? (std::to_string(deadzone_) + " %")
+                  : (std::to_string(deadzone_) + "% / " + std::to_string(deadzoneRight_) + "%");
             if (sel) value = "< " + value + " >";
         }
         if (i == PadSpeakerVolumeItem) {
@@ -659,20 +707,50 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
         if (i == TouchpadShortcutsItem) {
             value = tr(touchpadShortcuts_ == input::defaultTouchpadShortcuts() ? Str::ProfileDefault : Str::ProfileCustom);
-            if (sel) value = "< " + value + " >";
         }
         if (i == GyroItem) {
-            value = (gyroMode_ != 0) ? "ATIVADO" : "DESATIVADO";
+            value = tr(gyroMode_ == 1 ? Str::GyroAlways
+                     : gyroMode_ == 2 ? Str::GyroAiming
+                                      : Str::Off);
             if (sel) value = "< " + value + " >";
         }
-        if (i == SmartGlassItem) {
-            value = smartGlassOpen_ ? tr(Str::On) : tr(Str::Off);
-            if (sel) value = "< " + value + " >";
+
+        const bool hasSubmenu = (i == Stats || i == Triggers || i == DeadzoneItem ||
+                                 i == TouchpadShortcutsItem || i == GyroItem);
+        int pillLeft = row.x + row.w - 14;
+        if (hasSubmenu) {
+            const int pillW = sel ? 46 : 26;
+            const int pillH = 22;
+            const int pillX = row.x + row.w - 12 - pillW;
+            const int pillY = row.y + (row.h - pillH) / 2;
+            pillLeft = pillX;
+
+            c.fillRect({pillX, pillY, pillW, pillH},
+                       sel ? rgba(24, 28, 32) : rgba(255, 255, 255, 22), 6);
+            c.strokeRect({pillX, pillY, pillW, pillH},
+                         sel ? rgba(22, 163, 74) : rgba(255, 255, 255, 55), 1, 6);
+
+            if (sel) {
+                if (g_keyboardHints) {
+                    fonts_.bold.draw(c, "OK", pillX + 5, fonts_.bold.centeredY(pillY, pillH, 11), 11, rgba(74, 222, 128));
+                } else {
+                    drawFaceButton(c, fonts_.bold, g_glyphStyle,
+                                   circleConfirms_ ? PadButton::Circle : PadButton::Cross,
+                                   static_cast<float>(pillX + 14), static_cast<float>(pillY + pillH / 2), 8.0f);
+                }
+            }
+
+            const float cx = static_cast<float>(pillX + pillW - 12);
+            const float cy = static_cast<float>(pillY + pillH / 2);
+            const Color arrowCol = sel ? rgba(74, 222, 128) : rgba(215, 215, 215);
+            c.line(cx - 2.0f, cy - 4.0f, cx + 2.5f, cy, 2.0f, arrowCol);
+            c.line(cx + 2.5f, cy, cx - 2.0f, cy + 4.0f, 2.0f, arrowCol);
         }
 
         if (!value.empty()) {
             int w = fonts_.semibold.measure(value, kPx);
-            fonts_.semibold.draw(c, value, row.x + row.w - 16 - w, ty, kPx, sel ? kDark : kGray);
+            int rx = hasSubmenu ? (pillLeft - 10 - w) : (row.x + row.w - 16 - w);
+            fonts_.semibold.draw(c, value, rx, ty, kPx, sel ? kDark : kGray);
         }
     }
 
@@ -758,12 +836,18 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
     }
 
-    // Side Card: SmartGlass Web Gamepad QR Card
-    if (smartGlassOpen_) {
+    // Side Card: SmartGlass Web Gamepad QR Card (permanent unless customizing)
+    if (!statsCustomizing_ && !touchpadCustomizing_) {
         const int cardX = kMenuW + kCardGap;
         const int cardY = 204;
         WebControlCard::drawCard(c, fonts_, cardX, cardY, kCardW, 640);
     }
+
+    const bool subItem = (selected_ == Stats || selected_ == Triggers || selected_ == DeadzoneItem ||
+                          selected_ == TouchpadShortcutsItem || selected_ == GyroItem);
+    const char* confirmLabel = (selected_ == Stats) ? tr(Str::StatsCustomize)
+                             : subItem              ? tr(Str::Adjust)
+                                                    : tr(Str::Select);
 
     // Action Hints
     if (g_keyboardHints) {
@@ -775,18 +859,15 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             return kw;
         };
         int kw = cap("Enter");
-        x = fonts_.semibold.draw(c, selected_ == Stats ? tr(Str::StatsCustomize) : tr(Str::Select), x + kw + 8, hy, 20, kGray) + 24;
+        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, hy, 20, kGray) + 24;
         kw = cap("Esc");
         x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, hy, 20, kGray) + 24;
         kw = cap("Q/E");
-        fonts_.semibold.draw(c, "Aba", x + kw + 8, hy, 20, kGray);
+        fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, hy, 20, kGray);
         return c;
     }
 
     icon(!circleConfirms_, x, hy);
-    const char* confirmLabel = (selected_ == Stats) ? tr(Str::StatsCustomize)
-                             : (selected_ == GyroItem) ? "Abrir Roda"
-                             : tr(Str::Select);
     x = fonts_.semibold.draw(c, confirmLabel, x + 34, hy, 20, kGray) + 24;
     icon(circleConfirms_, x, hy);
     x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, hy, 20, kGray) + 24;
@@ -794,7 +875,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     // L1/R1 Tab Switch Hint
     c.fillRect({x, hy + 2, 54, 22}, rgba(255, 255, 255, 30), 4);
     fonts_.bold.draw(c, "L1/R1", x + 6, fonts_.bold.centeredY(hy + 2, 22, 13), 13, kWhite);
-    fonts_.semibold.draw(c, "Abas", x + 60, hy, 20, kGray);
+    fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + 60, hy, 20, kGray);
 
     return c;
 }

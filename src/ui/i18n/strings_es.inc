@@ -298,7 +298,7 @@ constexpr Column kSpanish = {
     "Tasa de bits (Bitrate)",                         // StatsIndicatorBitrate
     "Latencia (RTT)",                                 // StatsIndicatorLatency
     "Pérdida de paquetes",                            // StatsIndicatorLoss
-    "Gráfico de frametime",                           // StatsIndicatorGraph
+    "Gráfico de fluctuación de red",                  // StatsIndicatorGraph
     "Retardo de decodificación y pantalla",           // StatsIndicatorDelay
     "Calidad de vídeo (QP)",                          // StatsIndicatorQp
     "Estado del micrófono",                           // StatsIndicatorMic
@@ -454,4 +454,7 @@ constexpr Column kSpanish = {
     "Limitador de FPS",                               // FpsLimit
     "Ilimitado",                                      // FpsUnlimited
     "Limita la tasa de cuadros de presentación de la transmisión para mantener una cadencia fluida", // SettingDescFpsLimit
+    "General",                                        // MenuTabGeneral
+    "Pestaña",                                        // MenuTabLabel
+    "Pestañas",                                       // MenuTabsLabel
 };

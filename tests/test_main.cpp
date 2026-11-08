@@ -1006,10 +1006,6 @@ static void testStreamMenu() {
     press([](xc::ui::NavInput& n) { n.down = true; }); // VrrItem
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::VrrToggle);
     CHECK(menu.highRefresh());
-    press([](xc::ui::NavInput& n) { n.down = true; });  // SmartGlass Web Gamepad
-    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::SmartGlassToggle);
-    CHECK(menu.smartGlassOpen());
-    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::SmartGlassToggle);
     press([](xc::ui::NavInput& n) { n.down = true; });  // Reload Stream
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::ReloadStream);
     CHECK(!menu.isOpen());
@@ -1022,6 +1018,9 @@ static void testStreamMenu() {
     CHECK(menu.circleConfirms());
     press([](xc::ui::NavInput& n) { n.down = true; }); // Triggers
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Triggers);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // AudioHapticsItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 1);
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 2);
     press([](xc::ui::NavInput& n) { n.down = true; }); // Deadzone
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Deadzone);
     press([](xc::ui::NavInput& n) { n.down = true; }); // PadSpeakerVolume
@@ -1086,87 +1085,14 @@ static void testSmartGlassInGameMenuInvariants() {
     xc::ui::StreamMenu menu(fonts);
 
     // =========================================================================
-    // 1. Menu navigation state machine & SmartGlass toggling stress
+    // 1. Permanent QR card geometry and dynamic layout collapse invariants
     // =========================================================================
     CHECK(!menu.isOpen());
-    CHECK(!menu.smartGlassOpen());
 
     menu.open(0, false);
     CHECK(menu.isOpen());
-    CHECK(!menu.smartGlassOpen());
 
-    // Navigation stress and wrap-around targeting SmartGlassItem
-    xc::ui::NavInput navUp;
-    navUp.up = true;
-    xc::ui::NavInput navDown;
-    navDown.down = true;
-
-    // Up from XboxButton wraps to Leave
-    menu.handle(navUp);
-    // Up from Leave moves to ReloadStreamItem
-    menu.handle(navUp);
-    // Up from ReloadStreamItem moves to SmartGlassItem
-    menu.handle(navUp);
-
-    // Test accept toggling on SmartGlassItem
-    xc::ui::NavInput navAccept;
-    navAccept.accept = true;
-    CHECK(menu.handle(navAccept) == MenuAction::SmartGlassToggle);
-    CHECK(menu.smartGlassOpen());
-
-    // Test left toggling on SmartGlassItem
-    xc::ui::NavInput navLeft;
-    navLeft.left = true;
-    CHECK(menu.handle(navLeft) == MenuAction::SmartGlassToggle);
-    CHECK(!menu.smartGlassOpen());
-
-    // Test right toggling on SmartGlassItem
-    xc::ui::NavInput navRight;
-    navRight.right = true;
-    CHECK(menu.handle(navRight) == MenuAction::SmartGlassToggle);
-    CHECK(menu.smartGlassOpen());
-
-    // Test non-modifying inputs (square, triangle, l2)
-    xc::ui::NavInput navSquare, navTriangle, navL2;
-    navSquare.square = true;
-    CHECK(menu.handle(navSquare) == MenuAction::None);
-    CHECK(menu.smartGlassOpen());
-    navTriangle.triangle = true;
-    CHECK(menu.handle(navTriangle) == MenuAction::None);
-    CHECK(menu.smartGlassOpen());
-    navL2.l2 = true;
-    CHECK(menu.handle(navL2) == MenuAction::None);
-    CHECK(menu.smartGlassOpen());
-
-    // Stress test: 200 consecutive rapid toggles
-    for (int i = 0; i < 200; ++i) {
-        bool expected = (i % 2 == 1); // starts true: i=0 toggles to false, i=1 toggles to true
-        auto act = (i % 3 == 0) ? menu.handle(navLeft)
-                 : (i % 3 == 1) ? menu.handle(navRight)
-                                : menu.handle(navAccept);
-        CHECK(act == MenuAction::SmartGlassToggle);
-        CHECK(menu.smartGlassOpen() == expected);
-    }
-
-    // Navigation when caps without touchpad is used
-    xc::ui::UiCaps capsNoTouchpad{};
-    capsNoTouchpad.touchpad = false;
-    menu.setCapabilities(capsNoTouchpad);
-    // Menu item selection still valid and navigates cleanly
-    menu.setSmartGlassOpen(true);
-    CHECK(menu.smartGlassOpen());
-
-    // =========================================================================
-    // 2. Geometry invariants: 620 when closed, 1200 when open
-    // =========================================================================
-    menu.open(0, false);
-    menu.setSmartGlassOpen(false);
     xc::ui::StreamInfo sinfo;
-    xc::ui::Canvas cClosed = menu.renderMenu(sinfo);
-    CHECK(cClosed.width() == xc::ui::StreamMenu::kMenuW); // 620
-    CHECK(cClosed.height() == xc::ui::StreamMenu::kMenuH); // 1064
-
-    menu.setSmartGlassOpen(true);
     xc::ui::Canvas cOpen = menu.renderMenu(sinfo);
     CHECK(cOpen.width() == xc::ui::StreamMenu::kCombinedW); // 1200
     CHECK(cOpen.height() == xc::ui::StreamMenu::kMenuH); // 1064
@@ -1176,22 +1102,213 @@ static void testSmartGlassInGameMenuInvariants() {
     CHECK(xc::ui::StreamMenu::kCardW == 540);
     CHECK(xc::ui::StreamMenu::kCombinedW == 1200);
 
-    // Edge case: stats customization collapses canvas width to kMenuW (620)
+    // Navigation in General tab: wrap around XboxButton -> Leave -> ReloadStreamItem -> VrrItem
+    xc::ui::NavInput navUp, navDown, navLeft, navRight, navAccept, navBack, navR1, navL1;
+    navUp.up = true;
+    navDown.down = true;
+    navLeft.left = true;
+    navRight.right = true;
+    navAccept.accept = true;
+    navBack.back = true;
+    navR1.r1 = true;
+    navL1.l1 = true;
+
+    menu.handle(navUp); // Up from XboxButton wraps to Leave
+    menu.handle(navUp); // Up from Leave moves to ReloadStreamItem
+    menu.handle(navUp); // Up from ReloadStreamItem moves to VrrItem (no SmartGlassItem)
+    CHECK(menu.handle(navRight) == MenuAction::VrrToggle);
+
+    // Customization collapse invariants: stats customization collapses width to 620
     menu.open(0, true);
-    menu.setSmartGlassOpen(true);
     CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW);
-    // Navigate to Stats and open customization
     menu.handle(navDown); // Profile
     menu.handle(navDown); // Stats
     CHECK(menu.handle(navAccept) == MenuAction::Stats);
     CHECK(menu.isCustomizingStats());
-    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW);
-    // Exit customization with Back
-    xc::ui::NavInput navBack;
-    navBack.back = true;
-    menu.handle(navBack);
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW); // 620
+    menu.handle(navBack); // Back returns to main menu
     CHECK(!menu.isCustomizingStats());
-    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW);
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW); // 1200
+
+    // Touchpad shortcuts customization collapses width to 620
+    menu.open(0, false);
+    menu.handle(navR1); // Switch to Controls tab
+    for (int i = 0; i < 5; ++i) menu.handle(navDown); // -> TouchpadShortcutsItem
+    CHECK(menu.handle(navAccept) == MenuAction::TouchpadShortcuts);
+    CHECK(menu.isCustomizingTouchpad());
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW); // 620
+    menu.handle(navBack); // Back returns to main menu
+    CHECK(!menu.isCustomizingTouchpad());
+    CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW); // 1200
+
+    // =========================================================================
+    // 2. Submenus (StickTesterDialog, TriggerTesterDialog, AudioHaptics, Jitter)
+    // =========================================================================
+    // StickTesterDialog integration and deadzone sync
+    menu.open(0, false);
+    menu.handle(navR1); // Controls tab
+    menu.setDeadzone(15);
+    CHECK(!menu.isStickDialogOpen());
+    // Navigate to DeadzoneItem: ConfirmItem -> Triggers -> AudioHapticsItem -> DeadzoneItem
+    menu.handle(navDown); // Triggers
+    menu.handle(navDown); // AudioHapticsItem
+    menu.handle(navDown); // DeadzoneItem
+    CHECK(menu.handle(navRight) == MenuAction::Deadzone && menu.deadzone() == 20);
+    CHECK(menu.handle(navAccept) == MenuAction::None);
+    CHECK(menu.isStickDialogOpen());
+    // Draw stick dialog into a test canvas
+    xc::ui::Canvas stickCanvas(1920, 1080);
+    menu.drawStickDialog(stickCanvas);
+    CHECK(stickCanvas.data()[540 * 1920 + 960] != 0); // dialog rendered non-empty
+    // Input forwarding while stick dialog is open
+    xc::ui::NavInput stickIn;
+    stickIn.dpadLeft = true;
+    menu.handle(stickIn); // adjusts deadzone inside dialog
+    stickIn = {};
+    stickIn.back = true;
+    CHECK(menu.handle(stickIn) == MenuAction::Deadzone);
+    CHECK(!menu.isStickDialogOpen());
+
+    // TriggerTesterDialog integration and trigger feel sync
+    menu.open(0, false);
+    menu.handle(navR1); // Controls tab
+    menu.setTriggerStrength(2);
+    CHECK(!menu.isTriggerDialogOpen());
+    menu.handle(navDown); // -> Triggers
+    CHECK(menu.handle(navRight) == MenuAction::Triggers && menu.triggerStrength() == 3);
+    CHECK(menu.handle(navAccept) == MenuAction::None);
+    CHECK(menu.isTriggerDialogOpen());
+    // Draw trigger dialog into a test canvas
+    xc::ui::Canvas trigCanvas(1920, 1080);
+    menu.drawTriggerDialog(trigCanvas);
+    CHECK(trigCanvas.data()[540 * 1920 + 960] != 0); // dialog rendered non-empty
+    // Input forwarding while trigger dialog is open
+    xc::ui::NavInput trigIn;
+    trigIn.down = true;
+    menu.handle(trigIn); // navigates rows
+    trigIn = {};
+    trigIn.back = true;
+    CHECK(menu.handle(trigIn) == MenuAction::Triggers);
+    CHECK(!menu.isTriggerDialogOpen());
+
+    // Audio to Haptics in Controls Tab (0..3 cycling and actions)
+    menu.open(0, false);
+    menu.handle(navR1); // Controls tab
+    menu.setAudioHaptics(0);
+    CHECK(menu.audioHaptics() == 0);
+    menu.handle(navDown); // Triggers
+    menu.handle(navDown); // AudioHapticsItem
+    CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 1);
+    CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 2);
+    CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 3);
+    CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 0);
+    CHECK(menu.handle(navLeft) == MenuAction::AudioHaptics && menu.audioHaptics() == 3);
+    CHECK(menu.handle(navAccept) == MenuAction::AudioHaptics && menu.audioHaptics() == 0);
+    menu.setAudioHaptics(2);
+    CHECK(menu.audioHaptics() == 2);
+
+    // TelemetryOverlay real-time jitter sparkline integration
+    std::vector<float> jitterValues = {3.5f, 10.2f, 16.0f, 22.4f, 31.8f, 38.0f, 12.0f};
+    menu.setFrametimes(jitterValues);
+    xc::ui::TelemetryOverlay telemetry;
+    telemetry.setFrametimes(jitterValues);
+    xc::ui::Canvas sparkCanvas(400, 100);
+    sparkCanvas.clear(xc::ui::rgba(0, 0, 0, 0));
+    telemetry.drawSparkline(sparkCanvas, 10, 10, 200, 40);
+    bool sparklineDrawn = false;
+    for (int y = 10; y < 50; ++y) {
+        for (int x = 10; x < 210; ++x) {
+            if (sparkCanvas.data()[y * 400 + x] != 0) {
+                sparklineDrawn = true;
+                break;
+            }
+        }
+        if (sparklineDrawn) break;
+    }
+    CHECK(sparklineDrawn);
+
+    // Dynamic sub-5ms scaling: small jitter fluctuations visibly vary bar heights
+    std::vector<float> lowJitter = {0.4f, 0.8f, 1.5f, 3.0f, 0.5f};
+    telemetry.setFrametimes(lowJitter);
+    xc::ui::Canvas lowCanvas(220, 60);
+    lowCanvas.clear(0);
+    telemetry.drawSparkline(lowCanvas, 10, 10, 172, 22);
+    int minBarH = 100, maxBarH = 0;
+    const uint32_t barGreen = xc::ui::rgba(40, 210, 80);
+    for (int col = 10; col < 182; ++col) {
+        int colH = 0;
+        for (int row = 10; row < 32; ++row) {
+            if (lowCanvas.data()[row * 220 + col] == barGreen) ++colH;
+        }
+        if (colH > 0) {
+            minBarH = std::min(minBarH, colH);
+            maxBarH = std::max(maxBarH, colH);
+        }
+    }
+    CHECK(maxBarH - minBarH >= 8);
+
+    // StickTesterDialog: sticks never alter deadzone; D-pad L/R adjusts per-stick
+    xc::ui::StickTesterDialog stickDlg;
+    stickDlg.open(15, 15, "testgame");
+    xc::ui::NavInput stickTestIn;
+    stickTestIn.left = true;
+    stickTestIn.rawLX = -1.0f;
+    stickDlg.handleInput(stickTestIn);
+    CHECK(stickDlg.deadzoneLeft() == 15);
+    stickTestIn = {};
+    stickTestIn.dpadRight = true;
+    stickDlg.handleInput(stickTestIn);
+    CHECK(stickDlg.deadzoneLeft() == 16);
+    stickTestIn = {};
+    stickTestIn.r1 = true;
+    stickDlg.handleInput(stickTestIn);
+    CHECK(stickDlg.activeStick() == 1);
+    stickTestIn = {};
+    stickTestIn.dpadLeft = true;
+    stickDlg.handleInput(stickTestIn);
+    CHECK(stickDlg.deadzoneRight() == 14);
+    stickDlg.close();
+
+    // Asymmetric deadzones & full trigger configuration preservation across open() + dialogs
+    menu.open(0, false);
+    menu.setDeadzones(10, 22);
+    menu.setTriggerConfig(3, 2, 1, true, 1);
+    menu.handle(navR1); // Controls tab
+    menu.handle(navDown); // Triggers
+    CHECK(menu.handle(navAccept) == MenuAction::None);
+    CHECK(menu.isTriggerDialogOpen());
+    CHECK(menu.triggerDialog().strength() == 3);
+    CHECK(menu.triggerDialog().hz() == 2);
+    CHECK(menu.triggerDialog().resistance() == 1);
+    CHECK(menu.triggerDialog().pulses());
+    CHECK(menu.triggerDialog().profile() == 1);
+    menu.handle(navBack);
+    CHECK(!menu.isTriggerDialogOpen());
+    menu.handle(navDown); // AudioHapticsItem
+    menu.handle(navDown); // DeadzoneItem
+    CHECK(menu.handle(navAccept) == MenuAction::None);
+    CHECK(menu.isStickDialogOpen());
+    CHECK(menu.stickDialog().deadzoneLeft() == 10);
+    CHECK(menu.stickDialog().deadzoneRight() == 22);
+    menu.handle(navBack);
+    CHECK(!menu.isStickDialogOpen());
+    CHECK(menu.deadzoneLeft() == 10);
+    CHECK(menu.deadzoneRight() == 22);
+
+    // Submenu pill accent border renders cleanly on focused submenu items
+    xc::ui::Canvas cCtrl = menu.renderMenu(sinfo);
+    bool pillGreenFound = false;
+    const uint32_t pillGreen = xc::ui::rgba(22, 163, 74);
+    for (int py = 100; py < 450 && !pillGreenFound; ++py) {
+        for (int pxCol = 530; pxCol < 605; ++pxCol) {
+            if (cCtrl.data()[py * cCtrl.width() + pxCol] == pillGreen) {
+                pillGreenFound = true;
+                break;
+            }
+        }
+    }
+    CHECK(pillGreenFound);
+
 
     // =========================================================================
     // 3. Transparency invariants across the gap [620, 660) and surrounding regions
@@ -4450,7 +4567,7 @@ static void testBlock2Features() {
     // When at 100%, right should not trigger PadSpeakerVolume action
     ui::NavInput down;
     down.down = true;
-    for (int i = 0; i < 3; ++i) menu.handle(down);
+    for (int i = 0; i < 4; ++i) menu.handle(down);
 
     ui::NavInput right;
     right.right = true;
@@ -4477,7 +4594,7 @@ static void testBlock2Features() {
     // Rendering at 0% should render valid canvas
     ui::StreamInfo sinfo;
     auto cMute = menu.renderMenu(sinfo);
-    CHECK(cMute.width() == ui::StreamMenu::kMenuW);
+    CHECK(cMute.width() == ui::StreamMenu::kCombinedW);
 
     // Right should increase by 5%
     act = menu.handle(right);

@@ -298,7 +298,7 @@ constexpr Column kFrench = {
     "Débit binaire (Bitrate)",                        // StatsIndicatorBitrate
     "Latence (RTT)",                                  // StatsIndicatorLatency
     "Perte de paquets",                               // StatsIndicatorLoss
-    "Graphique de frametime",                         // StatsIndicatorGraph
+    "Graphique de gigue réseau",                      // StatsIndicatorGraph
     "Latence de décodage et d'affichage",             // StatsIndicatorDelay
     "Qualité vidéo (QP)",                             // StatsIndicatorQp
     "État du microphone",                             // StatsIndicatorMic
@@ -454,4 +454,7 @@ constexpr Column kFrench = {
     "Limiteur de FPS",                                // FpsLimit
     "Illimité",                                       // FpsUnlimited
     "Limite la fréquence d'affichage du flux pour maintenir une cadence fluide", // SettingDescFpsLimit
+    "Général",                                        // MenuTabGeneral
+    "Onglet",                                         // MenuTabLabel
+    "Onglets",                                        // MenuTabsLabel
 };

@@ -1958,7 +1958,6 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
         } else if (step == 1 && now - since > 4000) {
             ui::StreamMenu menu(g_ui->fonts());
             menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.0f, true);
-            menu.setSmartGlassOpen(true);
             for (int i = 0; i < 2; ++i) {
                 ui::NavInput up;
                 up.up = true;

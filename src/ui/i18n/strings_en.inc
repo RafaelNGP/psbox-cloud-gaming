@@ -298,7 +298,7 @@ constexpr Column kEnglish = {
     "Bitrate",                                        // StatsIndicatorBitrate
     "Latency (RTT)",                                  // StatsIndicatorLatency
     "Packet loss",                                    // StatsIndicatorLoss
-    "Frametime graph",                                // StatsIndicatorGraph
+    "Network jitter graph",                           // StatsIndicatorGraph
     "Decode & display latency",                       // StatsIndicatorDelay
     "Video quality (QP)",                             // StatsIndicatorQp
     "Microphone status",                              // StatsIndicatorMic
@@ -454,4 +454,7 @@ constexpr Column kEnglish = {
     "FPS Limiter",                                    // FpsLimit
     "Unlimited",                                      // FpsUnlimited
     "Limits the stream presentation framerate to maintain smooth frame pacing", // SettingDescFpsLimit
+    "General",                                        // MenuTabGeneral
+    "Tab",                                            // MenuTabLabel
+    "Tabs",                                           // MenuTabsLabel
 };

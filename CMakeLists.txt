@@ -128,6 +128,8 @@ add_library(xcloud_ui STATIC
     src/ui/components/web_control_card.cpp
     src/ui/components/telemetry_overlay.cpp
     src/ui/components/gyro_wheel_dialog.cpp
+    src/ui/components/stick_tester_dialog.cpp
+    src/ui/components/trigger_tester_dialog.cpp
     src/app/update_check.cpp
     src/app/report.cpp
     src/app/crash_guard.cpp

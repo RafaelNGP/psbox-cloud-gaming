@@ -4,6 +4,7 @@
 #include "ui/stream_menu.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
 
 namespace xc::ui {
@@ -43,6 +44,13 @@ void TelemetryOverlay::recordFrametime(float ms) {
 void TelemetryOverlay::updateFrametime(float ms) {
     if (ms > 0.0f) {
         recordFrametime(ms);
+    }
+}
+
+void TelemetryOverlay::setFrametimes(const std::vector<float>& ft) {
+    frametimes_ = ft;
+    if (frametimes_.size() > maxFrametimes_) {
+        frametimes_.erase(frametimes_.begin(), frametimes_.end() - maxFrametimes_);
     }
 }
 
@@ -105,29 +113,42 @@ void TelemetryOverlay::drawSparkline(Canvas& c, int x, int y, int w, int h) cons
     // Baseline
     c.line(x, y + h, x + w, y + h, 1.0f, rgba(80, 80, 80, 160));
 
-    // Target 60fps line (16.7ms out of 40ms scale)
-    float targetLineY = (y + h) - (16.7f / 40.0f) * static_cast<float>(h);
-    c.line(x, targetLineY, x + w, targetLineY, 1.0f, rgba(60, 160, 90, 120));
-
     if (frametimes_.empty()) return;
 
-    size_t count = frametimes_.size();
-    float barW = std::max(2.0f, static_cast<float>(w) / 60.0f - 1.0f);
-    float step = barW + 1.0f;
+    const size_t count = frametimes_.size();
+    const float barW = std::max(2.0f, static_cast<float>(w) / 60.0f - 1.0f);
+    const float step = barW + 1.0f;
+    const size_t maxBars = std::max<size_t>(1, static_cast<size_t>((static_cast<float>(w) + 1.0f) / step));
+    const size_t start = count > maxBars ? (count - maxBars) : 0;
 
-    for (size_t i = 0; i < count; ++i) {
-        float ms = frametimes_[i];
-        float norm = std::clamp(ms / 40.0f, 0.08f, 1.0f);
-        float bh = norm * static_cast<float>(h);
-        float bx = static_cast<float>(x) + static_cast<float>(i) * step;
+    float peakMs = 0.0f;
+    for (size_t i = start; i < count; ++i) {
+        if (frametimes_[i] > peakMs) peakMs = frametimes_[i];
+    }
+    const float scaleMax = std::clamp(peakMs * 1.25f, 4.0f, 40.0f);
+
+    if (scaleMax >= 15.0f) {
+        float targetLineY = (y + h) - (15.0f / scaleMax) * static_cast<float>(h);
+        c.line(x, targetLineY, x + w, targetLineY, 1.0f, rgba(60, 160, 90, 120));
+    } else {
+        float midLineY = static_cast<float>(y) + static_cast<float>(h) * 0.5f;
+        c.line(x, midLineY, x + w, midLineY, 1.0f, rgba(255, 255, 255, 25));
+    }
+
+    for (size_t i = start; i < count; ++i) {
+        const float ms = frametimes_[i];
+        const float norm = std::clamp(ms / scaleMax, 0.0f, 1.0f);
+        const float bh = std::max(2.0f, norm * static_cast<float>(h));
+        const float bx = static_cast<float>(x) + static_cast<float>(i - start) * step;
         if (bx + barW > static_cast<float>(x + w)) break;
 
-        Color barColor = (ms <= 17.5f) ? rgba(40, 200, 60)
-                       : (ms <= 33.3f) ? rgba(255, 190, 40)
+        Color barColor = (ms <= 8.0f)  ? rgba(40, 210, 80)
+                       : (ms <= 20.0f) ? rgba(255, 190, 40)
                                        : rgba(255, 60, 60);
 
-        c.fillRect({static_cast<int>(bx), static_cast<int>(y + h - bh),
-                    static_cast<int>(barW), static_cast<int>(bh)}, barColor);
+        const int ibh = std::max(2, static_cast<int>(std::lround(bh)));
+        c.fillRect({static_cast<int>(bx), y + h - ibh,
+                    std::max(1, static_cast<int>(barW)), ibh}, barColor);
     }
 }
 

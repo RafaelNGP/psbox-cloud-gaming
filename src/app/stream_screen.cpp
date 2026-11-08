@@ -15,6 +15,7 @@
 #include "input/keyboard_nav.h"
 #include "input/pad_usb.h"
 #include "media/audio_out.h"
+#include "media/audio_queue.h"
 #include "platform/platform.h"
 #include "platform/toasts.h"
 #include "ui/strings.h"
@@ -126,8 +127,13 @@ void StreamScreen::syncFromSettings() {
     applyUpscaler(upscaler_);
 
     triggerStrength_ = prof.triggerStrength;
+    triggerHz_ = prof.triggerHz;
+    triggerResistance_ = prof.triggerResistance;
+    triggerPulses_ = prof.triggerPulses;
     triggerProfile_ = prof.triggerProfile;
     deadzone_ = prof.deadzoneLeft;
+    deadzoneRight_ = prof.deadzoneRight;
+    audioHaptics_ = prof.audioHaptics;
     circleConfirms_ = prof.circleConfirms;
     keyMap_ = prof.keyMap;
     padMap_ = prof.padMap;
@@ -136,8 +142,9 @@ void StreamScreen::syncFromSettings() {
     gyroLevel_ = prof.gyroLevel;
     input::setGyro(gyroMode_, gyroLevel_);
     input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
-    input::setDeadzone(prof.deadzoneLeft / 100.0f, prof.deadzoneRight / 100.0f);
-    input::setTriggerFeel(prof.triggerStrength, prof.triggerHz, prof.triggerResistance, prof.triggerPulses, triggerProfile_);
+    input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
+    input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
+    media::setAudioHapticsLevel(audioHaptics_);
     input::setCircleConfirms(prof.circleConfirms);
     if (g_ui) g_ui->setCircleConfirms(prof.circleConfirms);
 
@@ -162,6 +169,10 @@ void StreamScreen::syncFromSettings() {
 
     menu_.setProfileValues(streamResolution_, sharpness_, deband_, upscaler_,
                            triggerStrength_, deadzone_, circleConfirms_, hasCustomProfile_);
+    menu_.setGameKey(gameKey_);
+    menu_.setDeadzones(deadzone_, deadzoneRight_);
+    menu_.setTriggerConfig(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
+    menu_.setAudioHaptics(audioHaptics_);
     menu_.setGyro(gyroMode_, gyroLevel_);
     menu_.setGyroYawScale(prof.gyroYawScale);
     menu_.setGyroPitchScale(prof.gyroPitchScale);
@@ -304,8 +315,14 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
 
         // Apply controller profile settings
         triggerStrength_ = prof.triggerStrength;
+        triggerHz_ = prof.triggerHz;
+        triggerResistance_ = prof.triggerResistance;
+        triggerPulses_ = prof.triggerPulses;
         triggerProfile_ = prof.triggerProfile;
         deadzone_ = prof.deadzoneLeft;
+        deadzoneRight_ = prof.deadzoneRight;
+        audioHaptics_ = prof.audioHaptics;
+        media::setAudioHapticsLevel(audioHaptics_);
         circleConfirms_ = prof.circleConfirms;
         keyMap_ = prof.keyMap;
         padMap_ = prof.padMap;
@@ -315,8 +332,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         gyroLevel_ = prof.gyroLevel;
         input::setGyro(gyroMode_, gyroLevel_);
         input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
-        input::setDeadzone(prof.deadzoneLeft / 100.0f, prof.deadzoneRight / 100.0f);
-        input::setTriggerFeel(prof.triggerStrength, prof.triggerHz, prof.triggerResistance, prof.triggerPulses, triggerProfile_);
+        input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
+        input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
         input::setCircleConfirms(prof.circleConfirms);
         if (g_ui) g_ui->setCircleConfirms(prof.circleConfirms);
         // 120 Hz (VRR) for this game's stream: active when enabled in settings/profile
@@ -402,10 +419,14 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 menu_.setFpsLimit(hasCustomProfile_ ? g_settings.perGame[gameKey_].fpsLimit : g_settings.fpsLimit);
                 menu_.setMaxBitrateMbps(g_settings.maxBitrateMbps);
                 menu_.setHighRefresh(hasCustomProfile_ ? g_settings.perGame[gameKey_].highRefresh : g_settings.highRefresh);
+                menu_.setAudioHaptics(hasCustomProfile_ ? g_settings.perGame[gameKey_].audioHaptics : g_settings.audioHaptics);
                 padVol = g_settings.padSpeakerVolume;
             }
             menu_.open(streamResolution_, showStats_, sharpness_, deband_, upscaler_, g_playingHome, allow1440,
                        hasCustomProfile_, triggerStrength_, deadzone_, circleConfirms_, micLvl, micMuted, padVol);
+            menu_.setGameKey(gameKey_);
+            menu_.setDeadzones(deadzone_, deadzoneRight_);
+            menu_.setTriggerConfig(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
             overlaySeq_ = 0;
         } else if (wasOpen && (menuCombo || swipeMenu_ || (usbMenu >= 0 && usbMenu == menuUsbOwner_))) {
             // The same gesture or key closes it again.
@@ -465,29 +486,40 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             case ui::MenuAction::PadSpeakerVolume: {
                 int vol = menu_.padSpeakerVolume();
                 media::setPadSpeakerVolume(vol);
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                g_settings.padSpeakerVolume = vol;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.padSpeakerVolume = vol;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Close: g_player->requestKeyframe(); break;  // a clean picture back in the game
-            case ui::MenuAction::Resolution:
+            case ui::MenuAction::Resolution: {
                 streamResolution_ = menu_.resolution();
                 g_tierPicked = true;
                 // The user's own Xbox: 1080p is its top tier ("1440").
                 g_player->requestResolution(streamResolution_ == 1 ? "720HQ"
                                             : streamResolution_ == 2 || g_playingHome ? "1440"
                                                                                       : "1080HQ");
+                Settings snapshot;
+                bool syncNeeded = false;
                 {
                     std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
                     if (hasCustomProfile_) {
                         g_settings.perGame[gameKey_].resolution = streamResolution_;
                         g_settings.save(settingsPath());
+                        snapshot = g_settings;
+                        syncNeeded = true;
                     }
                     ++g_settingsVersion;
                 }
+                if (syncNeeded) app::SettingsManager::instance().syncFrom(snapshot);
                 break;
+            }
             case ui::MenuAction::VideoDecoder: {
                 int dec = menu_.videoDecoder();
                 Settings snapshot;
@@ -550,140 +582,192 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             }
             case ui::MenuAction::ProfileToggle: {
                 hasCustomProfile_ = menu_.hasCustomProfile();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) {
-                    GameProfile p;
-                    p.sharpness = sharpness_;
-                    p.deband = deband_;
-                    p.upscaler = upscaler_;
-                    p.resolution = streamResolution_;
-                    p.deadzoneLeft = deadzone_;
-                    p.deadzoneRight = deadzone_;
-                    p.triggerStrength = triggerStrength_;
-                    p.triggerHz = g_settings.triggerHz;
-                    p.triggerResistance = g_settings.triggerResistance;
-                    p.triggerPulses = g_settings.triggerPulses;
-                    p.triggerProfile = triggerProfile_;
-                    p.circleConfirms = circleConfirms_;
-                    auto had = g_settings.perGame.find(gameKey_);  // not set from this menu: kept
-                    p.highRefresh = had != g_settings.perGame.end() ? had->second.highRefresh : g_settings.highRefresh;
-                    p.keyMap = had != g_settings.perGame.end() ? had->second.keyMap : g_settings.keyMap;
-                    p.padMap = had != g_settings.perGame.end() ? had->second.padMap : g_settings.padMap;
-                    p.locale = had != g_settings.perGame.end() ? had->second.locale : std::string();
-                    p.syncTrophies = had != g_settings.perGame.end() ? had->second.syncTrophies : true;
-                    p.xboxTitleId = had != g_settings.perGame.end() ? had->second.xboxTitleId : std::string();
-                    p.gameName = had != g_settings.perGame.end() ? had->second.gameName : std::string();
-                    p.touchpadShortcuts = touchpadShortcuts_;
-                    p.touchpadMouse = touchpadMouse_;
-                    p.gyroMode = gyroMode_;
-                    p.gyroLevel = gyroLevel_;
-                    p.gyroYawScale = menu_.gyroYawScale();
-                    p.gyroPitchScale = menu_.gyroPitchScale();
-                    if (const float* b = menu_.gyroBias()) {
-                        for (int i = 0; i < 3; ++i) p.gyroBias[i] = b[i];
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) {
+                        GameProfile p;
+                        p.sharpness = sharpness_;
+                        p.deband = deband_;
+                        p.upscaler = upscaler_;
+                        p.resolution = streamResolution_;
+                        p.deadzoneLeft = deadzone_;
+                        p.deadzoneRight = deadzoneRight_;
+                        p.triggerStrength = triggerStrength_;
+                        p.triggerHz = triggerHz_;
+                        p.triggerResistance = triggerResistance_;
+                        p.triggerPulses = triggerPulses_;
+                        p.triggerProfile = triggerProfile_;
+                        p.audioHaptics = audioHaptics_;
+                        p.circleConfirms = circleConfirms_;
+                        auto had = g_settings.perGame.find(gameKey_);  // not set from this menu: kept
+                        p.highRefresh = had != g_settings.perGame.end() ? had->second.highRefresh : g_settings.highRefresh;
+                        p.keyMap = had != g_settings.perGame.end() ? had->second.keyMap : g_settings.keyMap;
+                        p.padMap = had != g_settings.perGame.end() ? had->second.padMap : g_settings.padMap;
+                        p.locale = had != g_settings.perGame.end() ? had->second.locale : std::string();
+                        p.syncTrophies = had != g_settings.perGame.end() ? had->second.syncTrophies : true;
+                        p.xboxTitleId = had != g_settings.perGame.end() ? had->second.xboxTitleId : std::string();
+                        p.gameName = had != g_settings.perGame.end() ? had->second.gameName : std::string();
+                        p.touchpadShortcuts = touchpadShortcuts_;
+                        p.touchpadMouse = touchpadMouse_;
+                        p.gyroMode = gyroMode_;
+                        p.gyroLevel = gyroLevel_;
+                        p.gyroYawScale = menu_.gyroYawScale();
+                        p.gyroPitchScale = menu_.gyroPitchScale();
+                        if (const float* b = menu_.gyroBias()) {
+                            for (int i = 0; i < 3; ++i) p.gyroBias[i] = b[i];
+                        }
+                        g_settings.perGame[gameKey_] = p;
+                    } else {
+                        g_settings.perGame.erase(gameKey_);
+                        auto def = g_settings.defaultProfile();
+                        sharpness_ = def.sharpness;
+                        deband_ = def.deband;
+                        upscaler_ = def.upscaler;
+                        streamResolution_ = def.resolution;
+                        deadzone_ = def.deadzoneLeft;
+                        deadzoneRight_ = def.deadzoneRight;
+                        triggerStrength_ = def.triggerStrength;
+                        triggerHz_ = def.triggerHz;
+                        triggerResistance_ = def.triggerResistance;
+                        triggerPulses_ = def.triggerPulses;
+                        triggerProfile_ = def.triggerProfile;
+                        audioHaptics_ = def.audioHaptics;
+                        media::setAudioHapticsLevel(audioHaptics_);
+                        menu_.setAudioHaptics(audioHaptics_);
+                        keyMap_ = def.keyMap;
+                        padMap_ = def.padMap;
+                        touchpadShortcuts_ = def.touchpadShortcuts;
+                        touchpadMouse_ = def.touchpadMouse;
+                        circleConfirms_ = def.circleConfirms;
+                        gyroMode_ = def.gyroMode;
+                        gyroLevel_ = def.gyroLevel;
+                        input::setGyro(gyroMode_, gyroLevel_);
+                        menu_.setGyro(gyroMode_, gyroLevel_);
+                        menu_.setGyroYawScale(def.gyroYawScale);
+                        menu_.setGyroPitchScale(def.gyroPitchScale);
+                        menu_.setGyroBias(def.gyroBias);
+                        input::setGyroCalibration(def.gyroBias, def.gyroYawScale / 100.0f, def.gyroPitchScale / 100.0f);
+                        menu_.setTouchpadShortcuts(touchpadShortcuts_);
+                        display::setSharpness(kSharpAmount[sharpness_]);
+                        applyDeband_();
+                        applyUpscaler(upscaler_);
+                        input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
+                        input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
+                        input::setCircleConfirms(circleConfirms_);
+                        menu_.setProfileValues(streamResolution_, sharpness_, deband_, upscaler_,
+                                               triggerStrength_, deadzone_, circleConfirms_, false);
+                        menu_.setDeadzones(deadzone_, deadzoneRight_);
+                        menu_.setTriggerConfig(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
                     }
-                    g_settings.perGame[gameKey_] = p;
-                } else {
-                    g_settings.perGame.erase(gameKey_);
-                    auto def = g_settings.defaultProfile();
-                    sharpness_ = def.sharpness;
-                    deband_ = def.deband;
-                    upscaler_ = def.upscaler;
-                    streamResolution_ = def.resolution;
-                    deadzone_ = def.deadzoneLeft;
-                    triggerStrength_ = def.triggerStrength;
-                    triggerProfile_ = def.triggerProfile;
-                    keyMap_ = def.keyMap;
-                    padMap_ = def.padMap;
-                    touchpadShortcuts_ = def.touchpadShortcuts;
-                    touchpadMouse_ = def.touchpadMouse;
-                    circleConfirms_ = def.circleConfirms;
-                    gyroMode_ = def.gyroMode;
-                    gyroLevel_ = def.gyroLevel;
-                    input::setGyro(gyroMode_, gyroLevel_);
-                    menu_.setGyro(gyroMode_, gyroLevel_);
-                    menu_.setGyroYawScale(def.gyroYawScale);
-                    menu_.setGyroPitchScale(def.gyroPitchScale);
-                    menu_.setGyroBias(def.gyroBias);
-                    input::setGyroCalibration(def.gyroBias, def.gyroYawScale / 100.0f, def.gyroPitchScale / 100.0f);
-                    menu_.setTouchpadShortcuts(touchpadShortcuts_);
-                    display::setSharpness(kSharpAmount[sharpness_]);
-                    applyDeband_();
-                    applyUpscaler(upscaler_);
-                    input::setDeadzone(deadzone_ / 100.0f, deadzone_ / 100.0f);
-                    input::setTriggerFeel(triggerStrength_, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, triggerProfile_);
-                    input::setCircleConfirms(circleConfirms_);
-                    menu_.setProfileValues(streamResolution_, sharpness_, deband_, upscaler_,
-                                           triggerStrength_, deadzone_, circleConfirms_, false);
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
                 }
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Sharpness: {
                 sharpness_ = menu_.sharpness();
                 display::setSharpness(kSharpAmount[sharpness_]);
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].sharpness = sharpness_;
-                else g_settings.sharpness = sharpness_;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();  // else leaving Settings later would put the old value back
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].sharpness = sharpness_;
+                    else g_settings.sharpness = sharpness_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();  // else leaving Settings later would put the old value back
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Upscaler: {
                 upscaler_ = menu_.upscaler();
                 applyUpscaler(upscaler_);
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].upscaler = upscaler_;
-                else g_settings.upscaler = upscaler_;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].upscaler = upscaler_;
+                    else g_settings.upscaler = upscaler_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Deband: {
                 deband_ = menu_.deband();
                 applyDeband_();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].deband = deband_;
-                else g_settings.deband = deband_;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].deband = deband_;
+                    else g_settings.deband = deband_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Triggers: {
                 triggerStrength_ = menu_.triggerStrength();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) {
-                    auto& gp = g_settings.perGame[gameKey_];
-                    gp.triggerStrength = triggerStrength_;
-                    input::setTriggerFeel(triggerStrength_, gp.triggerHz, gp.triggerResistance, gp.triggerPulses, triggerProfile_);
-                } else {
-                    g_settings.triggerStrength = triggerStrength_;
-                    input::setTriggerFeel(triggerStrength_, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, triggerProfile_);
+                triggerHz_ = menu_.triggerHz();
+                triggerResistance_ = menu_.triggerResistance();
+                triggerPulses_ = menu_.triggerPulses();
+                triggerProfile_ = menu_.triggerProfile();
+                input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) {
+                        auto& gp = g_settings.perGame[gameKey_];
+                        gp.triggerStrength = triggerStrength_;
+                        gp.triggerHz = triggerHz_;
+                        gp.triggerResistance = triggerResistance_;
+                        gp.triggerPulses = triggerPulses_;
+                        gp.triggerProfile = triggerProfile_;
+                    } else {
+                        g_settings.triggerStrength = triggerStrength_;
+                        g_settings.triggerHz = triggerHz_;
+                        g_settings.triggerResistance = triggerResistance_;
+                        g_settings.triggerPulses = triggerPulses_;
+                        g_settings.triggerProfile = triggerProfile_;
+                    }
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
                 }
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Deadzone: {
-                deadzone_ = menu_.deadzone();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                input::setDeadzone(deadzone_ / 100.0f, deadzone_ / 100.0f);
-                if (hasCustomProfile_) {
-                    g_settings.perGame[gameKey_].deadzoneLeft = deadzone_;
-                    g_settings.perGame[gameKey_].deadzoneRight = deadzone_;
-                } else {
-                    g_settings.deadzoneLeft = deadzone_;
-                    g_settings.deadzoneRight = deadzone_;
+                deadzone_ = menu_.deadzoneLeft();
+                deadzoneRight_ = menu_.deadzoneRight();
+                input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) {
+                        g_settings.perGame[gameKey_].deadzoneLeft = deadzone_;
+                        g_settings.perGame[gameKey_].deadzoneRight = deadzoneRight_;
+                    } else {
+                        g_settings.deadzoneLeft = deadzone_;
+                        g_settings.deadzoneRight = deadzoneRight_;
+                    }
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
                 }
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Gyro: {
@@ -694,63 +778,96 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 int pitchScale = menu_.gyroPitchScale();
                 const float* b = menu_.gyroBias();
                 input::setGyroCalibration(b, yawScale / 100.0f, pitchScale / 100.0f);
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) {
-                    g_settings.perGame[gameKey_].gyroMode = gyroMode_;
-                    g_settings.perGame[gameKey_].gyroLevel = gyroLevel_;
-                    g_settings.perGame[gameKey_].gyroYawScale = yawScale;
-                    g_settings.perGame[gameKey_].gyroPitchScale = pitchScale;
-                    if (b) {
-                        for (int i = 0; i < 3; ++i) g_settings.perGame[gameKey_].gyroBias[i] = b[i];
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) {
+                        g_settings.perGame[gameKey_].gyroMode = gyroMode_;
+                        g_settings.perGame[gameKey_].gyroLevel = gyroLevel_;
+                        g_settings.perGame[gameKey_].gyroYawScale = yawScale;
+                        g_settings.perGame[gameKey_].gyroPitchScale = pitchScale;
+                        if (b) {
+                            for (int i = 0; i < 3; ++i) g_settings.perGame[gameKey_].gyroBias[i] = b[i];
+                        }
+                    } else {
+                        g_settings.gyroMode = gyroMode_;
+                        g_settings.gyroLevel = gyroLevel_;
+                        g_settings.gyroYawScale = yawScale;
+                        g_settings.gyroPitchScale = pitchScale;
+                        if (b) {
+                            for (int i = 0; i < 3; ++i) g_settings.gyroBias[i] = b[i];
+                        }
                     }
-                } else {
-                    g_settings.gyroMode = gyroMode_;
-                    g_settings.gyroLevel = gyroLevel_;
-                    g_settings.gyroYawScale = yawScale;
-                    g_settings.gyroPitchScale = pitchScale;
-                    if (b) {
-                        for (int i = 0; i < 3; ++i) g_settings.gyroBias[i] = b[i];
-                    }
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();  // the gyro's defaults too
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
                 }
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();  // the gyro's defaults too
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::ConfirmButton: {
                 circleConfirms_ = menu_.circleConfirms();
                 input::setCircleConfirms(circleConfirms_);
                 if (g_ui) g_ui->setCircleConfirms(circleConfirms_);
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].circleConfirms = circleConfirms_;
-                else g_settings.circleConfirms = circleConfirms_;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].circleConfirms = circleConfirms_;
+                    else g_settings.circleConfirms = circleConfirms_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::Stats: {
                 showStats_ = menu_.statsOn();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                g_settings.streamStats = showStats_;
-                g_settings.statsMask = menu_.statsMask();
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.streamStats = showStats_;
+                    g_settings.statsMask = menu_.statsMask();
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::TouchpadShortcuts: {
                 touchpadShortcuts_ = menu_.touchpadShortcuts();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].touchpadShortcuts = touchpadShortcuts_;
-                else g_settings.touchpadShortcuts = touchpadShortcuts_;
-                g_settings.save(settingsPath());
-                refreshSettingsUiLocked();
-                if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].touchpadShortcuts = touchpadShortcuts_;
+                    else g_settings.touchpadShortcuts = touchpadShortcuts_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
-            case ui::MenuAction::SmartGlassToggle:
-                overlaySeq_ = 0;
+            case ui::MenuAction::AudioHaptics: {
+                audioHaptics_ = menu_.audioHaptics();
+                media::setAudioHapticsLevel(audioHaptics_);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].audioHaptics = audioHaptics_;
+                    else g_settings.audioHaptics = audioHaptics_;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
+            }
             default: break;
             }
             overlaySeq_ = 0;
@@ -1015,18 +1132,45 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         }
     }
     uint64_t nowMs = platform::nowMs();
-    bool menuRedraw = menu_.isOpen() && (nowMs - lastMenuRedrawMs_ >= (menu_.isGyroDialogOpen() ? 16 : 40));
+    if (menu_.isOpen() && menu_.isTriggerDialogOpen()) {
+        const auto& td = menu_.triggerDialog();
+        input::setTriggerFeel(td.strength(), td.hz(), td.resistance(), td.pulses(), td.profile());
+        input::setTriggerLogging(true);
+        input::setTriggerRumble(static_cast<uint8_t>(std::lround(nav.l2Analog * 255)),
+                                static_cast<uint8_t>(std::lround(nav.r2Analog * 255)), 500);
+        triggerTesting_ = true;
+    } else if (triggerTesting_) {
+        input::setTriggerLogging(false);
+        input::setTriggerRumble(0, 0, 0);
+        triggerTesting_ = false;
+    }
+    if (menu_.isOpen() && menu_.isStickDialogOpen()) {
+        const auto& sd = menu_.stickDialog();
+        input::setDeadzone(sd.deadzoneLeft() / 100.0f, sd.deadzoneRight() / 100.0f);
+    }
+    bool dialogOpen = menu_.isGyroDialogOpen() || menu_.isStickDialogOpen() || menu_.isTriggerDialogOpen();
+    bool menuRedraw = menu_.isOpen() && (nowMs - lastMenuRedrawMs_ >= (dialogOpen ? 16 : 40));
+    bool statsRedraw = showStats_ && !menu_.isOpen() && (nowMs - lastStatsRedrawMs_ >= 200);
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
     uint64_t toasts = platform::toastsEnabled() ? platform::toasts().version(nowMs) : 0;
-    if (overlaySeq_ != seq + 1 || menuRedraw || toasts != toastsShown_) {
+    if (overlaySeq_ != seq + 1 || menuRedraw || statsRedraw || toasts != toastsShown_) {
         overlaySeq_ = seq + 1;
         toastsShown_ = toasts;
         if (menuRedraw) lastMenuRedrawMs_ = nowMs;
+        if (statsRedraw) lastStatsRedrawMs_ = nowMs;
         ui::StreamInfo info;
         {
             std::lock_guard<std::mutex> infoLock(g_infoMutex);
             info = g_streamInfo;
+        }
+        std::vector<float> jitter;
+        if (g_player) g_player->getRecentNetworkJitter(jitter);
+        if (!jitter.empty()) {
+            info.frametimes = jitter;
+            menu_.setFrametimes(jitter);
+        } else if (!info.frametimes.empty()) {
+            menu_.setFrametimes(info.frametimes);
         }
         if (menu_.isOpen()) {
             menu_.update(nowMs);
@@ -1039,6 +1183,16 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 c.clear(0);
                 menu_.drawGyroDialog(c);
                 display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
+            } else if (menu_.isStickDialogOpen()) {
+                ui::Canvas c(display::kWidth, display::kHeight);
+                c.clear(0);
+                menu_.drawStickDialog(c);
+                display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
+            } else if (menu_.isTriggerDialogOpen()) {
+                ui::Canvas c(display::kWidth, display::kHeight);
+                c.clear(0);
+                menu_.drawTriggerDialog(c);
+                display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
             } else {
                 ui::Canvas c = menu_.renderMenu(info);
                 display::setOverlay(c.data(), ui::StreamMenu::kMenuX, ui::StreamMenu::kMenuY, c.width(), c.height(), 235);
@@ -1047,7 +1201,6 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);
             display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
         } else if (showStats_ && seq) {
-            if (!info.frametimes.empty()) menu_.setFrametimes(info.frametimes);
             ui::Canvas c = menu_.renderStats(info);
             display::setOverlay(c.data(), ui::StreamMenu::kStatsX, ui::StreamMenu::kStatsY, c.width(), c.height(), 200);
         } else if (info.degraded) {
@@ -1078,6 +1231,11 @@ void StreamScreen::idle() {
     keysInGame_.clear();
     kbSlotAttached_ = -1;
     mouseStick_ = {};
+    if (triggerTesting_) {
+        input::setTriggerLogging(false);
+        input::setTriggerRumble(0, 0, 0);
+        triggerTesting_ = false;
+    }
     if (!g_keyboardFor.empty()) updateTextInput(nullptr);
     touchEnabled_ = false;  // each stream starts with touch off
     if (overlayShown_) {

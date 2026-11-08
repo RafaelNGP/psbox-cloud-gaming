@@ -298,7 +298,7 @@ constexpr Column kItalian = {
     "Bitrate",                                        // StatsIndicatorBitrate
     "Latenza (RTT)",                                  // StatsIndicatorLatency
     "Perdita pacchetti",                              // StatsIndicatorLoss
-    "Grafico frametime",                              // StatsIndicatorGraph
+    "Grafico jitter di rete",                         // StatsIndicatorGraph
     "Latenza di decodifica e visualizzazione",        // StatsIndicatorDelay
     "Qualità video (QP)",                             // StatsIndicatorQp
     "Stato microfono",                                // StatsIndicatorMic
@@ -454,4 +454,7 @@ constexpr Column kItalian = {
     "Limitatore FPS",                                 // FpsLimit
     "Illimitato",                                     // FpsUnlimited
     "Limita il framerate di visualizzazione dello stream per mantenere la fluidità", // SettingDescFpsLimit
+    "Generale",                                       // MenuTabGeneral
+    "Scheda",                                         // MenuTabLabel
+    "Schede",                                         // MenuTabsLabel
 };

@@ -137,6 +137,8 @@ public:
     int fpsLimit() const;
     // Recent presentation frametimes (ms, up to 60 frames)
     void getRecentFrametimes(std::vector<float>& out) const;
+    // Recent network packet arrival jitter (ms, up to 60 samples)
+    void getRecentNetworkJitter(std::vector<float>& out) const;
 
 private:
     struct Impl;

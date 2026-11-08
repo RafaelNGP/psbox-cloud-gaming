@@ -40,6 +40,7 @@ public:
     void setStatsMask(uint32_t mask) { statsMask_ = mask; }
 
     const std::vector<float>& frametimes() const { return frametimes_; }
+    void setFrametimes(const std::vector<float>& ft);
 
     // 1. Two-column connection stats block:
     // Column 1: Região, Latência, Taxa de bits, Quadros

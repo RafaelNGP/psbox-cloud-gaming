@@ -298,7 +298,7 @@ constexpr Column kGerman = {
     "Bitrate",                                        // StatsIndicatorBitrate
     "Latenz (RTT)",                                   // StatsIndicatorLatency
     "Paketverlust",                                   // StatsIndicatorLoss
-    "Frametime-Diagramm",                             // StatsIndicatorGraph
+    "Netzwerk-Jitter-Diagramm",                       // StatsIndicatorGraph
     "Dekodier- und Anzeigelatenz",                    // StatsIndicatorDelay
     "Videoqualität (QP)",                             // StatsIndicatorQp
     "Mikrofonstatus",                                 // StatsIndicatorMic
@@ -454,4 +454,7 @@ constexpr Column kGerman = {
     "FPS-Begrenzer",                                  // FpsLimit
     "Unbegrenzt",                                     // FpsUnlimited
     "Begrenzt die Bildrate des Streams für ein gleichmäßiges Bild-Pacing", // SettingDescFpsLimit
+    "Allgemein",                                      // MenuTabGeneral
+    "Tab",                                            // MenuTabLabel
+    "Tabs",                                           // MenuTabsLabel
 };

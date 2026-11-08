@@ -463,6 +463,9 @@ enum class Str {
     FpsLimit,
     FpsUnlimited,
     SettingDescFpsLimit,
+    MenuTabGeneral,
+    MenuTabLabel,
+    MenuTabsLabel,
     Count
 };
 

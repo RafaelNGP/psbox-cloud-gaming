@@ -1195,7 +1195,30 @@ void AppUi::drawSettings(Canvas& c) {
             if (focused && !dropdownOpen_) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 3, 16);
             fonts_.semibold.draw(c, labels[i], r.x + 32, ty, kRowPx, kWhite);
             float cx = static_cast<float>(r.x + r.w - 40), cy = static_cast<float>(r.y + r.h / 2);
-            if (i != 7 && i != 17 && i != 18 && i != 19 && i != 25) {
+            const bool isSubmenuRow = (i == 3 || i == 4 || i == 12 || i == 14);
+            if (isSubmenuRow) {
+                const int pillW = focused ? 42 : 24;
+                const int pillH = 22;
+                const int pillX = r.x + r.w - 16 - pillW;
+                const int pillY = r.y + (r.h - pillH) / 2;
+                c.fillRect({pillX, pillY, pillW, pillH},
+                           focused ? rgba(24, 28, 32) : rgba(255, 255, 255, 22), 6);
+                c.strokeRect({pillX, pillY, pillW, pillH},
+                             focused ? rgba(22, 163, 74) : rgba(255, 255, 255, 55), 1, 6);
+                if (focused) {
+                    if (g_keyboardHints) {
+                        fonts_.bold.draw(c, "OK", pillX + 4, fonts_.bold.centeredY(pillY, pillH, 10), 10, rgba(74, 222, 128));
+                    } else {
+                        drawFaceButton(c, fonts_.bold, circleConfirms_ ? kIconCircle : kIconCross,
+                                       static_cast<float>(pillX + 12), static_cast<float>(pillY + pillH / 2), 7.5f);
+                    }
+                }
+                const float acx = static_cast<float>(pillX + pillW - 11);
+                const float acy = static_cast<float>(pillY + pillH / 2);
+                const Color arrowCol = focused ? rgba(74, 222, 128) : rgba(215, 215, 215);
+                c.line(acx - 2.0f, acy - 4.0f, acx + 2.5f, acy, 2.0f, arrowCol);
+                c.line(acx + 2.5f, acy, acx - 2.0f, acy + 4.0f, 2.0f, arrowCol);
+            } else if (i != 7 && i != 17 && i != 18 && i != 19 && i != 25) {
                 c.line(cx - 8, cy - 3, cx, cy + 4, 2.5f, focused ? kWhite : kGray);
                 c.line(cx, cy + 4, cx + 8, cy - 3, 2.5f, focused ? kWhite : kGray);
             }
@@ -2249,7 +2272,9 @@ void AppUi::drawGameSettings(Canvas& c) {
             break;
         case 5:
             label = tr(Str::Deadzone);
-            value = std::to_string(activeGameProfile_.deadzoneLeft) + " %";
+            value = (activeGameProfile_.deadzoneLeft == activeGameProfile_.deadzoneRight)
+                  ? (std::to_string(activeGameProfile_.deadzoneLeft) + " %")
+                  : (std::to_string(activeGameProfile_.deadzoneLeft) + "% / " + std::to_string(activeGameProfile_.deadzoneRight) + "%");
             break;
         case 6: {
             label = tr(Str::TriggerRumble);
@@ -2337,9 +2362,38 @@ void AppUi::drawGameSettings(Canvas& c) {
             }
             drawFaceButton(c, fonts_.bold, activeGameProfile_.circleConfirms ? kIconCircle : kIconCross, cx, cy, 16);
         } else {
-            std::string disp = focused ? ("\xE2\x80\xB9  " + value + "  \xE2\x80\xBA") : value;
+            const bool hasSubmenu = (i == 5 || i == 6 || i == 9 || i == 11 || i == 17);
+            const bool canCycle = (i != 9 && i != 11 && i != 17);
+            int valueRight = r.x + r.w - 28;
+            if (hasSubmenu) {
+                const int pillW = focused ? 50 : 28;
+                const int pillH = 24;
+                const int pillX = r.x + r.w - 20 - pillW;
+                const int pillY = r.y + (r.h - pillH) / 2;
+                valueRight = pillX - 14;
+
+                c.fillRect({pillX, pillY, pillW, pillH},
+                           focused ? rgba(24, 28, 32) : rgba(255, 255, 255, 22), 6);
+                c.strokeRect({pillX, pillY, pillW, pillH},
+                             focused ? rgba(22, 163, 74) : rgba(255, 255, 255, 55), 1, 6);
+
+                if (focused) {
+                    if (g_keyboardHints) {
+                        fonts_.bold.draw(c, "OK", pillX + 6, fonts_.bold.centeredY(pillY, pillH, 11), 11, rgba(74, 222, 128));
+                    } else {
+                        drawFaceButton(c, fonts_.bold, circleConfirms_ ? kIconCircle : kIconCross,
+                                       static_cast<float>(pillX + 14), static_cast<float>(pillY + pillH / 2), 8.0f);
+                    }
+                }
+                const float acx = static_cast<float>(pillX + pillW - 12);
+                const float acy = static_cast<float>(pillY + pillH / 2);
+                const Color arrowCol = focused ? rgba(74, 222, 128) : rgba(215, 215, 215);
+                c.line(acx - 2.0f, acy - 4.0f, acx + 2.5f, acy, 2.0f, arrowCol);
+                c.line(acx + 2.5f, acy, acx - 2.0f, acy + 4.0f, 2.0f, arrowCol);
+            }
+            std::string disp = (focused && canCycle) ? ("\xE2\x80\xB9  " + value + "  \xE2\x80\xBA") : value;
             int vw = fonts_.regular.measure(disp, 26);
-            fonts_.regular.draw(c, disp, r.x + r.w - 28 - vw, fonts_.regular.centeredY(r.y, r.h, 26), 26,
+            fonts_.regular.draw(c, disp, valueRight - vw, fonts_.regular.centeredY(r.y, r.h, 26), 26,
                                 focused ? kWhite : kGray);
         }
 

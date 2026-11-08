@@ -173,6 +173,15 @@ struct StreamPlayer::Impl {
     size_t frametimesCount = 0;
     size_t frametimesHead = 0;
 
+    mutable std::mutex networkJitterMutex;
+    static constexpr size_t kJitterRing = 60;
+    std::array<float, kJitterRing> networkJitterRing{};
+    size_t networkJitterCount = 0;
+    size_t networkJitterHead = 0;
+    bool haveTransit = false;
+    uint64_t lastArrivalUs = 0;
+    uint32_t lastRtpTimestamp = 0;
+
     media::AudioIn audioIn;
     media::AudioEncoder audioEncoder;
     std::atomic<bool> highRefreshOutput{false};  // setHighRefreshOutput()
@@ -896,8 +905,27 @@ struct StreamPlayer::Impl {
                 frames.clear();
                 keyframeWanted = true;
             }
+            uint64_t nowUs = platform::nowUs();
+            uint64_t nowArrivalUs = firstPacketUs > 0 ? firstPacketUs : nowUs;
+            if (haveTransit && rtpTimestamp != lastRtpTimestamp) {
+                int64_t dArrivalUs = static_cast<int64_t>(nowArrivalUs) - static_cast<int64_t>(lastArrivalUs);
+                int64_t dArrival = (dArrivalUs * 90) / 1000;  // 90 kHz RTP clock units
+                int64_t dRtp = static_cast<int32_t>(rtpTimestamp - lastRtpTimestamp);
+                int64_t dt = std::abs(dArrival - dRtp);
+                float jitterMs = static_cast<float>(dt) / 90.0f;
+                if (jitterMs >= 0.0f && jitterMs <= 250.0f) {
+                    std::lock_guard<std::mutex> lk(networkJitterMutex);
+                    networkJitterRing[networkJitterHead % kJitterRing] = jitterMs;
+                    ++networkJitterHead;
+                    if (networkJitterCount < kJitterRing) ++networkJitterCount;
+                }
+            }
+            lastArrivalUs = nowArrivalUs;
+            lastRtpTimestamp = rtpTimestamp;
+            haveTransit = true;
+
             frames.push_back(
-                {std::vector<uint8_t>(d, d + n), rtpTimestamp, stream::clockMs(), platform::nowUs(), firstPacketUs});
+                {std::vector<uint8_t>(d, d + n), rtpTimestamp, stream::clockMs(), nowUs, firstPacketUs});
             cv.notify_one();
         };
         cb.audio = [this](const uint8_t* d, size_t n, uint32_t rtpTimestamp) {
@@ -1508,6 +1536,22 @@ void StreamPlayer::getRecentFrametimes(std::vector<float>& out) const {
     size_t start = head >= count ? head - count : 0;
     for (size_t i = 0; i < count; ++i) {
         out.push_back(impl_->frametimesRing[(start + i) % Impl::kFrametimeRing]);
+    }
+}
+
+void StreamPlayer::getRecentNetworkJitter(std::vector<float>& out) const {
+    if (!impl_) {
+        out.clear();
+        return;
+    }
+    std::lock_guard<std::mutex> lk(impl_->networkJitterMutex);
+    out.clear();
+    out.reserve(impl_->networkJitterCount);
+    size_t count = impl_->networkJitterCount;
+    size_t head = impl_->networkJitterHead;
+    size_t start = head >= count ? head - count : 0;
+    for (size_t i = 0; i < count; ++i) {
+        out.push_back(impl_->networkJitterRing[(start + i) % Impl::kJitterRing]);
     }
 }
 
