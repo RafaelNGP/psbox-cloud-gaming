@@ -489,4 +489,15 @@ constexpr Column kFrench = {
     "Échec : Gardez immobile",                        // GyroCalibratedFailedShort
     "Mode Démo (Automatique)",                        // GyroDemoMode
     "Bougez la manette pour tester ; utilisez les flèches pour ajuster la sensibilité.", // GyroTestHelp
+    "Qualité vidéo",                                  // StatVideoQuality
+    "Ouvre le menu Xbox Guide ou envoie la commande Xbox au jeu.", // MenuDescXboxButton
+    "Configure et affiche les statistiques de performance, réseau et latence à l'écran.", // MenuDescStats
+    "Applique des algorithmes de mise à l'échelle comme AMD FSR et netteté des contours.", // MenuDescUpscaler
+    "Ajuste l'intensité du filtre de netteté appliqué au flux vidéo.", // MenuDescSharpness
+    "Réduit les bandes de dégradés et les artefacts de compression dans les scènes sombres.", // MenuDescDeband
+    "Redémarre la connexion WebRTC sans fermer votre session cloud.", // MenuDescReloadStream
+    "Quitte le jeu cloud actuel et retourne à l'écran d'accueil.", // MenuDescLeave
+    "Met fin à la diffusion depuis votre console Xbox et retourne à l'accueil.", // MenuDescEndStream
+    "Assigne la manette physique correspondant à ce joueur virtuel.", // MenuDescPlayer
+    "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
 };

@@ -54,6 +54,7 @@ struct Autoplay {
     bool block1Test = false;     // "block1test": verify 3x3 filter grid, settings descriptions, free acquire button, and loading tips
     bool block2Test = false;     // "block2test": verify update prompt 3 buttons, notes modal, pad speaker volume, and bitrate caps
     bool block3Test = false;     // "block3test": verify web server qr in settings and official age rating on details
+    bool gyroSettingsTest = false; // "gyrosettingstest": verify gyro submenu > in settings and GyroWheelDialog
     bool touchpadTest = false;   // "touchpadtest": verify touchpad shortcuts modal, stream menu slots with Phone icon, and loading screen
     bool bitrateTest = false;    // "bitratetest": open settings, focus Bitrate row, test slider, save settings_bitrate_caps.ppm
     bool detailTest = false;     // open a game to buy far down the list, save its page

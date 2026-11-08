@@ -36,7 +36,8 @@ void drawToasts(Canvas& c, const Fonts& fonts, const std::vector<std::string>& t
         c.fillRect({r.x + 4, r.y + 6, r.w, r.h}, rgba(0, 0, 0, 110), 18);  // shadow
         c.fillRect(r, kPanel, 18);
         c.fillRect({r.x, r.y + 14, 5, r.h - 28}, kAccent, 2);
-        int ty = r.y + kPadY;
+        int ty = (ls.size() == 1) ? fonts.semibold.centeredY(r.y, r.h, kPx)
+                                  : (r.y + (r.h - (static_cast<int>(ls.size() - 1) * kLineH + kPx)) / 2);
         for (const auto& l : ls) {
             fonts.semibold.draw(c, l, r.x + kPadX, ty, kPx, kText);
             ty += kLineH;

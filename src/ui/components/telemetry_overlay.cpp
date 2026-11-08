@@ -93,7 +93,7 @@ void TelemetryOverlay::drawTwoColumnStats(Canvas& c, const Fonts& fonts, int x, 
     int sepX = col1X + colW + colGap / 2;
     c.line(sepX, y + 2, sepX, y + 78, 1.0f, rgba(255, 255, 255, 25));
 
-    // Column 2: Loss, Decode (HW/SW), Screen Delay
+    // Column 2: Loss, Decode (HW/SW), Screen Delay, Video Quality (QP)
     int r2Y = y;
     std::string lossStr = fmt("%.1f %%", info.lossPct);
     drawRow(col2X, r2Y, colW, Str::StatLoss, lossStr);
@@ -105,6 +105,10 @@ void TelemetryOverlay::drawTwoColumnStats(Canvas& c, const Fonts& fonts, int x, 
 
     std::string scrStr = info.onScreenMs > 0 ? fmt("%.1f ms", info.onScreenMs) : none;
     drawRow(col2X, r2Y, colW, Str::StatOnScreen, scrStr);
+    r2Y += 20;
+
+    std::string qpStr = info.qp >= 0 ? fmt("QP %.0f", info.qp) : none;
+    drawRow(col2X, r2Y, colW, Str::StatVideoQuality, qpStr);
 }
 
 void TelemetryOverlay::drawSparkline(Canvas& c, int x, int y, int w, int h) const {

@@ -498,6 +498,17 @@ enum class Str {
     GyroCalibratedFailedShort,
     GyroDemoMode,
     GyroTestHelp,
+    StatVideoQuality,
+    MenuDescXboxButton,
+    MenuDescStats,
+    MenuDescUpscaler,
+    MenuDescSharpness,
+    MenuDescDeband,
+    MenuDescReloadStream,
+    MenuDescLeave,
+    MenuDescEndStream,
+    MenuDescPlayer,
+    MenuDescPadSpeakerVolume,
     Count
 };
 

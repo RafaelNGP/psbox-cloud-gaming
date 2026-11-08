@@ -287,9 +287,12 @@ std::string prettyRegion(const std::string& name);
 // Format playtime in seconds into a friendly string (e.g. "14 h 32 min", "45 min", "< 1 min").
 std::string formatPlaytime(uint64_t seconds);
 
+class GyroWheelDialog;
+
 class AppUi {
 public:
     AppUi(const Fonts& fonts, ImageCache& images);
+    ~AppUi();
 
     const Fonts& fonts() const { return fonts_; }
 
@@ -605,7 +608,7 @@ private:
     Color pickerColour() const;
     void drawColourPicker(Canvas& c);
     // The testers that Dead zone and Trigger vibration open in Settings.
-    enum class Tester { None, Sticks, Triggers, Keys, Pad, Touchpad, SignInCheck, NetworkTest, Donation, GyroCal };
+    enum class Tester { None, Sticks, Triggers, Keys, Pad, Touchpad, SignInCheck, NetworkTest, Donation, GyroCal, Gyro };
     void openTester(Tester t);
     void handleTester(const NavInput& in);
     void drawStickTester(Canvas& c);
@@ -759,6 +762,7 @@ private:
     std::string updatingTo_, updateStatus_;
     float updateFraction_ = -1;
     Tester tester_ = Tester::None;
+    std::unique_ptr<GyroWheelDialog> gyroDialog_;
     SettingsChoice testerBackup_;  // what Circle puts back
     int testerRow_ = 0;            // the trigger tester's row: intensity, frequency, resistance, style
     // The keyboard keys' screen: the row (kKeysPerColumn: restore defaults),

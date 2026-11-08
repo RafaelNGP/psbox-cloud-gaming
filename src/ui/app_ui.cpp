@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "ui/app_ui_internal.h"
+#include "ui/components/gyro_wheel_dialog.h"
 
 namespace xc::ui {
 
@@ -98,6 +99,7 @@ bool AppUi::Anim::step(float dt) {
 }
 
 AppUi::AppUi(const Fonts& fonts, ImageCache& images) : fonts_(fonts), images_(images) {}
+AppUi::~AppUi() = default;
 
 // --- Model ---------------------------------------------------------------------
 

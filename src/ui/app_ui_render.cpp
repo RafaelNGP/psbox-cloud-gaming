@@ -258,7 +258,8 @@ void AppUi::drawToast(Canvas& c, uint64_t nowMs) {
     int w = fonts_.semibold.measure(toast_, 24) + 64;
     Rect r{(kW - w) / 2, kH - 150, w, 56};
     c.fillRect(r, rgba(40, 40, 40, 235), 28);
-    fonts_.semibold.draw(c, toast_, r.x + 32, r.y + 14, 24, kWhite);
+    int ty = fonts_.semibold.centeredY(r.y, r.h, 24);
+    fonts_.semibold.draw(c, toast_, r.x + 32, ty, 24, kWhite);
     animating_ = true;
 }
 

@@ -227,7 +227,6 @@ public:
     enum Item {
         // Tab General
         XboxButton = 0,
-        Profile,
         Stats,
         Upscaler,
         Sharpness,
@@ -244,14 +243,17 @@ public:
         PlayerItem,
         ConfirmItem,
         Triggers,
-        AudioHapticsItem,
         DeadzoneItem,
-        PadSpeakerVolumeItem,
         TouchpadShortcutsItem,
         GyroItem,
+        AudioHapticsItem,
+        PadSpeakerVolumeItem,
 
-        ItemCount
+        ItemCount,
+        Profile = ItemCount
     };
+
+    const char* itemDescription(int item) const;
 
 private:
     bool itemInTab(int item, MenuTab tab) const;

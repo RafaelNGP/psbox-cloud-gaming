@@ -33,19 +33,20 @@ std::string fmt(const char* f, double v) {
 
 bool StreamMenu::itemInTab(int item, MenuTab tab) const {
     if (tab == MenuTab::General) {
-        return item == XboxButton || item == Profile || item == Stats ||
+        return item == XboxButton || item == Stats ||
                item == Upscaler || item == Sharpness || item == Deband ||
                item == Resolution || item == VideoDecoderItem || item == FpsLimiterItem ||
                item == BitrateLimiterItem || item == VrrItem ||
                item == ReloadStreamItem || item == Leave;
     } else { // Controls
         return item == PlayerItem || item == ConfirmItem || item == Triggers ||
-               item == AudioHapticsItem || item == DeadzoneItem || item == PadSpeakerVolumeItem ||
-               item == TouchpadShortcutsItem || item == GyroItem;
+               item == DeadzoneItem || item == TouchpadShortcutsItem || item == GyroItem ||
+               item == AudioHapticsItem || item == PadSpeakerVolumeItem;
     }
 }
 
 bool StreamMenu::itemShown(int item) const {
+    if (item == Profile) return false;
     if (!itemInTab(item, activeTab_)) return false;
     switch (item) {
     case VideoDecoderItem: return true;
@@ -392,6 +393,33 @@ std::string StreamMenu::formatBitrateLabel(int mbps) {
     return std::to_string(mbps) + (mbps > 15 ? " Mbps (experimental)" : " Mbps");
 }
 
+const char* StreamMenu::itemDescription(int item) const {
+    switch (item) {
+        case XboxButton: return tr(Str::MenuDescXboxButton);
+        case Stats: return tr(Str::MenuDescStats);
+        case Upscaler: return tr(Str::MenuDescUpscaler);
+        case Sharpness: return tr(Str::MenuDescSharpness);
+        case Deband: return tr(Str::MenuDescDeband);
+        case Resolution: return tr(Str::SettingDescResolution);
+        case VideoDecoderItem: return tr(Str::SettingDescVideoDecoder);
+        case FpsLimiterItem: return tr(Str::SettingDescFpsLimit);
+        case BitrateLimiterItem: return tr(Str::SettingDescBitrateCap);
+        case VrrItem: return tr(Str::SettingDescHighRefresh);
+        case ReloadStreamItem: return tr(Str::MenuDescReloadStream);
+        case Leave: return tr(homeConsole_ ? Str::MenuDescEndStream : Str::MenuDescLeave);
+
+        case PlayerItem: return tr(Str::MenuDescPlayer);
+        case ConfirmItem: return tr(Str::SettingDescConfirmButton);
+        case Triggers: return tr(Str::SettingDescTriggerRumble);
+        case DeadzoneItem: return tr(Str::SettingDescDeadzone);
+        case TouchpadShortcutsItem: return tr(Str::SettingDescTouchpadShortcuts);
+        case GyroItem: return tr(Str::SettingDescGyro);
+        case AudioHapticsItem: return tr(Str::SettingDescAudioHaptics);
+        case PadSpeakerVolumeItem: return tr(Str::MenuDescPadSpeakerVolume);
+        default: return "";
+    }
+}
+
 Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     const int canvasW = (!statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
     Canvas c(canvasW, kMenuH);
@@ -586,7 +614,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
 
     // The Items List
-    constexpr int kRowH = 38, kTop = 108, kPx = 18, kMaxVisible = 14;
+    constexpr int kRowH = 38, kTop = 128, kPx = 18, kMaxVisible = 14;
+    constexpr int kLeaveGap = 32;
     int shownList[ItemCount];
     int totalShown = 0;
     int selIdx = 0;
@@ -603,7 +632,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
 
     for (int v = 0; v < visibleCount; ++v) {
         int i = shownList[startIdx + v];
-        Rect row{kPad - 16, kTop + v * kRowH, kMenuW - 2 * (kPad - 16), kRowH - 4};
+        int rowY = kTop + v * kRowH + ((activeTab_ == MenuTab::General && i == Leave) ? kLeaveGap : 0);
+        Rect row{kPad - 16, rowY, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
         Color fg = sel ? kDark : kWhite;
@@ -827,16 +857,17 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
     }
 
-    // 4. Gestures and Button Hints at bottom
+    // 4. Dynamic Description of Selected Option & Button Hints at bottom
     c.fillRect({kPad, 930, kMenuW - 2 * kPad, 1}, rgba(50, 50, 50));
-    int hy = kMenuH - 50, x = kPad;
     {
-        Str hint = g_keyboardHints ? Str::MenuKeyHint : caps_.touchpad ? Str::MenuGestureHint : Str::MenuButtonHint;
-        auto lines = fonts_.regular.wrap(tr(hint), 15, kMenuW - 2 * kPad, 2);
-        int gy = 944;
-        for (const auto& l : lines) {
-            fonts_.regular.draw(c, l, kPad, gy, 15, kDim);
-            gy += 20;
+        const char* desc = itemDescription(selected_);
+        if (desc && desc[0] != '\0') {
+            auto lines = fonts_.regular.wrap(desc, 15, kMenuW - 2 * kPad, 2);
+            int gy = 944;
+            for (const auto& l : lines) {
+                fonts_.regular.draw(c, l, kPad, gy, 15, kDim);
+                gy += 20;
+            }
         }
     }
 
@@ -853,6 +884,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                              : subItem              ? tr(Str::Adjust)
                                                     : tr(Str::Select);
 
+    int hy = kMenuH - 46, x = kPad;
+
     // Action Hints
     if (g_keyboardHints) {
         auto cap = [&](const char* key) {
@@ -863,23 +896,25 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             return kw;
         };
         int kw = cap("Enter");
-        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, hy, 20, kGray) + 24;
+        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 24;
         kw = cap("Esc");
-        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, hy, 20, kGray) + 24;
+        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 24;
         kw = cap("Q/E");
-        fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, hy, 20, kGray);
+        fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray);
         return c;
     }
 
     icon(!circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, confirmLabel, x + 34, hy, 20, kGray) + 24;
+    x = fonts_.semibold.draw(c, confirmLabel, x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 28;
     icon(circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, hy, 20, kGray) + 24;
+    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 28;
 
-    // L1/R1 Tab Switch Hint
-    c.fillRect({x, hy + 2, 54, 22}, rgba(255, 255, 255, 30), 4);
-    fonts_.bold.draw(c, "L1/R1", x + 6, fonts_.bold.centeredY(hy + 2, 22, 13), 13, kWhite);
-    fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + 60, hy, 20, kGray);
+    // L1 / R1 Tab Switch Hint (separated with clear spacing)
+    const char* tabBadge = "L1 / R1";
+    int bw = fonts_.bold.measure(tabBadge, 13) + 20;
+    c.fillRect({x, hy + 1, bw, 22}, rgba(255, 255, 255, 30), 4);
+    fonts_.bold.draw(c, tabBadge, x + 10, fonts_.bold.centeredY(hy + 1, 22, 13), 13, kWhite);
+    fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + bw + 10, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray);
 
     return c;
 }

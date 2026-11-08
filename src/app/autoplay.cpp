@@ -42,6 +42,7 @@ const char* cloudTimeShot = nullptr;  // "cloudtimetest": save this capture now
 bool signInCheckShot = false; // "checksignintest": save the screen now
 bool trophySettingsShot = false, trophySyncedShot = false, trophySyncingShot = false, homeSyncingShot = false; // "trophytest": save screenshots
 bool trophyDisclaimerShot = false, trophyEnabledShot = false, trophyRemoveConfirmShot = false, trophyRemovedToastShot = false;
+bool gyroRowShot = false, gyroDialogShot = false;
 bool freeUiShot = false, freeDetailsShot = false; // "freetest": save free account screenshots
 const char* keysShot = nullptr;  // "keystest": the screen to save now
 uint64_t homeSince = 0, launchSince = 0;
@@ -188,6 +189,7 @@ void loadAutoplay() {
         if (opt == "mw4test") g_autoplay.mw4Test = true;
         if (opt == "v150test") g_autoplay.v150Test = true;
         if (opt == "claimtest") g_autoplay.claimTest = true;
+        if (opt == "gyrosettingstest") g_autoplay.gyroSettingsTest = true;
         if (opt == "streammenutest") g_autoplay.streamMenuTest = true;
         if (opt == "regiontest") g_autoplay.regionTest = true;
         if (opt == "tlscheck") g_autoplay.tlsCheck = true;
@@ -1164,6 +1166,40 @@ void autoplayNav(ui::NavInput& nav, bool& menuCombo, uint64_t now) {
         }
     }
 
+    if (g_autoplay.gyroSettingsTest && uiSaved) {
+        static uint64_t since = 0;
+        static int step = 0;
+        if (!since) since = now;
+        static SettingsWalk walk;
+        const uint64_t at[] = {500, 1500, 3500, 5000, 6500, 8000};
+        if (step < 6 && now - since >= at[step]) {
+            bool next = true;
+            if (step == 0) nav.options = true;
+            if (step == 1) next = walk.step(nav, downsTo(15));
+            if (step == 2) {
+                if (onSettingsRow(15, "gyro settings test")) {
+                    gyroRowShot = true;
+                } else {
+                    g_autoplay.gyroSettingsTest = false;
+                    g_ui->showHome();
+                }
+            }
+            if (step == 3) {
+                nav.accept = true;
+            }
+            if (step == 4) {
+                gyroDialogShot = true;
+            }
+            if (step == 5) {
+                nav.back = true;
+                g_ui->showHome();
+                g_autoplay.gyroSettingsTest = false;
+                XC_LOGI("AUTOPLAY END: gyro settings test");
+            }
+            if (next) ++step;
+        }
+    }
+
     if (g_autoplay.cloudTimeTest && uiSaved) {
         // The account's cloud time as a limited account shows it: the badge
         // under the brand, then low (orange), then the error when it ran out.
@@ -1477,6 +1513,16 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
         trophyRemovedToastShot = false;
         saveCanvas("trophy_removed_toast.ppm");
         XC_LOGI("AUTOPLAY: saved trophy_removed_toast.ppm");
+    }
+    if (gyroRowShot) {
+        gyroRowShot = false;
+        saveCanvas("settings_gyro_row.ppm");
+        XC_LOGI("AUTOPLAY: saved settings_gyro_row.ppm");
+    }
+    if (gyroDialogShot) {
+        gyroDialogShot = false;
+        saveCanvas("settings_gyro_dialog.ppm");
+        XC_LOGI("AUTOPLAY: saved settings_gyro_dialog.ppm");
     }
     if (trophySyncingShot) {
         trophySyncingShot = false;
@@ -2022,6 +2068,24 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
                 ppm += static_cast<char>((p >> 16) & 0xFF);
             }
             platform::writeFileAtomic(platform::dataDir() + "/stream_menu_usb.ppm", ppm);
+
+            ui::StreamMenu menuSingle(g_ui->fonts());
+            menuSingle.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.3f, false);
+            ui::PadSlots singlePad{};
+            singlePad[0].connected = true;
+            singlePad[0].name = "RafaelNGP";
+            menuSingle.setPads(singlePad);
+            menuSingle.setTab(ui::MenuTab::Controls);
+            ui::Canvas ctrlCanvas = menuSingle.renderMenu(info);
+            std::string ppmCtrl = "P6\n" + std::to_string(ctrlCanvas.width()) + " " + std::to_string(ctrlCanvas.height()) + "\n255\n";
+            for (size_t i = 0; i < static_cast<size_t>(ctrlCanvas.width() * ctrlCanvas.height()); ++i) {
+                uint32_t p = ctrlCanvas.data()[i];
+                ppmCtrl += static_cast<char>(p & 0xFF);
+                ppmCtrl += static_cast<char>((p >> 8) & 0xFF);
+                ppmCtrl += static_cast<char>((p >> 16) & 0xFF);
+            }
+            platform::writeFileAtomic(platform::dataDir() + "/stream_menu_controls.ppm", ppmCtrl);
+            XC_LOGI("AUTOPLAY: stream_menu_controls.ppm saved");
             ++step;
         } else if (step == 3 && now - since > 8000) {
             ui::StreamMenu menu(g_ui->fonts());

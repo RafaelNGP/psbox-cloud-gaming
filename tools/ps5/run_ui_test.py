@@ -21,10 +21,13 @@ ftp.login()
 ppm_names = [
     "stream_menu.ppm",
     "stream_menu_muted.ppm",
+    "stream_menu_controls.ppm",
     "stream_menu_usb.ppm",
     "stream_menu_sticks.ppm",
     "stream_menu_triggers.ppm",
     "stream_menu_gyro.ppm",
+    "settings_gyro_row.ppm",
+    "settings_gyro_dialog.ppm",
     "settings.ppm",
     "ui.ppm"
 ]

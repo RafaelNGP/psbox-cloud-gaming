@@ -966,10 +966,7 @@ static void testStreamMenu() {
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::XboxButton);  // first; it closes
     CHECK(!menu.isOpen());
     menu.open(0, false);
-    press([](xc::ui::NavInput& n) { n.down = true; });
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::ProfileToggle);
-    CHECK(menu.hasCustomProfile());
-    press([](xc::ui::NavInput& n) { n.down = true; });
+    press([](xc::ui::NavInput& n) { n.down = true; }); // Stats (Profile was removed)
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Stats);
     CHECK(menu.statsOn());
     press([](xc::ui::NavInput& n) { n.down = true; });
@@ -1010,7 +1007,7 @@ static void testStreamMenu() {
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::ReloadStream);
     CHECK(!menu.isOpen());
 
-    // Test Controls Tab
+    // Test Controls Tab (reordered: Confirm -> Triggers -> Deadzone -> TouchpadShortcuts -> Gyro -> AudioHaptics -> PadSpeakerVolume)
     menu.open(0, false);
     press([](xc::ui::NavInput& n) { n.r1 = true; }); // Switch to Controls Tab
     CHECK(menu.tab() == xc::ui::MenuTab::Controls);
@@ -1018,13 +1015,8 @@ static void testStreamMenu() {
     CHECK(menu.circleConfirms());
     press([](xc::ui::NavInput& n) { n.down = true; }); // Triggers
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Triggers);
-    press([](xc::ui::NavInput& n) { n.down = true; }); // AudioHapticsItem
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 1);
-    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 2);
     press([](xc::ui::NavInput& n) { n.down = true; }); // Deadzone
     CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Deadzone);
-    press([](xc::ui::NavInput& n) { n.down = true; }); // PadSpeakerVolume
-    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::PadSpeakerVolume && menu.padSpeakerVolume() == 95);
     press([](xc::ui::NavInput& n) { n.down = true; }); // TouchpadShortcuts
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::TouchpadShortcuts);
     CHECK(press([](xc::ui::NavInput& n) { n.back = true; }) == MenuAction::TouchpadShortcuts);
@@ -1042,6 +1034,11 @@ static void testStreamMenu() {
     CHECK(menu.isGyroCalibrating());
     menu.closeGyroDialog();
     CHECK(!menu.isGyroDialogOpen());
+    press([](xc::ui::NavInput& n) { n.down = true; }); // AudioHapticsItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 1);
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::AudioHaptics && menu.audioHaptics() == 2);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // PadSpeakerVolume
+    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::PadSpeakerVolume && menu.padSpeakerVolume() == 95);
 
     menu.open(0, false);
     press([](xc::ui::NavInput& n) { n.up = true; });  // "Leave game", last (wraps from top)
@@ -1052,7 +1049,7 @@ static void testStreamMenu() {
     // Best (Auto) offered as resolution 2; cycling is 720p (1) -> 1080p (0) -> Best (2).
     menu.open(2, false, 0, 1, 0, false, false);
     CHECK(menu.resolution() == 2);
-    for (int i = 0; i < 6; ++i) press([](xc::ui::NavInput& n) { n.down = true; });  // to the resolution
+    for (int i = 0; i < 5; ++i) press([](xc::ui::NavInput& n) { n.down = true; });  // to the resolution (Xbox -> Stats -> Upscaler -> Sharpness -> Deband -> Resolution)
     press([](xc::ui::NavInput& n) { n.right = true; });
     CHECK(menu.resolution() == 1);  // Best (2) -> wraps to 720p (1)
     press([](xc::ui::NavInput& n) { n.right = true; });
@@ -1062,7 +1059,6 @@ static void testStreamMenu() {
 
     // Test stats indicator customization
     menu.open(0, true);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // -> Profile
     press([](xc::ui::NavInput& n) { n.down = true; });  // -> Stats
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Stats);
     CHECK(menu.isCustomizingStats());
@@ -1121,8 +1117,7 @@ static void testSmartGlassInGameMenuInvariants() {
     // Customization collapse invariants: stats customization collapses width to 620
     menu.open(0, true);
     CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kCombinedW);
-    menu.handle(navDown); // Profile
-    menu.handle(navDown); // Stats
+    menu.handle(navDown); // Stats (Profile was removed from General tab)
     CHECK(menu.handle(navAccept) == MenuAction::Stats);
     CHECK(menu.isCustomizingStats());
     CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW); // 620
@@ -1133,7 +1128,7 @@ static void testSmartGlassInGameMenuInvariants() {
     // Touchpad shortcuts customization collapses width to 620
     menu.open(0, false);
     menu.handle(navR1); // Switch to Controls tab
-    for (int i = 0; i < 5; ++i) menu.handle(navDown); // -> TouchpadShortcutsItem
+    for (int i = 0; i < 3; ++i) menu.handle(navDown); // ConfirmItem -> Triggers -> DeadzoneItem -> TouchpadShortcutsItem
     CHECK(menu.handle(navAccept) == MenuAction::TouchpadShortcuts);
     CHECK(menu.isCustomizingTouchpad());
     CHECK(menu.renderMenu(sinfo).width() == xc::ui::StreamMenu::kMenuW); // 620
@@ -1149,9 +1144,8 @@ static void testSmartGlassInGameMenuInvariants() {
     menu.handle(navR1); // Controls tab
     menu.setDeadzone(15);
     CHECK(!menu.isStickDialogOpen());
-    // Navigate to DeadzoneItem: ConfirmItem -> Triggers -> AudioHapticsItem -> DeadzoneItem
+    // Navigate to DeadzoneItem: ConfirmItem -> Triggers -> DeadzoneItem
     menu.handle(navDown); // Triggers
-    menu.handle(navDown); // AudioHapticsItem
     menu.handle(navDown); // DeadzoneItem
     CHECK(menu.handle(navRight) == MenuAction::Deadzone && menu.deadzone() == 20);
     CHECK(menu.handle(navAccept) == MenuAction::None);
@@ -1196,8 +1190,7 @@ static void testSmartGlassInGameMenuInvariants() {
     menu.handle(navR1); // Controls tab
     menu.setAudioHaptics(0);
     CHECK(menu.audioHaptics() == 0);
-    menu.handle(navDown); // Triggers
-    menu.handle(navDown); // AudioHapticsItem
+    for (int i = 0; i < 5; ++i) menu.handle(navDown); // ConfirmItem -> Triggers -> DeadzoneItem -> TouchpadShortcutsItem -> GyroItem -> AudioHapticsItem
     CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 1);
     CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 2);
     CHECK(menu.handle(navRight) == MenuAction::AudioHaptics && menu.audioHaptics() == 3);
@@ -1284,8 +1277,7 @@ static void testSmartGlassInGameMenuInvariants() {
     CHECK(menu.triggerDialog().profile() == 1);
     menu.handle(navBack);
     CHECK(!menu.isTriggerDialogOpen());
-    menu.handle(navDown); // AudioHapticsItem
-    menu.handle(navDown); // DeadzoneItem
+    menu.handle(navDown); // DeadzoneItem (immediately below Triggers in new order)
     CHECK(menu.handle(navAccept) == MenuAction::None);
     CHECK(menu.isStickDialogOpen());
     CHECK(menu.stickDialog().deadzoneLeft() == 10);
@@ -4565,9 +4557,10 @@ static void testBlock2Features() {
     menu.setTab(xc::ui::MenuTab::Controls);
 
     // When at 100%, right should not trigger PadSpeakerVolume action
+    // Controls tab order: ConfirmItem (0) -> Triggers (1) -> Deadzone (2) -> TouchpadShortcuts (3) -> Gyro (4) -> AudioHaptics (5) -> PadSpeakerVolume (6)
     ui::NavInput down;
     down.down = true;
-    for (int i = 0; i < 4; ++i) menu.handle(down);
+    for (int i = 0; i < 6; ++i) menu.handle(down);
 
     ui::NavInput right;
     right.right = true;

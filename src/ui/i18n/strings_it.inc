@@ -489,4 +489,15 @@ constexpr Column kItalian = {
     "Non riuscito: Tenere fermo",                     // GyroCalibratedFailedShort
     "Modalità Demo (Automatica)",                     // GyroDemoMode
     "Muovere il controller per testare; usare i tasti freccia per regolare la sensibilità.", // GyroTestHelp
+    "Qualità video",                                  // StatVideoQuality
+    "Apre il menu Xbox Guide o invia il comando del pulsante Xbox al gioco.", // MenuDescXboxButton
+    "Configura e visualizza le statistiche di prestazioni, rete e latenza sullo schermo.", // MenuDescStats
+    "Applica filtri di upscaling dell'immagine come AMD FSR e pulizia dei bordi.", // MenuDescUpscaler
+    "Regola l'intensità del filtro di nitidezza applicato al flusso video.", // MenuDescSharpness
+    "Riduce le bande di compressione e i gradienti di colore nelle scene scure.", // MenuDescDeband
+    "Riavvia la connessione WebRTC dello streaming senza chiudere la sessione cloud.", // MenuDescReloadStream
+    "Termina la sessione di gioco in cloud e torna alla schermata principale.", // MenuDescLeave
+    "Termina la riproduzione remota dalla console Xbox e torna alla home.", // MenuDescEndStream
+    "Assegna quale controller fisico corrisponde a questo giocatore virtuale.", // MenuDescPlayer
+    "Regola il livello del volume dell'altoparlante integrato nel controller.", // MenuDescPadSpeakerVolume
 };

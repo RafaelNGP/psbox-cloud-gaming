@@ -489,4 +489,15 @@ constexpr Column kEnglish = {
     "Failed: Keep still",                             // GyroCalibratedFailedShort
     "Demo Mode (Automatic)",                          // GyroDemoMode
     "Move controller to test; use arrows to adjust horizontal/vertical sensitivity.", // GyroTestHelp
+    "Video quality",                                  // StatVideoQuality
+    "Opens the Xbox Guide menu or sends the Xbox button to the game.", // MenuDescXboxButton
+    "Configures and displays performance, network, and latency overlay on screen.", // MenuDescStats
+    "Applies image upscaling and reconstruction filters such as AMD FSR and clean edges.", // MenuDescUpscaler
+    "Adjusts the intensity of the sharpening filter applied to the video stream.", // MenuDescSharpness
+    "Reduces banding artifacts and color gradients in dark game scenes.", // MenuDescDeband
+    "Re-establishes the WebRTC stream connection without closing your cloud session.", // MenuDescReloadStream
+    "Leaves the current cloud game and returns to the home screen.", // MenuDescLeave
+    "Ends remote play from your Xbox console and returns to the home screen.", // MenuDescEndStream
+    "Assigns which physical controller input operates this virtual player slot.", // MenuDescPlayer
+    "Adjusts the volume level for sound played through the controller's speaker.", // MenuDescPadSpeakerVolume
 };

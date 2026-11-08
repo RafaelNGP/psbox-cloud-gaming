@@ -489,4 +489,15 @@ constexpr Column kGerman = {
     "Fehlgeschlagen: Ruhig halten",                   // GyroCalibratedFailedShort
     "Demo-Modus (Automatisch)",                       // GyroDemoMode
     "Controller bewegen zum Testen; Pfeiltasten für Empfindlichkeit nutzen.", // GyroTestHelp
+    "Videoqualität",                                  // StatVideoQuality
+    "Öffnet das Xbox Guide-Menü oder sendet die Xbox-Taste an das Spiel.", // MenuDescXboxButton
+    "Konfiguriert und zeigt Leistungs-, Netzwerk- und Latenzstatistiken auf dem Bildschirm an.", // MenuDescStats
+    "Wendet Bild-Upscaling-Filter wie AMD FSR und Kantenglättung an.", // MenuDescUpscaler
+    "Passt die Schärfeintensität des Videostreams an.", // MenuDescSharpness
+    "Reduziert Farbstreifen und Kompressionsartefakte in dunklen Spielszenen.", // MenuDescDeband
+    "Startet die WebRTC-Streamverbindung neu, ohne die Cloud-Sitzung zu beenden.", // MenuDescReloadStream
+    "Beendet das aktuelle Cloud-Spiel und kehrt zum Startbildschirm zurück.", // MenuDescLeave
+    "Beendet das Remote Play von der Xbox-Konsole und kehrt zum Startbildschirm zurück.", // MenuDescEndStream
+    "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
+    "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
 };

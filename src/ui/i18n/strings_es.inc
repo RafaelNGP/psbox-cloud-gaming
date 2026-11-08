@@ -489,4 +489,15 @@ constexpr Column kSpanish = {
     "Fallo: Mantenga inmóvil",                        // GyroCalibratedFailedShort
     "Modo Demostración (Automático)",                 // GyroDemoMode
     "Mueva el control para probar; use las flechas para ajustar sensibilidad horizontal/vertical.", // GyroTestHelp
+    "Calidad de vídeo",                               // StatVideoQuality
+    "Abre el menú Xbox Guide o envía el comando del botón Xbox al juego.", // MenuDescXboxButton
+    "Configura y muestra las estadísticas de rendimiento, red y latencia en pantalla.", // MenuDescStats
+    "Aplica algoritmos de reconstrucción y escalado de imagen como AMD FSR y limpieza.", // MenuDescUpscaler
+    "Ajusta la intensidad del filtro de nitidez aplicado al flujo de vídeo.", // MenuDescSharpness
+    "Reduce los artefactos de bandas y gradientes de color en escenas oscuras.", // MenuDescDeband
+    "Reinicia la conexión WebRTC de la transmisión sin cerrar la sesión en la nube.", // MenuDescReloadStream
+    "Sale del juego en la nube actual y vuelve a la pantalla principal.", // MenuDescLeave
+    "Finaliza la retransmisión desde tu consola Xbox y vuelve al inicio.", // MenuDescEndStream
+    "Asigna qué mando físico controlará esta ranura de jugador virtual.", // MenuDescPlayer
+    "Ajusta el nivel de volumen del altavoz integrado en el mando.", // MenuDescPadSpeakerVolume
 };

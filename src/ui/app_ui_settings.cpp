@@ -143,6 +143,9 @@ void AppUi::openTester(Tester t) {
             {"5. xCloud Offering (xgpuweb)", false, true, "Waiting..."},
             {"6. Recursos Preview (xCloud & Ads)", false, true, "Waiting..."},
         };
+    } else if (t == Tester::Gyro) {
+        if (!gyroDialog_) gyroDialog_ = std::make_unique<GyroWheelDialog>();
+        gyroDialog_->open(0, gameSettingsOpen_ ? app::gameProfileKey(detail_.productId, detail_.titleId) : "");
     } else if (t == Tester::NetworkTest) {
         networkTest_.running = true;
         networkTest_.natStatus = "Probing UDP STUN...";
@@ -389,6 +392,36 @@ void AppUi::handleTester(const NavInput& in) {
     if (tester_ == Tester::Keys) return handleKeysTester(in);
     if (tester_ == Tester::Pad) return handlePadTester(in);
     if (tester_ == Tester::Touchpad) return handleTouchpadTester(in);
+    if (tester_ == Tester::Gyro) {
+        if (gyroDialog_) {
+            gyroDialog_->handleInput(in);
+            if (!gyroDialog_->isOpen()) {
+                settings_.gyroLevel = gyroDialog_->level();
+                settings_.gyroYawScale = gyroDialog_->yawScale();
+                settings_.gyroPitchScale = gyroDialog_->pitchScale();
+                const float* b = gyroDialog_->bias();
+                if (b) {
+                    settings_.gyroBias[0] = b[0];
+                    settings_.gyroBias[1] = b[1];
+                    settings_.gyroBias[2] = b[2];
+                }
+                if (gameSettingsOpen_) {
+                    activeGameProfile_.gyroLevel = settings_.gyroLevel;
+                    activeGameProfile_.gyroYawScale = settings_.gyroYawScale;
+                    activeGameProfile_.gyroPitchScale = settings_.gyroPitchScale;
+                    activeGameProfile_.gyroBias[0] = settings_.gyroBias[0];
+                    activeGameProfile_.gyroBias[1] = settings_.gyroBias[1];
+                    activeGameProfile_.gyroBias[2] = settings_.gyroBias[2];
+                    activeGameHasCustom_ = true;
+                }
+                tester_ = Tester::None;
+                dirty_ = true;
+            }
+        } else {
+            tester_ = Tester::None;
+        }
+        return;
+    }
     if (tester_ == Tester::Sticks) {
         // L1 / R1 pick the stick, the D-pad (only: the sticks are what is
         // being tried) changes its dead zone.
@@ -1198,7 +1231,7 @@ void AppUi::drawSettings(Canvas& c) {
             if (focused && !dropdownOpen_) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 3, 16);
             fonts_.semibold.draw(c, labels[i], r.x + 32, ty, kRowPx, kWhite);
             float cx = static_cast<float>(r.x + r.w - 40), cy = static_cast<float>(r.y + r.h / 2);
-            const bool isSubmenuRow = (i == 3 || i == 4 || i == 12 || i == 14);
+            const bool isSubmenuRow = (i == 3 || i == 4 || i == 12 || i == 14 || i == 15);
             if (isSubmenuRow) {
                 const int pillW = focused ? 42 : 24;
                 const int pillH = 22;
@@ -1298,9 +1331,11 @@ void AppUi::drawSettings(Canvas& c) {
         Str::SettingDescFpsLimit,
     };
     if (settingsRow_ >= 0 && settingsRow_ < kSettingRows) {
-        int dy = std::max(y + 6, 922);
         const char* desc = tr(kSettingDescs[settingsRow_]);
-        for (const auto& line : fonts_.regular.wrap(desc, 22, kRowW, 3)) {
+        auto lines = fonts_.regular.wrap(desc, 22, kRowW - 40, 2);
+        const int hintBaseline = kH - 64;
+        int dy = (lines.size() > 1) ? (hintBaseline - 26) : hintBaseline;
+        for (const auto& line : lines) {
             fonts_.regular.draw(c, line, kMargin, dy, 22, kDim);
             dy += 26;
         }
@@ -1370,6 +1405,13 @@ void AppUi::drawSettings(Canvas& c) {
     }
     if (tester_ == Tester::Sticks) return drawStickTester(c);
     if (tester_ == Tester::Triggers) return drawTriggerTester(c);
+    if (tester_ == Tester::Gyro) {
+        if (gyroDialog_) {
+            gyroDialog_->update(lastRender_);
+            gyroDialog_->draw(c, fonts_, 0, 0, kW, kH);
+        }
+        return;
+    }
     if (tester_ == Tester::Keys) return drawKeysTester(c);
     if (tester_ == Tester::Pad) return drawPadTester(c);
     if (tester_ == Tester::Touchpad) return drawTouchpadTester(c);

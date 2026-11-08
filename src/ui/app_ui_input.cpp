@@ -1191,6 +1191,8 @@ UiEvent AppUi::handle(const NavInput& in) {
             }
             if (in.accept && settingsRow_ == 14) {
                 openPadTester();  // controller buttons: their own screen
+            } else if (in.accept && settingsRow_ == 15) {
+                openTester(Tester::Gyro);
             } else if (in.accept && (settingsRow_ == 3 || settingsRow_ == 4 || settingsRow_ == 12)) {
                 // Dead zone, trigger vibration, keyboard keys: their own screens instead of a list.
                 openTester(settingsRow_ == 3 ? Tester::Sticks : settingsRow_ == 4 ? Tester::Triggers : Tester::Keys);
