@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "app/settings_manager.h"
-#include "app/app_state.h"
 #include "input/gyro.h"
 #include "input/pad_map.h"
 #include "input/key_map.h"
@@ -13,6 +12,11 @@
 #include <cstring>
 
 namespace xc::app {
+
+// Legacy global settings state definitions shared across appcore and ui
+std::mutex g_settingsMutex;
+Settings g_settings;
+std::atomic<uint64_t> g_settingsVersion{1};
 
 SettingsManager& SettingsManager::instance() {
     static SettingsManager s_instance;
@@ -110,7 +114,13 @@ void SettingsManager::notifyListeners(const SettingsChangeEvent& ev) {
         }
     }
     for (const auto& fn : copy) {
-        fn(ev);
+        try {
+            fn(ev);
+        } catch (const std::exception& e) {
+            XC_LOGW("SettingsManager: listener exception: %s", e.what());
+        } catch (...) {
+            XC_LOGW("SettingsManager: unknown listener exception");
+        }
     }
 }
 
