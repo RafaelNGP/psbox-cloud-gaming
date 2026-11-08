@@ -132,6 +132,9 @@ public:
     // FFmpeg HWAccel on Desktop) with automatic software CPU fallback.
     void setPreferHwDecode(bool on);
     bool preferHwDecode() const;
+    // Presentation pacing FPS limit: 0 unlimited, 30, 60, 120.
+    void setFpsLimit(int fps);
+    int fpsLimit() const;
     // Recent presentation frametimes (ms, up to 60 frames)
     void getRecentFrametimes(std::vector<float>& out) const;
 

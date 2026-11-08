@@ -29,6 +29,7 @@ SettingsChoice choiceFromSettings(const app::Settings& s) {
     c.deband = s.deband;
     c.upscaler = s.upscaler;
     c.videoDecoder = s.videoDecoder;
+    c.fpsLimit = s.fpsLimit;
     c.highRefresh = s.highRefresh;
     c.maxBitrateMbps = s.maxBitrateMbps;
     c.gameVolume = s.gameVolume;
@@ -72,6 +73,7 @@ void applyChoice(const SettingsChoice& c, app::Settings& s) {
     s.deband = c.deband;
     s.upscaler = c.upscaler;
     s.videoDecoder = c.videoDecoder;
+    s.fpsLimit = c.fpsLimit;
     s.highRefresh = c.highRefresh;
     s.maxBitrateMbps = c.maxBitrateMbps;
     s.gameVolume = c.gameVolume;

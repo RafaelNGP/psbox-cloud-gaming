@@ -604,6 +604,9 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
     } else if (row == 10) {
         out.push_back(tr(Str::BitrateAuto));
         for (int mbps : kBitrateCaps) out.push_back(std::to_string(mbps) + " Mbps");
+        out.push_back(tr(Str::BitrateUnlimited));
+    } else if (row == 26) {
+        out = {tr(Str::FpsUnlimited), "30 FPS", "60 FPS", "120 FPS"};
     } else if (row == 11) {
         for (int v : kVolumes) out.push_back(std::to_string(v) + " %");
     } else if (row == 16) {
@@ -673,7 +676,15 @@ int AppUi::settingSelected(int row) const {
     if (row == 21) return std::clamp(settings_.audioHaptics, 0, 3);
     if (row == 22) return settings_.previewFeatures ? 1 : 0;
     if (row == 24) return settings_.syncTrophies ? 1 : 0;
+    if (row == 26) {
+        if (settings_.fpsLimit == 30) return 1;
+        if (settings_.fpsLimit == 60) return 2;
+        if (settings_.fpsLimit == 120) return 3;
+        return 0;
+    }
     if (row == 10) {
+        if (settings_.maxBitrateMbps == -1 || settings_.maxBitrateMbps >= 100)
+            return static_cast<int>(std::size(kBitrateCaps)) + 1;
         if (settings_.maxBitrateMbps <= 0) return 0;
         int closest = 1;
         int minDiff = 1000;
@@ -768,7 +779,16 @@ void AppUi::applySetting(int row, int index) {
             input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
         }
     } else if (row == 10) {
-        settings_.maxBitrateMbps = index == 0 ? 0 : kBitrateCaps[index - 1];
+        if (index == 0) {
+            settings_.maxBitrateMbps = 0;
+        } else if (index == static_cast<int>(std::size(kBitrateCaps)) + 1) {
+            settings_.maxBitrateMbps = -1;
+        } else {
+            settings_.maxBitrateMbps = kBitrateCaps[index - 1];
+        }
+    } else if (row == 26) {
+        static constexpr int kFpsLimits[] = {0, 30, 60, 120};
+        settings_.fpsLimit = kFpsLimits[std::clamp(index, 0, 3)];
     } else if (row == 11) {
         settings_.gameVolume = kVolumes[index];
     } else if (row == 16) {
@@ -1146,7 +1166,8 @@ void AppUi::drawSettings(Canvas& c) {
                                         tr(Str::Gyro),          tr(Str::QueueReadyNotification),
                                         tr(Str::CheckSignIn),   tr(Str::NetworkTest),   tr(Str::SupportProject),
                                         tr(Str::VideoDecoder),  tr(Str::AudioHaptics),  tr(Str::PreviewFeatures),
-                                        tr(Str::ResetSettings), tr(Str::SyncTrophies),  tr(Str::RemoveTrophies)};
+                                        tr(Str::ResetSettings), tr(Str::SyncTrophies),  tr(Str::RemoveTrophies),
+                                        tr(Str::FpsLimit)};
     constexpr int kRowW = 1140, kRowH = 30, kGap = 2, kGroupGap = 4, kRowPx = 22;
     Rect rows[kSettingRows];  // by row id
     int y = 184;
@@ -1254,6 +1275,7 @@ void AppUi::drawSettings(Canvas& c) {
         Str::SettingDescResetSettings,
         Str::SettingDescSyncTrophies,
         Str::SettingDescRemoveTrophies,
+        Str::SettingDescFpsLimit,
     };
     if (settingsRow_ >= 0 && settingsRow_ < kSettingRows) {
         int dy = std::max(y + 6, 922);

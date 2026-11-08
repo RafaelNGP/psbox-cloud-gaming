@@ -450,4 +450,8 @@ constexpr Column kEnglish = {
     "Removed %s trophy title(s) from this profile.",  // TrophiesRemovedToast
     "Syncing achievements...",                        // SyncingTrophies
     "Reload Stream",                                  // ReloadStream
+    "Unlimited",                                      // BitrateUnlimited
+    "FPS Limiter",                                    // FpsLimit
+    "Unlimited",                                      // FpsUnlimited
+    "Limits the stream presentation framerate to maintain smooth frame pacing", // SettingDescFpsLimit
 };

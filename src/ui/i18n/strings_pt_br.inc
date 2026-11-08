@@ -391,7 +391,7 @@ constexpr Column kPortugueseBR = {
     "Configuração Web",                               // WebControlTitle
     "Acesse pelo celular",                            // WebControlSubtitle
     "Conecte no mesmo Wi-Fi para pesquisar, remapear botões, usar o celular como controle virtual, relatar problemas ou visualizar o log.", // WebControlDesc
-    "Decodificação de Vídeo",                         // VideoDecoder
+    "Decodificador de Vídeo",                         // VideoDecoder
     "Hardware (Recomendado)",                         // VideoDecoderHw
     "Software (CPU)",                                 // VideoDecoderSw
     "Seleciona decodificação por hardware (libSceVideodec2 no PS5, HWAccel no Desktop) ou por software (CPU)", // SettingDescVideoDecoder
@@ -450,4 +450,8 @@ constexpr Column kPortugueseBR = {
     "Removido(s) %s título(s) de troféus deste perfil.", // TrophiesRemovedToast
     "Sincronizando conquistas...",                    // SyncingTrophies
     "Recarregar Transmissão",                          // ReloadStream
+    "Sem Limite",                                     // BitrateUnlimited
+    "Limitador de FPS",                               // FpsLimit
+    "Ilimitado",                                      // FpsUnlimited
+    "Limita a taxa de quadros de exibição da transmissão para manter a cadência de apresentação suave", // SettingDescFpsLimit
 };

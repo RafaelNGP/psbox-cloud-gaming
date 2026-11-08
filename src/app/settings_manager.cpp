@@ -149,7 +149,8 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
             }
         }
         if (root.has("maxBitrateMbps")) {
-            int v = static_cast<int>(std::clamp<int64_t>(root["maxBitrateMbps"].asInt(settings_.maxBitrateMbps), -1, 50));
+            int parsed = static_cast<int>(root["maxBitrateMbps"].asInt(settings_.maxBitrateMbps));
+            int v = (parsed == -1 || parsed >= 100) ? -1 : std::clamp(parsed, 0, 50);
             if (v != settings_.maxBitrateMbps) {
                 settings_.maxBitrateMbps = v;
                 changed = true;
@@ -165,7 +166,8 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
             }
         }
         if (root.has("fpsLimit")) {
-            int v = static_cast<int>(std::clamp<int64_t>(root["fpsLimit"].asInt(settings_.fpsLimit), 0, 120));
+            int parsed = static_cast<int>(root["fpsLimit"].asInt(settings_.fpsLimit));
+            int v = (parsed == 30 || parsed == 60 || parsed == 120) ? parsed : 0;
             if (v != settings_.fpsLimit) {
                 settings_.fpsLimit = v;
                 changed = true;
@@ -506,7 +508,8 @@ bool SettingsManager::updateGameProfileFromJson(const std::string& gameKey, cons
             if (v != prof.videoDecoder) { prof.videoDecoder = v; changed = true; ev.affectsDisplay = true; }
         }
         if (root.has("fpsLimit")) {
-            int v = static_cast<int>(std::clamp<int64_t>(root["fpsLimit"].asInt(prof.fpsLimit), 0, 120));
+            int parsed = static_cast<int>(root["fpsLimit"].asInt(prof.fpsLimit));
+            int v = (parsed == 30 || parsed == 60 || parsed == 120) ? parsed : 0;
             if (v != prof.fpsLimit) { prof.fpsLimit = v; changed = true; ev.affectsDisplay = true; }
         }
         if (root.has("resolution")) {

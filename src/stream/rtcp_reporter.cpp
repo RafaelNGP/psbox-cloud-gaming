@@ -39,6 +39,13 @@ RtcpReporter::RtcpReporter(uint32_t clockRate, uint32_t maxBitrate)
     estimate_ = maxBitrate;
 }
 
+void RtcpReporter::setMaxBitrate(uint32_t maxBitrate) {
+    maxBitrate_.store(maxBitrate, std::memory_order_relaxed);
+    if (maxBitrate > 0 && estimate_.load(std::memory_order_relaxed) > maxBitrate) {
+        estimate_.store(maxBitrate, std::memory_order_relaxed);
+    }
+}
+
 void RtcpReporter::onRtp(const uint8_t* d, size_t n, uint64_t now) {
     uint32_t ssrc = get32(d + 8);
     uint16_t seq = get16(d + 2);
@@ -138,18 +145,19 @@ void RtcpReporter::report(uint64_t now, const rtc::message_callback& send) {
     put32(b, lastSr_);
     put32(b, lastSr_ ? dlsr : 0);
 
-    if (maxBitrate_) {
+    uint32_t curMax = maxBitrate_.load(std::memory_order_relaxed);
+    if (curMax) {
         uint32_t rate = intervalUs ? static_cast<uint32_t>(bytesSinceReport_ * 8 * 1000000 / intervalUs) : 0;
         receiveRate_ = rate;
         // Like a receive-side estimator, much simplified: back off below
         // what arrives when the network drops packets, otherwise climb back
         // to the ceiling.
         double loss = fraction / 256.0;
-        uint32_t est = estimate_;
+        uint32_t est = estimate_.load(std::memory_order_relaxed);
         if (loss > 0.10)
             est = std::max<uint32_t>(kMinBitrate, static_cast<uint32_t>(rate * (1.0 - 0.5 * loss)));
         else if (loss < 0.02)
-            est = std::min<uint32_t>(maxBitrate_, std::max<uint32_t>(est, kMinBitrate) + maxBitrate_ / 10);
+            est = std::min<uint32_t>(curMax, std::max<uint32_t>(est, kMinBitrate) + curMax / 10);
         estimate_ = est;
 
         uint8_t exp = 0;

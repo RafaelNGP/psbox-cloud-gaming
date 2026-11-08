@@ -450,4 +450,8 @@ constexpr Column kFrench = {
     "%s titre(s) de trophées supprimé(s) de ce profil.", // TrophiesRemovedToast
     "Synchronisation des succès...",                  // SyncingTrophies
     "Recharger la diffusion",                         // ReloadStream
+    "Sans limite",                                    // BitrateUnlimited
+    "Limiteur de FPS",                                // FpsLimit
+    "Illimité",                                       // FpsUnlimited
+    "Limite la fréquence d'affichage du flux pour maintenir une cadence fluide", // SettingDescFpsLimit
 };

@@ -912,6 +912,13 @@ void StreamSession::cancelTextInput(const std::string& id) { impl_->cancelTransa
 
 void StreamSession::requestResolution(const std::string& alias) { impl_->sendResolution(alias); }
 
+void StreamSession::setMaxBitrate(uint32_t bps) {
+    impl_->opt.maxBitrate = bps;
+    if (impl_->videoReporter) {
+        impl_->videoReporter->setMaxBitrate(bps);
+    }
+}
+
 void StreamSession::tick() { impl_->tick(); }
 void StreamSession::close() { impl_->close(); }
 int StreamSession::rttMs() const {

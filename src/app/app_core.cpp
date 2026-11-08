@@ -16,6 +16,7 @@
 #include "app/library.h"
 #include "app/report.h"
 #include "app/settings.h"
+#include "app/settings_manager.h"
 #include "app/shell.h"
 #include "app/stream_player.h"
 #include "app/stream_screen.h"
@@ -131,6 +132,7 @@ bool saveSettings(const ui::SettingsChoice& choice) {
         languageChanged = g_settings.language != language;
         fullscreenChanged = g_settings.desktopFullscreen != fullscreen;
         g_settings.save(settingsPath());  // warns itself
+        SettingsManager::instance().load(settingsPath());
         XC_LOGI("settings saved: language %s, %s, region %s", g_settings.language.c_str(), g_settings.resolution.c_str(),
                 g_settings.region.empty() ? "auto" : g_settings.region.c_str());
     }
@@ -455,6 +457,7 @@ bool coreStartup() {
             root.set("language", g_settings.language);
             root.set("resolution", g_settings.resolution);
             root.set("maxBitrateMbps", g_settings.maxBitrateMbps);
+            root.set("fpsLimit", g_settings.fpsLimit);
             root.set("highRefresh", g_settings.highRefresh);
             root.set("deadzoneLeft", g_settings.deadzoneLeft);
             root.set("deadzoneRight", g_settings.deadzoneRight);
@@ -493,8 +496,16 @@ bool coreStartup() {
                     changed = true;
                 }
                 if (root.has("maxBitrateMbps")) {
-                    g_settings.maxBitrateMbps = static_cast<int>(std::clamp<int64_t>(root["maxBitrateMbps"].asInt(g_settings.maxBitrateMbps), 0, 50));
+                    int raw = static_cast<int>(root["maxBitrateMbps"].asInt(g_settings.maxBitrateMbps));
+                    g_settings.maxBitrateMbps = (raw == -1 || raw >= 100) ? -1 : static_cast<int>(std::clamp(raw, 0, 50));
                     changed = true;
+                }
+                if (root.has("fpsLimit")) {
+                    int val = static_cast<int>(root["fpsLimit"].asInt(g_settings.fpsLimit));
+                    if (val == 0 || val == 30 || val == 60 || val == 120) {
+                        g_settings.fpsLimit = val;
+                        changed = true;
+                    }
                 }
                 if (root.has("highRefresh")) {
                     g_settings.highRefresh = root["highRefresh"].asBool(g_settings.highRefresh);
@@ -606,6 +617,7 @@ bool coreStartup() {
                 }
                 if (changed) {
                     g_settings.save(settingsPath());
+                    SettingsManager::instance().load(settingsPath());
                     refreshSettingsUiLocked();
                 }
             }
@@ -616,6 +628,10 @@ bool coreStartup() {
                 }
                 if (g_core && g_core->streamScreen) {
                     g_core->streamScreen->syncFromSettings();
+                }
+                if (g_player && g_player->running()) {
+                    g_player->setFpsLimit(g_settings.fpsLimit);
+                    g_player->setMaxBitrate(g_settings.maxBitrateMbps);
                 }
                 platform::notify("Configurações atualizadas (WebUI)");
                 if (g_ui && !shell::caps().console) {

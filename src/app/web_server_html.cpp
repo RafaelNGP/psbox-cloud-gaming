@@ -703,7 +703,17 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
           <span>Bitrate Máximo</span>
           <span class="slider-val" id="valBitrate">Auto</span>
         </div>
-        <input type="range" id="inputBitrate" min="0" max="50" step="5" value="0" oninput="onBitrateInput(this.value)">
+        <input type="range" id="inputBitrate" min="0" max="55" step="5" value="0" oninput="onBitrateInput(this.value)">
+      </div>
+
+      <div class="map-item" style="margin-top: 10px; margin-bottom: 12px;">
+        <label>Limitador de FPS</label>
+        <select id="selectFpsLimit" onchange="markSettingsChanged()">
+          <option value="0">Ilimitado</option>
+          <option value="30">30 FPS</option>
+          <option value="60">60 FPS</option>
+          <option value="120">120 FPS</option>
+        </select>
       </div>
 
       <div class="toggle-row">
@@ -1676,7 +1686,11 @@ function saveSettings() {
 function onBitrateInput(val) {
   const v = parseInt(val, 10);
   const el = document.getElementById('valBitrate');
-  if (el) el.textContent = (v === 0) ? 'Auto' : v + ' Mbps';
+  if (el) {
+    if (v === 0) el.textContent = 'Auto';
+    else if (v === 55 || v === -1 || v >= 100) el.textContent = 'Sem Limite';
+    else el.textContent = v + ' Mbps';
+  }
 }
 
 function onLightBarModeChange() {
@@ -1691,8 +1705,11 @@ function markSettingsChanged() {
 }
 
 function saveGeneralSettings() {
+  const rawBitrate = parseInt(document.getElementById('inputBitrate').value, 10);
+  const fpsEl = document.getElementById('selectFpsLimit');
   const payload = {
-    maxBitrateMbps: parseInt(document.getElementById('inputBitrate').value, 10),
+    maxBitrateMbps: (rawBitrate === 55) ? -1 : rawBitrate,
+    fpsLimit: fpsEl ? parseInt(fpsEl.value, 10) : 0,
     highRefresh: document.getElementById('check120Hz').checked,
     deadzoneLeft: parseInt(document.getElementById('inputDeadzoneL').value, 10),
     deadzoneRight: parseInt(document.getElementById('inputDeadzoneR').value, 10),
@@ -2037,7 +2054,15 @@ function applyLoadedSettings(s) {
   }
   if (s.maxBitrateMbps !== undefined) {
     const el = document.getElementById('inputBitrate');
-    if (el) { el.value = s.maxBitrateMbps; onBitrateInput(s.maxBitrateMbps); }
+    if (el) {
+      const sliderVal = (s.maxBitrateMbps === -1 || s.maxBitrateMbps >= 100) ? 55 : s.maxBitrateMbps;
+      el.value = sliderVal;
+      onBitrateInput(sliderVal);
+    }
+  }
+  if (s.fpsLimit !== undefined) {
+    const el = document.getElementById('selectFpsLimit');
+    if (el) el.value = s.fpsLimit;
   }
   if (s.highRefresh !== undefined) {
     const el = document.getElementById('check120Hz');

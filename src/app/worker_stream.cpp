@@ -117,12 +117,16 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         XC_LOGI("stream: video decoder %s", preferHw ? "hardware preferred" : "software (CPU)");
         player.setMicGain(g_settings.micGainFactor());
         player.setMicEnabled(g_settings.micEnabled);
+        int fpsLim = hasCustom ? prof.fpsLimit : g_settings.fpsLimit;
+        player.setFpsLimit(fpsLim);
+        if (fpsLim > 0) XC_LOGI("stream: FPS limit %d FPS", fpsLim);
+        else XC_LOGI("stream: FPS limit unlimited");
         player.setLegacyTuning(g_autoplay.legacy);
         int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
         player.setMaxBitrate(cap);
         media::audioSetVolume(g_settings.gameVolume / 100.0f);
         XC_LOGI("stream: bitrate cap %s, game volume %d%%",
-                cap ? (std::to_string(cap) + " Mbps").c_str() : "automatic",
+                (cap == -1 || cap >= 100) ? "unlimited" : cap ? (std::to_string(cap) + " Mbps").c_str() : "automatic",
                 g_settings.gameVolume);
         media::audioSetRoute(static_cast<media::AudioRoute>(g_settings.audioRoute));
         media::audioSetVoiceRouting(g_settings.voiceRouting);

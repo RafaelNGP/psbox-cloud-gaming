@@ -4,6 +4,7 @@
 #include "app/auto_deband.h"
 #include "app/library.h"
 #include "app/settings.h"
+#include "app/settings_manager.h"
 #include "app/stream_player.cpp"
 #include "app/update_check.h"
 #include "app/updater.h"
@@ -373,6 +374,7 @@ static void testSettingsChoiceRoundTrip() {
     s.sharpness = 3, s.deband = 1, s.upscaler = 0;
     s.videoDecoder = 1;
     s.highRefresh = true;
+    s.fpsLimit = 60;
     s.maxBitrateMbps = 15, s.gameVolume = 150;
     assignKey(s.keyMap, KeyAction::A, 0, 'E');
     assignPadSource(s.padMap, PadFn::A, static_cast<uint8_t>(PadFn::B));
@@ -391,6 +393,7 @@ static void testSettingsChoiceRoundTrip() {
     CHECK(c.language == static_cast<int>(ui::Language::PortugueseBR));
     CHECK(c.resolution == 1 && c.triggerProfile == 2 && c.lightBarColour == 0xFF112233u && !c.fullscreen);
     CHECK(c.videoDecoder == 1);
+    CHECK(c.fpsLimit == 60);
     CHECK(!c.queueReadyAlert && c.titlePlaytime.at("game1") == 3600);
 
     xc::app::Settings back;  // defaults, then what the screen carries
@@ -410,6 +413,7 @@ static void testSettingsChoiceRoundTrip() {
     CHECK(back.sharpness == s.sharpness && back.deband == s.deband && back.upscaler == s.upscaler);
     CHECK(back.videoDecoder == s.videoDecoder);
     CHECK(back.highRefresh == s.highRefresh);
+    CHECK(back.fpsLimit == s.fpsLimit);
     CHECK(back.maxBitrateMbps == s.maxBitrateMbps && back.gameVolume == s.gameVolume);
     CHECK(back.queueReadyAlert == s.queueReadyAlert && back.titlePlaytime == s.titlePlaytime);
     CHECK(back.keyMap == s.keyMap && back.padMap == s.padMap);
@@ -440,6 +444,93 @@ static void testSettingsChoiceRoundTrip() {
     xc::app::Settings kept = s;
     ui::applyChoice(broken, kept);
     CHECK(kept.padMap == s.padMap);
+}
+
+static void testGeneralSettingsR2() {
+    // 1. Bitrate unlimited (-1) roundtrip
+    {
+        xc::app::Settings s;
+        s.maxBitrateMbps = -1;
+        s.fpsLimit = 120;
+        s.highRefresh = true;
+        s.videoDecoder = 1;
+        ui::SettingsChoice c = ui::choiceFromSettings(s);
+        CHECK(c.maxBitrateMbps == -1);
+        CHECK(c.fpsLimit == 120);
+        CHECK(c.highRefresh == true);
+        CHECK(c.videoDecoder == 1);
+        xc::app::Settings back;
+        ui::applyChoice(c, back);
+        CHECK(back.maxBitrateMbps == -1);
+        CHECK(back.fpsLimit == 120);
+        CHECK(back.highRefresh == true);
+        CHECK(back.videoDecoder == 1);
+    }
+
+    // 2. Settings JSON parsing for R2 options
+    {
+        xc::app::Settings s;
+        json::Value root = json::Value::object();
+        root.set("maxBitrateMbps", static_cast<int64_t>(-1));
+        root.set("fpsLimit", static_cast<int64_t>(30));
+        root.set("videoDecoder", static_cast<int64_t>(0));
+        root.set("highRefresh", true);
+        std::string path = "/tmp/test_r2_settings.json";
+        std::string jsonStr = root.dump();
+        FILE* f = std::fopen(path.c_str(), "w");
+        CHECK(f != nullptr);
+        std::fwrite(jsonStr.data(), 1, jsonStr.size(), f);
+        std::fclose(f);
+
+        CHECK(s.load(path));
+        CHECK(s.maxBitrateMbps == -1);
+        CHECK(s.fpsLimit == 30);
+        CHECK(s.videoDecoder == 0);
+        CHECK(s.highRefresh == true);
+        std::remove(path.c_str());
+    }
+
+    // 3. SettingsManager JSON updates
+    {
+        auto& mgr = xc::app::SettingsManager::instance();
+        json::Value patch = json::Value::object();
+        patch.set("maxBitrateMbps", static_cast<int64_t>(100)); // 100 Mbps maps to -1 (unlimited)
+        patch.set("fpsLimit", static_cast<int64_t>(60));
+        patch.set("videoDecoder", static_cast<int64_t>(1));
+        patch.set("highRefresh", true);
+        CHECK(mgr.updateFromJson(patch, true));
+        xc::app::Settings cur = mgr.get();
+        CHECK(cur.maxBitrateMbps == -1);
+        CHECK(cur.fpsLimit == 60);
+        CHECK(cur.videoDecoder == 1);
+        CHECK(cur.highRefresh == true);
+
+        // Clamping invalid FPS limits to 0 (unlimited)
+        json::Value patch2 = json::Value::object();
+        patch2.set("fpsLimit", static_cast<int64_t>(45));
+        CHECK(mgr.updateFromJson(patch2, true));
+        CHECK(mgr.get().fpsLimit == 0);
+    }
+
+    // 4. StreamPlayer FPS Limit & Bitrate Cap API
+    {
+        xc::xcloud::GssvClient gssv;
+        xc::app::StreamPlayer player(gssv);
+        CHECK(player.fpsLimit() == 0);
+        player.setFpsLimit(30);
+        CHECK(player.fpsLimit() == 30);
+        player.setFpsLimit(60);
+        CHECK(player.fpsLimit() == 60);
+        player.setFpsLimit(120);
+        CHECK(player.fpsLimit() == 120);
+        player.setFpsLimit(0);
+        CHECK(player.fpsLimit() == 0);
+
+        // Bitrate cap
+        player.setMaxBitrate(-1); // Unlimited -> 100 Mbps REMB
+        player.setMaxBitrate(25); // 25 Mbps
+        player.setMaxBitrate(0);  // Auto
+    }
 }
 
 static void testMicGain() {
@@ -2870,21 +2961,21 @@ static void testVisibleSettingsRows() {
     };
     const ui::UiCaps ps5;
     auto all = ui::visibleSettingsRows(ps5);
-    CHECK((ids(all) == std::vector<int>{0, 2, 8, 17, 18, 24, 25, 1, 20, 9, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
-    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
+    CHECK((ids(all) == std::vector<int>{0, 2, 8, 17, 18, 24, 25, 1, 20, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
+    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
     ui::UiCaps pc;
     pc.lightBar = pc.triggerRumble = pc.adaptiveTriggers = pc.gyro = pc.touchpad = false;
     pc.upscalers = pc.sharpen = pc.deband = pc.highRefresh = pc.console = pc.selfUpdate = false;
     pc.openUrl = true;
     auto desk = ui::visibleSettingsRows(pc);
-    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, true, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
     // The desktop app's window: Display mode after the resolution, in the stream's group.
     ui::UiCaps win = pc;
     win.desktopWindow = true;
     auto w = ui::visibleSettingsRows(win);
-    CHECK((ids(w) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 13, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(w) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
     ui::UiCaps xbox = pc;  // an Xbox pad: impulse triggers, no light bar
     xbox.triggerRumble = true;
     auto x = ids(ui::visibleSettingsRows(xbox));
@@ -2932,14 +3023,14 @@ static void testVisibleSettingsRows() {
     // How far down the autoplay tests walk to each row (autoplay.cpp's downsTo).
     CHECK(ui::settingsRowPosition(ps5, 24) == 5);
     CHECK(ui::settingsRowPosition(ps5, 25) == 6);
-    CHECK(ui::settingsRowPosition(ps5, 1) == 7 && ui::settingsRowPosition(ps5, 3) == 13);
-    CHECK(ui::settingsRowPosition(ps5, 16) == 19);
-    CHECK(ui::settingsRowPosition(ps5, 5) == 17 && ui::settingsRowPosition(ps5, 6) == 18);
-    CHECK(ui::settingsRowPosition(ps5, 12) == 12 && ui::settingsRowPosition(ps5, 14) == 11);
-    CHECK(ui::settingsRowPosition(ps5, 22) == 20);
-    CHECK(ui::settingsRowPosition(ps5, 7) == 22 && ui::settingsRowPosition(ps5, 19) == 21 && ui::settingsRowPosition(ps5, 2) == 1);
-    CHECK(ui::settingsRowPosition(ps5, 21) == 16);
-    CHECK(ui::settingsRowPosition(pc, 5) == 12 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
+    CHECK(ui::settingsRowPosition(ps5, 1) == 7 && ui::settingsRowPosition(ps5, 3) == 14);
+    CHECK(ui::settingsRowPosition(ps5, 16) == 20);
+    CHECK(ui::settingsRowPosition(ps5, 5) == 18 && ui::settingsRowPosition(ps5, 6) == 19);
+    CHECK(ui::settingsRowPosition(ps5, 12) == 13 && ui::settingsRowPosition(ps5, 14) == 12);
+    CHECK(ui::settingsRowPosition(ps5, 22) == 21);
+    CHECK(ui::settingsRowPosition(ps5, 7) == 23 && ui::settingsRowPosition(ps5, 19) == 22 && ui::settingsRowPosition(ps5, 2) == 1);
+    CHECK(ui::settingsRowPosition(ps5, 21) == 17);
+    CHECK(ui::settingsRowPosition(pc, 5) == 13 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
 }
 
 // The controller's glyphs by pad kind (ui/pad_glyphs.h).
@@ -3869,11 +3960,15 @@ static void testBlock2Features() {
         CHECK(app.settings().maxBitrateMbps == exp);
     }
 
-    // Pressing right at 50 Mbps should clamp at 50 Mbps
+    // Pressing right advances to Unlimited (-1) and clamps at Unlimited
     app.handle(navRight);
-    CHECK(app.settings().maxBitrateMbps == 50);
+    CHECK(app.settings().maxBitrateMbps == -1);
+    app.handle(navRight);
+    CHECK(app.settings().maxBitrateMbps == -1);
 
-    // Pressing left reduces the bitrate from 50 to 45 Mbps
+    // Pressing left reduces from Unlimited to 50 Mbps, then to 45 Mbps
+    app.handle(navLeft);
+    CHECK(app.settings().maxBitrateMbps == 50);
     app.handle(navLeft);
     CHECK(app.settings().maxBitrateMbps == 45);
 
@@ -3882,6 +3977,8 @@ static void testBlock2Features() {
     acc.accept = true;
     app.handle(acc);
     CHECK(app.settings().maxBitrateMbps == 50);
+    app.handle(acc);
+    CHECK(app.settings().maxBitrateMbps == -1); // Unlimited
     app.handle(acc);
     CHECK(app.settings().maxBitrateMbps == 0); // wrapped to Automatic
     app.handle(acc);
@@ -10105,6 +10202,7 @@ int main() {
     testSplashInputBlocking();
     testSettingsMigration();
     testSettingsChoiceRoundTrip();
+    testGeneralSettingsR2();
     testMicGain();
     testPerGameSettings();
     testPlaytimeLimit();

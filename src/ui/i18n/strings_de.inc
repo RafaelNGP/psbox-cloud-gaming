@@ -450,4 +450,8 @@ constexpr Column kGerman = {
     "%s Trophäen-Titel aus diesem Profil entfernt.",  // TrophiesRemovedToast
     "Erfolge werden synchronisiert...",               // SyncingTrophies
     "Stream neu laden",                               // ReloadStream
+    "Unbegrenzt",                                     // BitrateUnlimited
+    "FPS-Begrenzer",                                  // FpsLimit
+    "Unbegrenzt",                                     // FpsUnlimited
+    "Begrenzt die Bildrate des Streams für ein gleichmäßiges Bild-Pacing", // SettingDescFpsLimit
 };

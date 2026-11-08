@@ -109,6 +109,8 @@ public:
     void cancelTextInput(const std::string& id);
     // Another stream tier mid-session (StreamOptions::resolutionAlias).
     void requestResolution(const std::string& alias);
+    // Dynamic bitrate cap adjustment (REMB ceiling, bits/s).
+    void setMaxBitrate(uint32_t bps);
     // Sends keepalives and periodic key frame requests; call about once a
     // second from the thread that owns the GssvClient.
     void tick();

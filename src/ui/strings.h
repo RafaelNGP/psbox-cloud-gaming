@@ -459,6 +459,10 @@ enum class Str {
     TrophiesRemovedToast,
     SyncingTrophies,
     ReloadStream,
+    BitrateUnlimited,
+    FpsLimit,
+    FpsUnlimited,
+    SettingDescFpsLimit,
     Count
 };
 

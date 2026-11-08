@@ -33,13 +33,16 @@ public:
     // Last REMB estimate and the measured receive rate, bits/s.
     uint32_t estimate() const { return estimate_; }
     uint32_t receiveRate() const { return receiveRate_; }
+    void setMaxBitrate(uint32_t maxBitrate);
+    uint32_t maxBitrate() const { return maxBitrate_.load(std::memory_order_relaxed); }
 
 private:
     void onRtp(const uint8_t* d, size_t n, uint64_t nowUs);
     void onRtcp(const uint8_t* d, size_t n, uint64_t nowUs);
     void report(uint64_t nowUs, const rtc::message_callback& send);
 
-    const uint32_t clockRate_, maxBitrate_;
+    const uint32_t clockRate_;
+    std::atomic<uint32_t> maxBitrate_{0};
     uint32_t mediaSsrc_ = 0;
     bool started_ = false;
     uint16_t maxSeq_ = 0;

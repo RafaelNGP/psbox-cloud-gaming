@@ -75,7 +75,8 @@ bool Settings::load(const std::string& path) {
     deband = static_cast<int>(std::clamp<int64_t>((*j)["deband"].asInt(deband), 0, 3));
     upscaler = static_cast<int>(std::clamp<int64_t>((*j)["upscaler"].asInt(upscaler), 0, 3));
     videoDecoder = static_cast<int>(std::clamp<int64_t>((*j)["videoDecoder"].asInt(videoDecoder), 0, 1));
-    fpsLimit = static_cast<int>(std::clamp<int64_t>((*j)["fpsLimit"].asInt(fpsLimit), 0, 120));
+    int parsedFps = static_cast<int>((*j)["fpsLimit"].asInt(fpsLimit));
+    fpsLimit = (parsedFps == 30 || parsedFps == 60 || parsedFps == 120) ? parsedFps : 0;
     // "deadzone": one for both sticks, until each could have its own.
     int both = static_cast<int>(std::clamp<int64_t>((*j)["deadzone"].asInt(15), 0, 50));
     deadzoneLeft = static_cast<int>(std::clamp<int64_t>((*j)["deadzoneLeft"].asInt(both), 0, 50));
@@ -101,7 +102,9 @@ bool Settings::load(const std::string& path) {
     highRefresh = (*j)["highRefresh"].asBool(highRefresh);
     desktopFullscreen = (*j)["desktopFullscreen"].asBool(desktopFullscreen);
     handheldProfile = (*j)["handheldProfile"].asBool(handheldProfile);
-    maxBitrateMbps = static_cast<int>(std::clamp<int64_t>((*j)["maxBitrateMbps"].asInt(maxBitrateMbps), 0, 50));
+    int parsedBitrate = static_cast<int>((*j)["maxBitrateMbps"].asInt(maxBitrateMbps));
+    if (parsedBitrate == -1 || parsedBitrate >= 100) maxBitrateMbps = -1;
+    else maxBitrateMbps = std::clamp(parsedBitrate, 0, 50);
     gameVolume = static_cast<int>(std::clamp<int64_t>((*j)["gameVolume"].asInt(gameVolume), 0, 200));
     keyMap = keyMapFromJson((*j)["keyMap"], input::defaultKeyMap());
     padMap = readPadMapOr((*j)["padMap"], input::defaultPadMap(), "the settings");
@@ -157,7 +160,8 @@ bool Settings::load(const std::string& path) {
         p.deband = static_cast<int>(std::clamp<int64_t>(obj["deband"].asInt(deband), 0, 3));
         p.upscaler = static_cast<int>(std::clamp<int64_t>(obj["upscaler"].asInt(upscaler), 0, 3));
         p.videoDecoder = static_cast<int>(std::clamp<int64_t>(obj["videoDecoder"].asInt(videoDecoder), 0, 1));
-        p.fpsLimit = static_cast<int>(std::clamp<int64_t>(obj["fpsLimit"].asInt(fpsLimit), 0, 120));
+        int pFps = static_cast<int>(obj["fpsLimit"].asInt(fpsLimit));
+        p.fpsLimit = (pFps == 30 || pFps == 60 || pFps == 120) ? pFps : 0;
         int resDef = resolution == "720p" ? 1 : resolution == "1440p" ? 2 : 0;
         p.resolution = static_cast<int>(std::clamp<int64_t>(obj["resolution"].asInt(resDef), 0, 2));
         p.deadzoneLeft = static_cast<int>(std::clamp<int64_t>(obj["deadzoneLeft"].asInt(deadzoneLeft), 0, 50));

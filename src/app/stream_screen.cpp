@@ -145,6 +145,18 @@ void StreamScreen::syncFromSettings() {
     media::setPadSpeakerVolume(g_settings.padSpeakerVolume);
     if (g_player) {
         g_player->setMicGain(g_settings.micGainFactor());
+        int fpsLim = hasCustom ? prof.fpsLimit : g_settings.fpsLimit;
+        g_player->setFpsLimit(fpsLim);
+        int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
+        g_player->setMaxBitrate(cap);
+        bool want120 = (hasCustom ? prof.highRefresh : g_settings.highRefresh) && !g_autoplay.hz60;
+        bool hr = want120 && display::setHighRefresh(true);
+        if (!want120 && highRefresh_) {
+            display::setHighRefresh(false);
+            hr = false;
+        }
+        highRefresh_ = hr;
+        g_player->setHighRefreshOutput(highRefresh_);
     }
 
     menu_.setProfileValues(streamResolution_, sharpness_, deband_, upscaler_,
@@ -306,9 +318,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         input::setTriggerFeel(prof.triggerStrength, prof.triggerHz, prof.triggerResistance, prof.triggerPulses, triggerProfile_);
         input::setCircleConfirms(prof.circleConfirms);
         if (g_ui) g_ui->setCircleConfirms(prof.circleConfirms);
-        // 120 Hz (VRR) for this game's stream: active when enabled in profile,
-        // or defaulted on when the display supports switching refresh (menus stay at 60 Hz).
-        bool want120 = (prof.highRefresh || (!hasCustom && display::canSwitchRefresh())) && !g_autoplay.hz60;
+        // 120 Hz (VRR) for this game's stream: active when enabled in settings/profile
+        bool want120 = (hasCustom ? prof.highRefresh : g_settings.highRefresh) && !g_autoplay.hz60;
         highRefresh_ = want120 && display::setHighRefresh(true);
 
         media::audioSetRoute(static_cast<media::AudioRoute>(g_settings.audioRoute));

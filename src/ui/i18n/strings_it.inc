@@ -450,4 +450,8 @@ constexpr Column kItalian = {
     "Rimossi %s titoli di trofei da questo profilo.", // TrophiesRemovedToast
     "Sincronizzazione obiettivi...",                  // SyncingTrophies
     "Ricarica streaming",                             // ReloadStream
+    "Senza limite",                                   // BitrateUnlimited
+    "Limitatore FPS",                                 // FpsLimit
+    "Illimitato",                                     // FpsUnlimited
+    "Limita il framerate di visualizzazione dello stream per mantenere la fluidità", // SettingDescFpsLimit
 };

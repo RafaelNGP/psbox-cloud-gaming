@@ -176,6 +176,7 @@ struct StreamPlayer::Impl {
     media::AudioIn audioIn;
     media::AudioEncoder audioEncoder;
     std::atomic<bool> highRefreshOutput{false};  // setHighRefreshOutput()
+    std::atomic<int> fpsLimit{0};                // setFpsLimit()
     std::atomic<bool> legacy{false};             // setLegacyTuning()
     std::atomic<int> decoderSwitch{-1};          // switchDecoder(): 0 software, 1 hardware
     std::atomic<bool> micEnabled{true};
@@ -482,6 +483,18 @@ struct StreamPlayer::Impl {
                         cur.isHw ? "hardware" : "software");
             }
             uint64_t t2 = platform::nowUs();
+            int limit = fpsLimit.load(std::memory_order_relaxed);
+            if (limit > 0 && lastFramePresentUs > 0) {
+                uint64_t minIntervalUs = (1000000u / static_cast<uint32_t>(limit)) * 8 / 10;
+                if (t2 - lastFramePresentUs < minIntervalUs) {
+                    ++droppedFrames;
+                    if (auto s = current(); s && cur.known) {
+                        cur.meta.renderedMs = stream::clockMs();
+                        s->reportFrame(cur.meta);
+                    }
+                    continue;
+                }
+            }
             auto drawPic = [](const media::Picture& p, bool wait) {
                 if (p.format == media::Picture::Format::Nv12) {
                     return display::drawNv12(p.y, p.u, p.strideY, p.strideU, p.width, p.height, wait);
@@ -786,6 +799,18 @@ struct StreamPlayer::Impl {
                         decoder->isHardware() ? "hardware" : "software");
             }
             uint64_t t2 = platform::nowUs();
+            int limit = fpsLimit.load(std::memory_order_relaxed);
+            if (limit > 0 && lastFramePresentUs > 0) {
+                uint64_t minIntervalUs = (1000000u / static_cast<uint32_t>(limit)) * 8 / 10;
+                if (t2 - lastFramePresentUs < minIntervalUs) {
+                    ++droppedFrames;
+                    if (auto s = current(); s && known) {
+                        meta.renderedMs = stream::clockMs();
+                        s->reportFrame(meta);
+                    }
+                    continue;
+                }
+            }
             // Try acquire with zero wait first; if not ready, wait for swapchain image.
             auto drawPic = [](const media::Picture& p, bool wait) {
                 if (p.format == media::Picture::Format::Nv12) {
@@ -949,7 +974,10 @@ struct StreamPlayer::Impl {
                           : gssv.resolution() == xcloud::Resolution::P1440 ? 40000000
                           : gssv.resolution() == xcloud::Resolution::P1080HQ ? 30000000
                                                                            : 25000000;
-        if (maxBitrateMbps > 0) {  // the user's cap (Wi-Fi) or test override: REMB offers this rate
+        if (maxBitrateMbps == -1 || maxBitrateMbps >= 100) {
+            // Explicit Unlimited bitrate option: uncapped REMB (100 Mbps ceiling)
+            opts.maxBitrate = 100000000u;
+        } else if (maxBitrateMbps > 0) {  // the user's cap (Wi-Fi) or test override: REMB offers this rate
             opts.maxBitrate = static_cast<uint32_t>(std::clamp(maxBitrateMbps, 5, 50)) * 1000000u;
         } else if (uint32_t deviceCap = display::caps().defaultMaxBitrate; deviceCap > 0) {
             // A device that can't keep up with the HQ tiers (PS4): the plain tier, at most
@@ -1342,12 +1370,32 @@ void StreamPlayer::requestSnapshot(const std::string& path) {
 }
 void StreamPlayer::stop() { impl_->stop(); }
 
+void StreamPlayer::setDecodeThreads(int threads) { impl_->decodeThreads = std::max(1, threads); }
 void StreamPlayer::setHwDecodeProbe(bool on) { impl_->hwProbe = on; }
 void StreamPlayer::setPreferHwDecode(bool on) { impl_->preferHwDecode = on; }
 bool StreamPlayer::preferHwDecode() const { return impl_->preferHwDecode; }
 
-void StreamPlayer::setDecodeThreads(int threads) { impl_->decodeThreads = std::max(1, threads); }
-void StreamPlayer::setMaxBitrate(int mbps) { impl_->maxBitrateMbps = std::clamp(mbps, 0, 50); }
+void StreamPlayer::setMaxBitrate(int mbps) {
+    if (mbps == -1 || mbps >= 100) {
+        impl_->maxBitrateMbps = -1;
+    } else {
+        impl_->maxBitrateMbps = std::clamp(mbps, 0, 50);
+    }
+    if (auto s = impl_->current()) {
+        uint32_t bps = (impl_->maxBitrateMbps == -1) ? 100000000u
+                     : (impl_->maxBitrateMbps > 0) ? static_cast<uint32_t>(impl_->maxBitrateMbps) * 1000000u
+                     : 25000000u;
+        s->setMaxBitrate(bps);
+    }
+}
+
+void StreamPlayer::setFpsLimit(int fps) {
+    impl_->fpsLimit.store((fps == 30 || fps == 60 || fps == 120) ? fps : 0, std::memory_order_relaxed);
+}
+
+int StreamPlayer::fpsLimit() const {
+    return impl_->fpsLimit.load(std::memory_order_relaxed);
+}
 void StreamPlayer::setSimulatedLoss(int percent) { impl_->simulatedLoss = std::clamp(percent, 0, 50); }
 
 StreamPlayer::Stats StreamPlayer::stats() const {
