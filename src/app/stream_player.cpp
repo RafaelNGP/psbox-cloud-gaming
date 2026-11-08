@@ -779,7 +779,7 @@ struct StreamPlayer::Impl {
                 continue;
             }
             bool screenshot = saveSnapshotIfAsked(pic);
-            std::lock_guard<std::recursive_mutex> lock(display::frameMutex());
+            std::unique_lock<std::recursive_mutex> lock(display::frameMutex());
             if (decodedFrames == 1) {
                 XC_LOGI("first draw %dx%d (%s, %s)", pic.width, pic.height,
                         pic.format == media::Picture::Format::Nv12 ? "NV12" : "YUV420P",
@@ -818,13 +818,17 @@ struct StreamPlayer::Impl {
                 lastPresentedId = id;
                 noteShown();
             }
+            if (!screenshot) lock.unlock();
             meta.renderedMs = stream::clockMs();
             if (auto s = current(); s && known) s->reportFrame(meta);
             if (decodedFrames % 600 == 1)
                 XC_LOGI("frame %u: queued %.1f, decoded %.1f, shown %.1f ms after arrival", meta.serverDataKey,
                         meta.submittedMs - meta.firstPacketArrivalMs, meta.decodedMs - meta.firstPacketArrivalMs,
                         meta.renderedMs - meta.firstPacketArrivalMs);
-            if (screenshot) saveScreen();
+            if (screenshot) {
+                saveScreen();
+                lock.unlock();
+            }
             drawUs += t3 - t2;
             ++drawCalls;
             atomicMax(drawMaxUs, t3 - t2);

@@ -158,12 +158,6 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         open_ = false;
         return MenuAction::Close;
     }
-    if (calibrating_) {
-        float raw[3];
-        if (input::pollPadRawGyro(0, raw)) {
-            feedGyroCalibration(raw);
-        }
-    }
     // Up / down over the items shown (the Xbox button always is).
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
     if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
@@ -228,7 +222,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         int s = std::clamp(gyroYawScale_ + (in.right ? 10 : -10), 20, 200);
         if (s != gyroYawScale_) {
             gyroYawScale_ = s;
-            input::setGlobalGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
+            input::setGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
             return MenuAction::Gyro;
         }
     }
@@ -236,7 +230,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         int s = std::clamp(gyroPitchScale_ + (in.right ? 10 : -10), 20, 200);
         if (s != gyroPitchScale_) {
             gyroPitchScale_ = s;
-            input::setGlobalGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
+            input::setGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
             return MenuAction::Gyro;
         }
     }

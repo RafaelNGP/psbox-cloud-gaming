@@ -75,6 +75,7 @@ bool Settings::load(const std::string& path) {
     deband = static_cast<int>(std::clamp<int64_t>((*j)["deband"].asInt(deband), 0, 3));
     upscaler = static_cast<int>(std::clamp<int64_t>((*j)["upscaler"].asInt(upscaler), 0, 3));
     videoDecoder = static_cast<int>(std::clamp<int64_t>((*j)["videoDecoder"].asInt(videoDecoder), 0, 1));
+    fpsLimit = static_cast<int>(std::clamp<int64_t>((*j)["fpsLimit"].asInt(fpsLimit), 0, 120));
     // "deadzone": one for both sticks, until each could have its own.
     int both = static_cast<int>(std::clamp<int64_t>((*j)["deadzone"].asInt(15), 0, 50));
     deadzoneLeft = static_cast<int>(std::clamp<int64_t>((*j)["deadzoneLeft"].asInt(both), 0, 50));
@@ -156,6 +157,7 @@ bool Settings::load(const std::string& path) {
         p.deband = static_cast<int>(std::clamp<int64_t>(obj["deband"].asInt(deband), 0, 3));
         p.upscaler = static_cast<int>(std::clamp<int64_t>(obj["upscaler"].asInt(upscaler), 0, 3));
         p.videoDecoder = static_cast<int>(std::clamp<int64_t>(obj["videoDecoder"].asInt(videoDecoder), 0, 1));
+        p.fpsLimit = static_cast<int>(std::clamp<int64_t>(obj["fpsLimit"].asInt(fpsLimit), 0, 120));
         int resDef = resolution == "720p" ? 1 : resolution == "1440p" ? 2 : 0;
         p.resolution = static_cast<int>(std::clamp<int64_t>(obj["resolution"].asInt(resDef), 0, 2));
         p.deadzoneLeft = static_cast<int>(std::clamp<int64_t>(obj["deadzoneLeft"].asInt(deadzoneLeft), 0, 50));
@@ -206,6 +208,7 @@ GameProfile Settings::defaultProfile() const {
     p.deband = deband;
     p.upscaler = upscaler;
     p.videoDecoder = videoDecoder;
+    p.fpsLimit = fpsLimit;
     p.resolution = resolution == "720p" ? 1 : resolution == "1440p" ? 2 : 0;
     p.deadzoneLeft = deadzoneLeft;
     p.deadzoneRight = deadzoneRight;
@@ -276,6 +279,7 @@ bool Settings::save(const std::string& path) const {
     v.set("deband", deband);
     v.set("upscaler", upscaler);
     v.set("videoDecoder", videoDecoder);
+    v.set("fpsLimit", fpsLimit);
     v.set("deadzoneLeft", deadzoneLeft);
     v.set("deadzoneRight", deadzoneRight);
     v.set("triggerStrength", triggerStrength);
@@ -336,6 +340,7 @@ bool Settings::save(const std::string& path) const {
         obj.set("deband", p.deband);
         obj.set("upscaler", p.upscaler);
         obj.set("videoDecoder", p.videoDecoder);
+        obj.set("fpsLimit", p.fpsLimit);
         obj.set("resolution", p.resolution);
         obj.set("deadzoneLeft", p.deadzoneLeft);
         obj.set("deadzoneRight", p.deadzoneRight);

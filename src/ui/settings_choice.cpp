@@ -39,6 +39,11 @@ SettingsChoice choiceFromSettings(const app::Settings& s) {
     c.padMap = s.padMap;
     c.gyroMode = s.gyroMode;
     c.gyroLevel = s.gyroLevel;
+    c.gyroYawScale = s.gyroYawScale;
+    c.gyroPitchScale = s.gyroPitchScale;
+    c.gyroBias[0] = s.gyroBias[0];
+    c.gyroBias[1] = s.gyroBias[1];
+    c.gyroBias[2] = s.gyroBias[2];
     c.fullscreen = s.desktopFullscreen;
     c.touchpadMouse = s.touchpadMouse;
     c.touchpadShortcuts = s.touchpadShortcuts;
@@ -77,6 +82,11 @@ void applyChoice(const SettingsChoice& c, app::Settings& s) {
     if (input::padMapValid(c.padMap)) s.padMap = c.padMap;  // the screen only lets a complete one out
     s.gyroMode = c.gyroMode;
     s.gyroLevel = c.gyroLevel;
+    s.gyroYawScale = c.gyroYawScale;
+    s.gyroPitchScale = c.gyroPitchScale;
+    s.gyroBias[0] = c.gyroBias[0];
+    s.gyroBias[1] = c.gyroBias[1];
+    s.gyroBias[2] = c.gyroBias[2];
     s.desktopFullscreen = c.fullscreen;
     s.touchpadMouse = c.touchpadMouse;
     s.touchpadShortcuts = c.touchpadShortcuts;

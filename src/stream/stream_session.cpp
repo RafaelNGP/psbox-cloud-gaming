@@ -111,6 +111,8 @@ struct StreamSession::Impl {
 
     std::atomic<bool> open{false};
     std::atomic<bool> resolutionPending{false};  // 1440: asked at the first video frame
+    std::atomic<bool> firstVideoSeen{false};
+    std::atomic<bool> keyframePending{false};    // deferred from H264Receiver to avoid mSslMutex re-entrancy
     std::atomic<bool> closedNotified{false};
     std::atomic<uint32_t> inputSequence{1};
     uint64_t lastKeepaliveMs = 0;
@@ -547,11 +549,9 @@ struct StreamSession::Impl {
             [g = guard] {
                 std::lock_guard<std::mutex> lock(g->mutex);
                 if (!g->self || !g->self->open) return;
-                try {
-                    g->self->requestKeyframe();
-                } catch (const std::exception& e) {
-                    XC_LOGW("keyframe request: %s", e.what());
-                }
+                // Defer control data-channel send outside DtlsTransport::ReadCallback
+                // (which holds mSslMutex in MbedTLS).
+                g->self->keyframePending.store(true, std::memory_order_relaxed);
             },
             videoStats);
         videoReceiver->setSimulatedLoss(opt.simulatedVideoLoss);
@@ -565,7 +565,7 @@ struct StreamSession::Impl {
                 platform::setThreadAffinity(platform::ThreadRole::Network, "xcloud_net");
                 s_netPinned = true;
             }
-            if (resolutionPending.exchange(false)) sendResolution(opt.resolutionAlias);
+            firstVideoSeen.store(true, std::memory_order_relaxed);
             uint64_t now = platform::nowMs();
             uint64_t last = lastVideoMs.exchange(now);
             if (last && now - last >= 1500) {
@@ -712,8 +712,19 @@ struct StreamSession::Impl {
         sendText(control, v.dump());
     }
 
+    void flushPendingControl() {
+        if (!open) return;
+        if (firstVideoSeen.load(std::memory_order_relaxed) && resolutionPending.exchange(false)) {
+            sendResolution(opt.resolutionAlias);
+        }
+        if (keyframePending.exchange(false)) {
+            requestKeyframe();
+        }
+    }
+
     void tick() {
         if (!open) return;
+        flushPendingControl();
         uint64_t now = platform::nowMs();
         if (now - lastKeepaliveMs >= 30000) {
             lastKeepaliveMs = now;
@@ -817,6 +828,7 @@ void StreamSession::sendKeys(const std::vector<KeyFrame>& keys) {
 void StreamSession::sendGamepad(const GamepadFrame& frame) {
     if (!impl_->open) return;
     Impl& d = *impl_;
+    d.flushPendingControl();
     if (d.padsStale.exchange(false)) {
         uint32_t attached = d.padsAttached;
         for (int i = 0; i < 4; ++i)
@@ -874,6 +886,7 @@ void StreamSession::requestKeyframe() {
 }
 void StreamSession::reportFrame(const FrameMetadata& frame) {
     if (!impl_->open) return;
+    impl_->flushPendingControl();
     Impl::sendBinary(impl_->input, metadataReport(impl_->inputSequence++, impl_->nowMs(), {frame}));
 }
 

@@ -107,7 +107,9 @@ void openReport(const std::string& what, bool previousSession, const std::string
 void applyControllerSettings() {
     std::lock_guard<std::mutex> lock(g_settingsMutex);
     input::setDeadzone(g_settings.deadzoneLeft / 100.0f, g_settings.deadzoneRight / 100.0f);
-    input::setTriggerFeel(g_settings.triggerStrength, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses);
+    input::setTriggerFeel(g_settings.triggerStrength, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, g_settings.triggerProfile);
+    input::setGyro(g_settings.gyroMode, g_settings.gyroLevel);
+    input::setGyroCalibration(g_settings.gyroBias, g_settings.gyroYawScale / 100.0f, g_settings.gyroPitchScale / 100.0f);
     input::setCircleConfirms(g_settings.circleConfirms);
     media::setAudioHapticsLevel(g_settings.audioHaptics);
     input::setUsbPadsEnabled(g_settings.usbControllers);

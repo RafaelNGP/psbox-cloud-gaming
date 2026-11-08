@@ -65,9 +65,9 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         return;
     }
 
-    // Effective bias and scales: fallback to global calibration if unpopulated or default
+    // Effective bias and scales: keep in sync with global calibration when set
     float effBias[3] = {s.bias[0], s.bias[1], s.bias[2]};
-    if (effBias[0] == 0.0f && effBias[1] == 0.0f && effBias[2] == 0.0f && g_hasGlobalGyroBias) {
+    if (g_hasGlobalGyroBias && effBias[0] == 0.0f && effBias[1] == 0.0f && effBias[2] == 0.0f) {
         effBias[0] = g_globalGyroBias[0];
         effBias[1] = g_globalGyroBias[1];
         effBias[2] = g_globalGyroBias[2];
@@ -77,7 +77,7 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
     }
     float effYawScale = s.yawScale;
     float effPitchScale = s.pitchScale;
-    if (effYawScale == 1.0f && effPitchScale == 0.8f && g_hasGlobalGyroScales) {
+    if (g_hasGlobalGyroScales) {
         effYawScale = g_globalYawScale;
         effPitchScale = g_globalPitchScale;
         s.yawScale = effYawScale;

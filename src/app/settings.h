@@ -27,6 +27,7 @@ struct GameProfile {
     int upscaler = 2;            // 0 FSR 1, 1 Anime4K, 2 FSR + clean, 3 Anime4K + clean
     int resolution = 0;          // 0 1080p, 1 720p, 2 1440p
     int videoDecoder = 0;        // 0 Hardware, 1 Software
+    int fpsLimit = 0;            // 0 Unlimited, 30, 60, 120
     // Controller: dead zone (percent), triggers, confirm button
     int deadzoneLeft = 15, deadzoneRight = 15;
     int triggerStrength = 2;     // 0 off .. 4 max
@@ -113,6 +114,7 @@ struct Settings {
     // Voice chat & Audio routing
     bool micEnabled = true;
     bool highRefresh = false;  // 119.88 Hz output (VRR where the console turns it on) while streaming
+    int fpsLimit = 0;          // presentation pacing FPS limit: 0 unlimited, 30, 60, 120
     int maxBitrateMbps = 0;    // the stream's bitrate cap: 0 automatic (the tier's), else 50, 45, 40, 35, 30, 25, 20, 15, 10 or 5
     int gameVolume = 100;      // percent: 25, 50, 75, 100 or 150
     input::KeyMap keyMap = input::defaultKeyMap();  // the keys when the keyboard is a player's controller

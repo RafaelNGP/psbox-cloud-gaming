@@ -17,7 +17,7 @@ uint64_t s_gyroCalDoneTime = 0;
 static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
                                        const std::function<Rect(Canvas&, int, int, const std::string&)>& drawModalFn,
                                        const std::function<void(Canvas&, const std::vector<std::pair<int, const char*>>&)>& drawHintsFn,
-                                       app::GameProfile& activeGameProfile, bool gameSettingsOpen,
+                                       SettingsChoice& settings, app::GameProfile& activeGameProfile, bool gameSettingsOpen,
                                        bool& activeGameHasCustom, uint64_t lastRender, bool& dirty, bool& animating) {
     if (s_gyroCalibrator.state == input::GyroCalibrator::State::Calibrating) {
         float rawGyro[3]{0};
@@ -29,6 +29,9 @@ static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
             s_gyroBias[0] = s_gyroCalibrator.resultBias[0];
             s_gyroBias[1] = s_gyroCalibrator.resultBias[1];
             s_gyroBias[2] = s_gyroCalibrator.resultBias[2];
+            settings.gyroBias[0] = s_gyroBias[0];
+            settings.gyroBias[1] = s_gyroBias[1];
+            settings.gyroBias[2] = s_gyroBias[2];
             input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
             if (gameSettingsOpen) {
                 activeGameProfile.gyroBias[0] = s_gyroBias[0];
@@ -415,15 +418,16 @@ void AppUi::handleTester(const NavInput& in) {
         if (delta) dirty_ = true;
         if (in.l2Analog != testL2_ || in.r2Analog != testR2_) testL2_ = in.l2Analog, testR2_ = in.r2Analog, dirty_ = true;
     }
-    if (in.back) {
-        settings_.deadzone[0] = testerBackup_.deadzone[0], settings_.deadzone[1] = testerBackup_.deadzone[1];
-        settings_.triggerStrength = testerBackup_.triggerStrength, settings_.triggerHz = testerBackup_.triggerHz;
-        settings_.triggerResistance = testerBackup_.triggerResistance, settings_.triggerPulses = testerBackup_.triggerPulses;
-        settings_.triggerProfile = testerBackup_.triggerProfile;
-    }
     if (in.accept || in.back) {
         if (gameSettingsOpen_) {
-            if (in.accept) {
+            bool changed = settings_.deadzone[0] != activeGameProfile_.deadzoneLeft ||
+                           settings_.deadzone[1] != activeGameProfile_.deadzoneRight ||
+                           settings_.triggerStrength != activeGameProfile_.triggerStrength ||
+                           settings_.triggerHz != activeGameProfile_.triggerHz ||
+                           settings_.triggerResistance != activeGameProfile_.triggerResistance ||
+                           settings_.triggerPulses != activeGameProfile_.triggerPulses ||
+                           settings_.triggerProfile != activeGameProfile_.triggerProfile;
+            if (changed || in.accept) {
                 activeGameProfile_.deadzoneLeft = settings_.deadzone[0];
                 activeGameProfile_.deadzoneRight = settings_.deadzone[1];
                 activeGameProfile_.triggerStrength = settings_.triggerStrength;
@@ -499,6 +503,11 @@ void AppUi::setGyroDefaults(int mode, int level) {
     input::getGlobalGyroCalibration(s_gyroBias, y, p);
     s_gyroYawScale = static_cast<int>(std::round(y * 100.0f));
     s_gyroPitchScale = static_cast<int>(std::round(p * 100.0f));
+    settings_.gyroYawScale = s_gyroYawScale;
+    settings_.gyroPitchScale = s_gyroPitchScale;
+    settings_.gyroBias[0] = s_gyroBias[0];
+    settings_.gyroBias[1] = s_gyroBias[1];
+    settings_.gyroBias[2] = s_gyroBias[2];
     dirty_ = true;
 }
 
@@ -530,6 +539,7 @@ void AppUi::openGameSettings() {
         activeGameProfile_.triggerHz = settings_.triggerHz;
         activeGameProfile_.triggerResistance = settings_.triggerResistance;
         activeGameProfile_.triggerPulses = settings_.triggerPulses;
+        activeGameProfile_.triggerProfile = settings_.triggerProfile;
         activeGameProfile_.audioHaptics = settings_.audioHaptics;
         activeGameProfile_.circleConfirms = settings_.circleConfirms;
         activeGameProfile_.highRefresh = settings_.highRefresh;
@@ -741,6 +751,7 @@ void AppUi::applySetting(int row, int index) {
                 }
             }
             s_gyroYawScale = next;
+            settings_.gyroYawScale = s_gyroYawScale;
             input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
         } else if (index == 5) {
             static constexpr int kScales[] = {20, 40, 60, 80, 100, 120, 150, 200};
@@ -753,6 +764,7 @@ void AppUi::applySetting(int row, int index) {
                 }
             }
             s_gyroPitchScale = next;
+            settings_.gyroPitchScale = s_gyroPitchScale;
             input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
         }
     } else if (row == 10) {
@@ -1303,7 +1315,7 @@ void AppUi::drawSettings(Canvas& c) {
             renderGyroCalibrationModal(c, fonts_,
                 [this](Canvas& cv, int w, int h, const std::string& t) { return drawModal(cv, w, h, t); },
                 [this](Canvas& cv, const std::vector<std::pair<int, const char*>>& h) { drawHints(cv, h); },
-                activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
+                settings_, activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
             return;
         }
     }
@@ -2116,7 +2128,7 @@ void AppUi::drawGameSettings(Canvas& c) {
             renderGyroCalibrationModal(c, fonts_,
                 [this](Canvas& cv, int w, int h, const std::string& t) { return drawModal(cv, w, h, t); },
                 [this](Canvas& cv, const std::vector<std::pair<int, const char*>>& h) { drawHints(cv, h); },
-                activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
+                settings_, activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
             return;
         }
     }

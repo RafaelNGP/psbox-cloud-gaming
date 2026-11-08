@@ -139,6 +139,9 @@ struct SettingsChoice {
     input::PadMap padMap = input::defaultPadMap();  // the controller's buttons toward the game (always complete)
     int gyroMode = 0;   // gyro aiming (input/gyro.h): 0 off, 1 always, 2 while L2 is held
     int gyroLevel = 5;  // intensity, 1..10
+    int gyroYawScale = 100;
+    int gyroPitchScale = 80;
+    float gyroBias[3] = {0.0f, 0.0f, 0.0f};
     bool fullscreen = true;    // a desktop's window fullscreen (UiCaps::desktopWindow; F11 switches it too)
     bool touchpadMouse = false;
     input::TouchpadShortcuts touchpadShortcuts = input::defaultTouchpadShortcuts();

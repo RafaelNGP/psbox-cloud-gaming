@@ -301,6 +301,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         gyroMode_ = prof.gyroMode;
         gyroLevel_ = prof.gyroLevel;
         input::setGyro(gyroMode_, gyroLevel_);
+        input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
         input::setDeadzone(prof.deadzoneLeft / 100.0f, prof.deadzoneRight / 100.0f);
         input::setTriggerFeel(prof.triggerStrength, prof.triggerHz, prof.triggerResistance, prof.triggerPulses, triggerProfile_);
         input::setCircleConfirms(prof.circleConfirms);
@@ -580,9 +581,14 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             case ui::MenuAction::Triggers: {
                 triggerStrength_ = menu_.triggerStrength();
                 std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                input::setTriggerFeel(triggerStrength_, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].triggerStrength = triggerStrength_;
-                else g_settings.triggerStrength = triggerStrength_;
+                if (hasCustomProfile_) {
+                    auto& gp = g_settings.perGame[gameKey_];
+                    gp.triggerStrength = triggerStrength_;
+                    input::setTriggerFeel(triggerStrength_, gp.triggerHz, gp.triggerResistance, gp.triggerPulses, triggerProfile_);
+                } else {
+                    g_settings.triggerStrength = triggerStrength_;
+                    input::setTriggerFeel(triggerStrength_, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, triggerProfile_);
+                }
                 g_settings.save(settingsPath());
                 refreshSettingsUiLocked();
                 if (g_ui) g_ui->setPerGameSettings(g_settings.perGame);
