@@ -114,6 +114,8 @@ std::string diagnostics();
 
 // Platform description ("PlayStation 4", "PlayStation 5", "Linux", etc.).
 std::string platformName();
+bool isPS4();
+bool isPS5();
 
 // Suggested image cache budget in bytes for this platform's RAM constraints.
 size_t imageCacheBudget();

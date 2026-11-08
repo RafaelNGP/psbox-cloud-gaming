@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "ui/app_ui_internal.h"
+#include "ui/stream_menu.h"
 #include "input/gyro.h"
 #include "input/controller_backend.h"
 
@@ -596,9 +597,11 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
     } else if (row == 13) {
         out = {tr(Str::DisplayWindow), tr(Str::DisplayFullscreen)};
     } else if (row == 10) {
-        out.push_back(tr(Str::BitrateAuto));
-        for (int mbps : kBitrateCaps) out.push_back(std::to_string(mbps) + " Mbps");
-        out.push_back(tr(Str::BitrateUnlimited));
+        out.push_back(StreamMenu::formatBitrateLabel(0));
+        for (int mbps : kBitrateCaps) {
+            out.push_back(StreamMenu::formatBitrateLabel(mbps));
+        }
+        out.push_back(StreamMenu::formatBitrateLabel(-1));
     } else if (row == 26) {
         out = {tr(Str::FpsUnlimited), "30 FPS", "60 FPS", "120 FPS"};
     } else if (row == 11) {

@@ -374,7 +374,7 @@ constexpr Column kEnglish = {
     "Checks for and automatically installs official app updates directly on your console without needing a PC", // SettingDescUpdates
     "Allows signing in to your Xbox account via a different geographic region to access alternative catalogs", // SettingDescLoginCountry
     "Enables 120 Hz video output on your console for lower display lag and reduced input latency", // SettingDescHighRefresh
-    "Sets the maximum bandwidth limit for video streaming, ensuring higher visual fidelity or saving network data", // SettingDescBitrateCap
+    "Automatic uses Xbox's profile cap; Unlimited removes the app ceiling up to the server maximum. Above 15 Mbps is experimental.", // SettingDescBitrateCap
     "Adjusts the master audio volume level played during game streaming sessions", // SettingDescGameVolume
     "Maps USB or Bluetooth keyboard keys to the corresponding Xbox controller buttons during gameplay", // SettingDescKeyboardKeys
     "Toggles between windowed and fullscreen display mode on supported desktop platforms", // SettingDescDisplayMode

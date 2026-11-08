@@ -386,6 +386,12 @@ MenuAction StreamMenu::handle(const NavInput& in) {
     }
 }
 
+std::string StreamMenu::formatBitrateLabel(int mbps) {
+    if (mbps == -1 || mbps >= 100) return tr(Str::BitrateUnlimited);
+    if (mbps == 0) return tr(Str::BitrateAuto);
+    return std::to_string(mbps) + (mbps > 15 ? " Mbps (experimental)" : " Mbps");
+}
+
 Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     const int canvasW = (!statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
     Canvas c(canvasW, kMenuH);
@@ -653,9 +659,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             if (sel) value = "< " + value + " >";
         }
         if (i == BitrateLimiterItem) {
-            value = (maxBitrateMbps_ == -1) ? tr(Str::BitrateUnlimited)
-                    : (maxBitrateMbps_ == 0)  ? tr(Str::BitrateAuto)
-                                              : (std::to_string(maxBitrateMbps_) + " Mbps");
+            value = formatBitrateLabel(maxBitrateMbps_);
             if (sel) value = "< " + value + " >";
         }
         if (i == VrrItem) {

@@ -374,7 +374,7 @@ constexpr Column kSpanish = {
     "Comprueba e instala automáticamente actualizaciones oficiales de la aplicación directamente en la consola", // SettingDescUpdates
     "Permite iniciar sesión en tu cuenta de Xbox mediante otra región geográfica para acceder a catálogos alternativos", // SettingDescLoginCountry
     "Activa salida de vídeo a 120 Hz en tu consola para reducir el retardo de pantalla y la latencia de entrada", // SettingDescHighRefresh
-    "Define el límite máximo de tasa de bits para streaming de vídeo, asegurando calidad visual o ahorrando red", // SettingDescBitrateCap
+    "Automático usa el límite del perfil Xbox; Sin límite quita el tope de la app hasta el máximo real del servidor. Más de 15 Mbps es experimental.", // SettingDescBitrateCap
     "Ajusta el volumen general del audio reproducido durante las sesiones de juego en la nube", // SettingDescGameVolume
     "Asigna teclas del teclado USB o Bluetooth a los botones correspondientes del mando de Xbox durante el juego", // SettingDescKeyboardKeys
     "Alterna entre modo ventana y pantalla completa en plataformas de escritorio compatibles", // SettingDescDisplayMode

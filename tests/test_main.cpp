@@ -10671,6 +10671,53 @@ static void testMilestone6UsbKeyboardMouseIsolation() {
     CHECK(probeUsbPadPs4(0x054C, 0x0CE6, genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)));
 }
 
+static void testM3PlatformAndBitrateUi() {
+    // 1. Platform detection helpers on host (Linux)
+    CHECK(!platform::isPS4());
+    CHECK(!platform::isPS5());
+    CHECK(!platform::platformName().empty());
+
+    // 2. WebServer /api/settings exposes platform flags even without custom hooks
+    {
+        app::WebServer srv;
+        auto res = srv.handleRequest("GET", "/api/settings", "");
+        CHECK(res.status == 200);
+        auto j = json::parse(res.body);
+        CHECK(j && j->isObject());
+        CHECK((*j).has("platform") && !(*j)["platform"].str().empty());
+        CHECK((*j).has("isPS4") && (*j)["isPS4"].asBool() == platform::isPS4());
+        CHECK((*j).has("isPS5") && (*j)["isPS5"].asBool() == platform::isPS5());
+
+        // HTML hides OneFamily toggle unless PS4, rounds FPS/QP, and marks > 15 Mbps experimental
+        auto htmlRes = srv.handleRequest("GET", "/", "");
+        CHECK(htmlRes.status == 200);
+        CHECK(htmlRes.body.find("id=\"rowUsbControllers\" style=\"display:none;\"") != std::string::npos);
+        CHECK(htmlRes.body.find("rowUsb.style.display = s.isPS4 ? 'flex' : 'none'") != std::string::npos);
+        CHECK(htmlRes.body.find("Math.round(fpsN)") != std::string::npos);
+        CHECK(htmlRes.body.find("Math.round(qpN)") != std::string::npos);
+        CHECK(htmlRes.body.find("Mbps (experimental)") != std::string::npos);
+        CHECK(htmlRes.body.find("Automático:") != std::string::npos);
+        CHECK(htmlRes.body.find("Sem Limite:") != std::string::npos);
+    }
+
+    // 3. Bitrate labels & description distinguish Auto vs Unlimited and mark > 15 Mbps (experimental)
+    {
+        ui::setLanguage(ui::Language::PortugueseBR);
+        CHECK(ui::StreamMenu::formatBitrateLabel(0) == "Automático");
+        CHECK(ui::StreamMenu::formatBitrateLabel(-1) == "Sem Limite");
+        CHECK(ui::StreamMenu::formatBitrateLabel(15) == "15 Mbps");
+        CHECK(ui::StreamMenu::formatBitrateLabel(20) == "20 Mbps (experimental)");
+        CHECK(ui::StreamMenu::formatBitrateLabel(50) == "50 Mbps (experimental)");
+        std::string descPt = ui::tr(ui::Str::SettingDescBitrateCap);
+        CHECK(descPt.find("Automático") != std::string::npos);
+        CHECK(descPt.find("Sem Limite") != std::string::npos);
+        ui::setLanguage(ui::Language::English);
+        CHECK(ui::StreamMenu::formatBitrateLabel(0) == "Automatic");
+        CHECK(ui::StreamMenu::formatBitrateLabel(-1) == "Unlimited");
+        CHECK(ui::StreamMenu::formatBitrateLabel(25) == "25 Mbps (experimental)");
+    }
+}
+
 int main() {
     testPs4VideoPipelineAndSse2Converter();
     testTrophySystem();
@@ -10780,6 +10827,7 @@ int main() {
     testDetailsHydrationAndPlaytimeBadge();
     testMilestone5TransmissionQualityAndStreamReload();
     testMilestone6UsbKeyboardMouseIsolation();
+    testM3PlatformAndBitrateUi();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

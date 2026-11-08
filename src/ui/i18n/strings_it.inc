@@ -374,7 +374,7 @@ constexpr Column kItalian = {
     "Verifica e installa automaticamente gli aggiornamenti ufficiali dell'app direttamente sulla console", // SettingDescUpdates
     "Consente di accedere al proprio account Xbox tramite un'altra regione per accedere a cataloghi alternativi", // SettingDescLoginCountry
     "Abilita l'uscita video a 120 Hz sulla console per un ritardo di visualizzazione e latenza di input ridotti", // SettingDescHighRefresh
-    "Imposta il limite massimo di bitrate per lo streaming video, garantendo alta fedeltà o risparmio dati", // SettingDescBitrateCap
+    "Automatico usa il limite del profilo Xbox; Senza limite rimuove il blocco dell'app fino al max del server. Oltre 15 Mbps è sperimentale.", // SettingDescBitrateCap
     "Regola il livello del volume audio principale durante le sessioni di gioco in streaming", // SettingDescGameVolume
     "Mappa i tasti della tastiera USB o Bluetooth sui pulsanti corrispondenti del controller Xbox durante il gioco", // SettingDescKeyboardKeys
     "Alterna tra modalità finestra e schermo intero sulle piattaforme desktop supportate", // SettingDescDisplayMode

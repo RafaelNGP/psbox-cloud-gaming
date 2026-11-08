@@ -197,6 +197,8 @@ bool restartApp() { return false; }
 std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }
 std::string platformName() { return "Linux"; }
+bool isPS4() { return false; }
+bool isPS5() { return false; }
 size_t imageCacheBudget() { return 160u << 20; }
 
 // Threads keep the scheduler's choice unless setNoThreadPinning(false), as

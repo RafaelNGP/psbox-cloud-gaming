@@ -730,7 +730,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
     </svg>
     <div class="brand-text">
       <h1>PSBOX CLOUD GAMING</h1>
-      <span class="brand-subtitle">Smartglass WebUI</span>
+      <span class="brand-subtitle" id="brandSubtitle">Smartglass WebUI</span>
     </div>
   </div>
   <span class="badge">v)html" XC_APP_VERSION R"html(</span>
@@ -755,9 +755,10 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
       <div class="slider-group">
         <div class="slider-header">
           <span>Bitrate Máximo</span>
-          <span class="slider-val" id="valBitrate">Auto</span>
+          <span class="slider-val" id="valBitrate">Automático</span>
         </div>
         <input type="range" id="inputBitrate" min="0" max="55" step="5" value="0" oninput="onBitrateInput(this.value)">
+        <p style="font-size:0.76rem; color:var(--text-dim); margin:4px 0 0 0;"><strong>Automático:</strong> usa o teto nativo do perfil Xbox (720p ~12 Mbps, 1080p ~25–30 Mbps, 1440p ~40 Mbps). <strong>Sem Limite:</strong> remove a trava do app até o limite real do servidor Xbox. Valores acima de 15 Mbps são experimentais.</p>
       </div>
 
       <div class="map-item" style="margin-top: 10px; margin-bottom: 12px;">
@@ -803,7 +804,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
       </div>
 
       <div class="map-item" style="margin-bottom: 10px;">
-        <label>Barra de Luz DualSense</label>
+        <label id="lblLightBar">Barra de Luz DualSense</label>
         <select id="selectLightBarMode" onchange="onLightBarModeChange()">
           <option value="0">Cor do Jogo</option>
           <option value="1">Cor Personalizada</option>
@@ -820,7 +821,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
         </label>
       </div>
 
-      <div class="toggle-row">
+      <div class="toggle-row" id="rowUsbControllers" style="display:none;">
         <span class="toggle-label">Controles USB (Driver OneFamily integrado)</span>
         <label class="switch">
           <input type="checkbox" id="checkUsbControllers" onchange="markSettingsChanged()">
@@ -831,7 +832,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
       <div class="map-item" style="margin-top: 10px;">
         <label>Decodificador de Vídeo</label>
         <select id="selectVideoDecoder" onchange="markSettingsChanged()">
-          <option value="0">Hardware (libSceVideodec2 / HWAccel)</option>
+          <option value="0" id="optVideoHw">Hardware (libSceVideodec2 / HWAccel)</option>
           <option value="1">Software (FFmpeg CPU)</option>
         </select>
       </div>
@@ -839,7 +840,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
       <div class="map-item" style="margin-top: 10px;">
         <label>Saída do Chat de Voz</label>
         <select id="selectVoiceRouting" onchange="markSettingsChanged()">
-          <option value="0">Automático (Alto-falante DualSense se disponível)</option>
+          <option value="0" id="optVoiceAuto">Automático (Alto-falante DualSense se disponível)</option>
           <option value="1">Sempre TV / Headset Principal</option>
         </select>
       </div>
@@ -895,7 +896,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 
       <div class="slider-group">
         <div class="slider-header">
-          <span>Volume Alto-falante DualSense</span>
+          <span id="lblPadSpeaker">Volume Alto-falante DualSense</span>
           <span class="slider-val" id="valPadSpeaker">100%</span>
         </div>
         <input type="range" id="inputPadSpeaker" min="0" max="100" step="5" value="100" oninput="document.getElementById('valPadSpeaker').textContent=this.value+'%'; sendStreamParam('padSpeakerVolume', parseInt(this.value));">
@@ -1046,7 +1047,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 
     <div id="subRemapPad">
       <div class="card">
-        <h2>🎮 Remapeamento de Botões (DualSense)</h2>
+        <h2 id="h2RemapPad">🎮 Remapeamento de Botões (DualSense)</h2>
         <p>Ajuste os botões do controle para o jogo na nuvem. Suas alterações são sincronizadas e salvas automaticamente.</p>
         <div class="grid-map" id="padGrid"></div>
         <div class="btn-row">
@@ -1070,7 +1071,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 
     <div id="subRemapTouch" style="display:none;">
       <div class="card">
-        <h2>👆 Atalhos do Touchpad (DualSense)</h2>
+        <h2 id="h2RemapTouch">👆 Atalhos do Touchpad (DualSense)</h2>
         <p>Configure o que cada gesto (deslizar) ou clique físico (lado esquerdo/direito) no touchpad faz durante o streaming. <strong>Touchpad + Options</strong> permanece sempre fixo para abrir o Menu do Jogo.</p>
         <div class="grid-map" id="remapTouchpadShortcutsGrid"></div>
         <div class="btn-row">
@@ -1743,8 +1744,9 @@ function onBitrateInput(val) {
   const v = parseInt(val, 10);
   const el = document.getElementById('valBitrate');
   if (el) {
-    if (v === 0) el.textContent = 'Auto';
+    if (v === 0) el.textContent = 'Automático';
     else if (v === 55 || v === -1 || v >= 100) el.textContent = 'Sem Limite';
+    else if (v > 15) el.textContent = v + ' Mbps (experimental)';
     else el.textContent = v + ' Mbps';
   }
 }
@@ -1765,6 +1767,7 @@ function saveGeneralSettings() {
   if (isInitializing) return;
   const rawBitrate = parseInt(document.getElementById('inputBitrate').value, 10);
   const fpsEl = document.getElementById('selectFpsLimit');
+  const rowUsb = document.getElementById('rowUsbControllers');
   const payload = {
     maxBitrateMbps: (rawBitrate === 55) ? -1 : rawBitrate,
     fpsLimit: fpsEl ? parseInt(fpsEl.value, 10) : 0,
@@ -1775,10 +1778,12 @@ function saveGeneralSettings() {
     lightBarMode: parseInt(document.getElementById('selectLightBarMode').value, 10),
     lightBarColour: document.getElementById('inputLightBarColor').value,
     queueReadyAlert: document.getElementById('checkQueueAlert').checked,
-    usbControllers: document.getElementById('checkUsbControllers') ? document.getElementById('checkUsbControllers').checked : true,
     videoDecoder: parseInt(document.getElementById('selectVideoDecoder').value, 10),
     voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10)
   };
+  if (rowUsb && rowUsb.style.display !== 'none') {
+    payload.usbControllers = document.getElementById('checkUsbControllers') ? document.getElementById('checkUsbControllers').checked : true;
+  }
   fetch('/api/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
@@ -1854,11 +1859,20 @@ function loadStreamMenuState() {
 
 function renderTelemetry(data) {
   if (!data) return;
-  if (data.fps !== undefined) document.getElementById('telFps').textContent = data.fps;
-  if (data.rttMs !== undefined) document.getElementById('telRtt').textContent = data.rttMs + ' ms';
+  if (data.fps !== undefined) {
+    const fpsN = Number(data.fps);
+    document.getElementById('telFps').textContent = Number.isFinite(fpsN) ? Math.round(fpsN) : '--';
+  }
+  if (data.rttMs !== undefined) {
+    const rttN = Number(data.rttMs);
+    document.getElementById('telRtt').textContent = (Number.isFinite(rttN) ? Math.round(rttN) : '--') + ' ms';
+  }
   if (data.mbps !== undefined) document.getElementById('telMbps').textContent = (typeof data.mbps === 'number' ? data.mbps.toFixed(1) : data.mbps) + ' Mbps';
   if (data.lossPct !== undefined) document.getElementById('telLoss').textContent = (typeof data.lossPct === 'number' ? data.lossPct.toFixed(1) : data.lossPct) + '%';
-  if (data.qp !== undefined) document.getElementById('telQp').textContent = data.qp;
+  if (data.qp !== undefined) {
+    const qpN = Number(data.qp);
+    document.getElementById('telQp').textContent = (!Number.isFinite(qpN) || qpN < 0) ? '--' : Math.round(qpN);
+  }
   if (data.decodeMs !== undefined) document.getElementById('telDec').textContent = (typeof data.decodeMs === 'number' ? data.decodeMs.toFixed(1) : data.decodeMs) + ' ms';
 }
 
@@ -2036,8 +2050,39 @@ function previewReport() {
   });
 }
 
+function applyPlatformAdaptation(s) {
+  const sub = document.getElementById('brandSubtitle');
+  if (sub && s.platform) {
+    sub.textContent = 'Smartglass WebUI \u00B7 ' + s.platform;
+  }
+  const rowUsb = document.getElementById('rowUsbControllers');
+  if (rowUsb && s.isPS4 !== undefined) {
+    rowUsb.style.display = s.isPS4 ? 'flex' : 'none';
+  }
+  const optVideoHw = document.getElementById('optVideoHw');
+  if (optVideoHw && (s.isPS4 !== undefined || s.isPS5 !== undefined)) {
+    optVideoHw.textContent = (s.isPS4 || s.isPS5) ? 'Hardware (libSceVideodec2)' : 'Hardware (HWAccel)';
+  }
+  const padName = (s.isPS4 && !s.isPS5) ? 'DualShock 4' : 'DualSense';
+  const lblLightBar = document.getElementById('lblLightBar');
+  if (lblLightBar) lblLightBar.textContent = 'Barra de Luz ' + padName;
+  const optVoiceAuto = document.getElementById('optVoiceAuto');
+  if (optVoiceAuto) optVoiceAuto.textContent = (s.isPS4 && !s.isPS5)
+    ? 'Automático (Alto-falante DualShock 4 se disponível)'
+    : 'Automático (Alto-falante DualSense se disponível)';
+  const lblPadSpeaker = document.getElementById('lblPadSpeaker');
+  if (lblPadSpeaker) lblPadSpeaker.textContent = 'Volume Alto-falante ' + padName;
+  const btnSubPad = document.getElementById('btnSubPad');
+  if (btnSubPad) btnSubPad.textContent = '\uD83C\uDFAE ' + padName;
+  const h2RemapPad = document.getElementById('h2RemapPad');
+  if (h2RemapPad) h2RemapPad.textContent = '\uD83C\uDFAE Remapeamento de Botões (' + padName + ')';
+  const h2RemapTouch = document.getElementById('h2RemapTouch');
+  if (h2RemapTouch) h2RemapTouch.textContent = '\uD83D\uDC46 Atalhos do Touchpad (' + padName + ')';
+}
+
 function applyLoadedSettings(s) {
   currentSettings = Object.assign(currentSettings, s);
+  applyPlatformAdaptation(s);
   if (s.settingsVersion !== undefined) lastSettingsVersion = s.settingsVersion;
   if (s.query !== undefined && document.activeElement !== searchInput) searchInput.value = s.query;
   if (s.tab) {

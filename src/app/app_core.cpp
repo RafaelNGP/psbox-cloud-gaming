@@ -455,6 +455,9 @@ bool coreStartup() {
     setWebServerHooks({
         /*getSettings=*/[](json::Value& root) {
             std::lock_guard<std::mutex> lock(g_settingsMutex);
+            root.set("platform", platform::platformName());
+            root.set("isPS4", platform::isPS4());
+            root.set("isPS5", platform::isPS5());
             root.set("settingsVersion", static_cast<int64_t>(g_settingsVersion.load()));
             root.set("language", g_settings.language);
             root.set("resolution", g_settings.resolution);
@@ -777,12 +780,12 @@ bool coreStartup() {
         /*injectGamepad=*/nullptr,
         /*getTelemetry=*/[](json::Value& stats) {
             std::lock_guard<std::mutex> lock(g_infoMutex);
-            stats.set("fps", g_streamInfo.fps);
+            stats.set("fps", static_cast<int>(std::lround(g_streamInfo.fps)));
             stats.set("rttMs", g_streamInfo.rttMs);
-            stats.set("mbps", g_streamInfo.mbps);
-            stats.set("lossPct", g_streamInfo.lossPct);
-            stats.set("qp", g_streamInfo.qp);
-            stats.set("decodeMs", g_streamInfo.decodeMs);
+            stats.set("mbps", std::round(g_streamInfo.mbps * 10.0) / 10.0);
+            stats.set("lossPct", std::round(g_streamInfo.lossPct * 10.0) / 10.0);
+            stats.set("qp", g_streamInfo.qp >= 0 ? static_cast<int>(std::lround(g_streamInfo.qp)) : -1);
+            stats.set("decodeMs", std::round(g_streamInfo.decodeMs * 10.0) / 10.0);
             stats.set("isHwDecode", g_streamInfo.isHwDecode);
             stats.set("width", g_streamInfo.width);
             stats.set("height", g_streamInfo.height);

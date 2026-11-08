@@ -143,6 +143,8 @@ bool restartApp() { return false; }
 std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }
 std::string platformName() { return "Android"; }
+bool isPS4() { return false; }
+bool isPS5() { return false; }
 size_t imageCacheBudget() { return 96u << 20; }
 
 void setNoThreadPinning(bool) {}

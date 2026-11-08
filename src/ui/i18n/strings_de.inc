@@ -374,7 +374,7 @@ constexpr Column kGerman = {
     "Prüft und installiert offizielle App-Updates automatisch direkt auf der Konsole ohne PC", // SettingDescUpdates
     "Ermöglicht die Xbox-Konto-Anmeldung über eine andere Region für alternative Spielkataloge", // SettingDescLoginCountry
     "Aktiviert 120-Hz-Videoausgabe auf Ihrer Konsole für minimale Eingabelatenz und höhere Bildwiederholrate", // SettingDescHighRefresh
-    "Legt die maximale Bitrate für das Videostreaming fest, um Bildqualität zu optimieren oder Daten zu sparen", // SettingDescBitrateCap
+    "Automatisch nutzt das Xbox-Profillimit; Unbegrenzt hebt die App-Grenze bis zum Serverlimit auf. Über 15 Mbps ist experimentell.", // SettingDescBitrateCap
     "Regelt die Gesamtlautstärke während der Spielsitzungen im Cloud-Streaming", // SettingDescGameVolume
     "Weist Tasten der USB- oder Bluetooth-Tastatur den entsprechenden Xbox-Controller-Tasten beim Spielen zu", // SettingDescKeyboardKeys
     "Wechselt zwischen Fenster- und Vollbildmodus auf unterstützten Desktop-Plattformen", // SettingDescDisplayMode

@@ -447,6 +447,9 @@ WebServer::HttpResponse WebServer::handleRequest(const std::string& method, cons
                 root.set("keyMap", keyMapToJson(input::defaultKeyMap()));
                 root.set("touchpadShortcuts", input::touchpadShortcutsJson(input::defaultTouchpadShortcuts()));
             }
+            if (!root.has("platform")) root.set("platform", platform::platformName());
+            if (!root.has("isPS4")) root.set("isPS4", platform::isPS4());
+            if (!root.has("isPS5")) root.set("isPS5", platform::isPS5());
             if (s_hooks.getSearchParams) {
                 std::string q, tab;
                 json::Value filters = json::Value::object();

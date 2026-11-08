@@ -139,6 +139,7 @@ public:
     void setFpsLimit(int f) { fpsLimit_ = f; }
     int maxBitrateMbps() const { return maxBitrateMbps_; }
     void setMaxBitrateMbps(int b) { maxBitrateMbps_ = b; }
+    static std::string formatBitrateLabel(int mbps);
     bool highRefresh() const { return highRefresh_; }
     void setHighRefresh(bool h) { highRefresh_ = h; }
 

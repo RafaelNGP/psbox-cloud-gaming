@@ -412,6 +412,8 @@ std::string firmwareVersion() {
 std::string platformName() {
     return "PlayStation 5";
 }
+bool isPS4() { return false; }
+bool isPS5() { return true; }
 
 size_t imageCacheBudget() {
     return 160u << 20;

@@ -374,7 +374,7 @@ constexpr Column kFrench = {
     "Vérifie et installe automatiquement les mises à jour officielles de l'application directement sur votre console", // SettingDescUpdates
     "Permet de vous connecter à votre compte Xbox via une autre région pour accéder à d'autres catalogues", // SettingDescLoginCountry
     "Active la sortie vidéo 120 Hz sur votre console pour une réactivité accrue et une latence réduite", // SettingDescHighRefresh
-    "Définit la limite maximale de débit binaire pour le streaming vidéo, optimisant la qualité ou préservant le réseau", // SettingDescBitrateCap
+    "Automatique suit le plafond du profil Xbox ; Sans limite lève la limite locale jusqu'au max du serveur. Au-dessus de 15 Mbps est expérimental.", // SettingDescBitrateCap
     "Ajuste le niveau du volume audio principal pendant les sessions de jeu en streaming", // SettingDescGameVolume
     "Associe les touches du clavier USB ou Bluetooth aux boutons correspondants de la manette Xbox en jeu", // SettingDescKeyboardKeys
     "Bascule entre mode fenêtré et plein écran sur les plates-formes de bureau compatibles", // SettingDescDisplayMode
