@@ -7,6 +7,7 @@
 #include "display/display.h"
 #include "platform/platform.h"
 #include "platform/ps4/exit_ps4.h"
+#include "platform/toasts.h"
 #include "ui/strings.h"
 #include "util/log.h"
 

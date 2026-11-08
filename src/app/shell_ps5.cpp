@@ -7,6 +7,7 @@
 #include "app/updater.h"
 #include "display/display.h"
 #include "platform/platform.h"
+#include "platform/toasts.h"
 #include "ui/strings.h"
 #include "util/log.h"
 

@@ -5,6 +5,7 @@
 
 #include "app/app_state.h"
 #include "app/autoplay.h"
+#include "app/settings_manager.h"
 #include "app/shell.h"
 #include "app/stream_player.h"
 #include "app/web_server.h"
