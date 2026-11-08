@@ -41,6 +41,7 @@ namespace xc::app::shell {
 
 void beforeSettings() {
     installSignalHandlers();
+    platform::enableToasts(true);
     if (recoverUpdate(platform::appDir())) platform::restartApp();
     importStoreLeftovers(platform::dataDir(), "/data/pkg/previous/PSBX00001");
 }

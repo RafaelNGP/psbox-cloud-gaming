@@ -43,6 +43,7 @@ namespace xc::app::shell {
 
 void beforeSettings() {
     installSignalHandlers();
+    platform::enableToasts(true);
     // An update cut short: the old files went back, and the old eboot.bin
     // is the one to run.
     if (recoverUpdate(platform::appDir())) platform::restartApp();

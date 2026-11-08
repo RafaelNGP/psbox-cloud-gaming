@@ -77,23 +77,17 @@ static void renderGyroCalibrationModal(Canvas& c, const Fonts& fonts,
         textY += 32;
         fonts.regular.draw(c, "Measuring static angular velocity drift and rotational variance...", textX, textY, 20, kGray);
     } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Succeeded) {
-        fonts.bold.draw(c, "Calibration Complete - Zero-Drift Applied", textX, textY, 26, rgba(74, 222, 128));
+        fonts.bold.draw(c, "Calibração Concluída com Sucesso", textX, textY, 26, rgba(74, 222, 128));
         textY += 38;
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "Offset: X: %+.4f  Y: %+.4f  Z: %+.4f rad/s (max var: %.6f)",
-                      s_gyroCalibrator.resultBias[0], s_gyroCalibrator.resultBias[1], s_gyroCalibrator.resultBias[2],
-                      s_gyroCalibrator.maxVariance);
-        fonts.regular.draw(c, buf, textX, textY, 22, rgba(200, 230, 200));
+        fonts.regular.draw(c, "Compensação estática de drift aplicada ao giroscópio.", textX, textY, 22, rgba(200, 230, 200));
         textY += 32;
-        fonts.regular.draw(c, "Static zero-drift calibration saved to settings profile.", textX, textY, 20, kGray);
+        fonts.regular.draw(c, "Configurações salvas automaticamente no perfil.", textX, textY, 20, kGray);
     } else if (s_gyroCalibrator.state == input::GyroCalibrator::State::Failed) {
-        fonts.bold.draw(c, "Calibration Failed - Motion Detected", textX, textY, 26, rgba(248, 113, 113));
+        fonts.bold.draw(c, "Falha na Calibração - Movimento Detectado", textX, textY, 26, rgba(248, 113, 113));
         textY += 38;
-        char buf[128];
-        std::snprintf(buf, sizeof(buf), "Motion variance: %.6f rad^2/s^2 (threshold: 0.0025 rad^2/s^2)", s_gyroCalibrator.maxVariance);
-        fonts.regular.draw(c, buf, textX, textY, 22, rgba(254, 202, 202));
+        fonts.regular.draw(c, "O controle moveu-se durante a leitura dos sensores.", textX, textY, 22, rgba(254, 202, 202));
         textY += 32;
-        fonts.regular.draw(c, "The controller moved during sampling. Please keep it still and retry.", textX, textY, 20, kGray);
+        fonts.regular.draw(c, "Mantenha o controle imóvel em uma superfície plana e tente novamente.", textX, textY, 20, kGray);
     }
 
     c.fillRect({0, kH - 80, kW, 80}, kBg);

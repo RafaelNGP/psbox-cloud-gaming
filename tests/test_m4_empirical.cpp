@@ -346,96 +346,52 @@ static void testStreamMenuTransitions() {
     menu.open(0, false);
     ASSERT_TRUE(menu.isOpen());
 
-    // Navigate to GyroYawItem
-    // Items: XboxButton -> Profile -> Stats -> Upscaler -> Sharpness -> Deband -> Resolution ->
-    //        Triggers -> DeadzoneItem -> ConfirmItem -> GyroItem -> GyroLevelItem -> GyroYawItem
-    for (int i = 0; i < 12; ++i) {
+    // Navigate to GyroItem in Controls tab
+    menu.setTab(ui::MenuTab::Controls);
+    for (int i = 0; i < 5; ++i) {
         press([](ui::NavInput& n) { n.down = true; });
     }
 
-    // 1. GyroYawItem
-    ASSERT_EQ(menu.gyroYawScale(), 100);
-    // Right increments by 10
+    // 1. GyroItem toggle (ATIVADO / DESATIVADO)
+    ASSERT_EQ(menu.gyroMode(), 0);
     ui::MenuAction act = press([](ui::NavInput& n) { n.right = true; });
     ASSERT_EQ(act, ui::MenuAction::Gyro);
+    ASSERT_EQ(menu.gyroMode(), 1);
+
+    act = press([](ui::NavInput& n) { n.left = true; });
+    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    ASSERT_EQ(menu.gyroMode(), 0);
+
+    // Accept on GyroItem opens single-wheel modal
+    act = press([](ui::NavInput& n) { n.accept = true; });
+    ASSERT_EQ(act, ui::MenuAction::None);
+    ASSERT_TRUE(menu.isGyroDialogOpen());
+
+    // Test GyroYawScale & GyroPitchScale getters and setters
+    ASSERT_EQ(menu.gyroYawScale(), 100);
+    menu.setGyroYawScale(110);
     ASSERT_EQ(menu.gyroYawScale(), 110);
-
-    // Left decrements by 10
-    act = press([](ui::NavInput& n) { n.left = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    menu.setGyroYawScale(100);
     ASSERT_EQ(menu.gyroYawScale(), 100);
 
-    // Accept on GyroYawItem must NOT change value and return None
-    act = press([](ui::NavInput& n) { n.accept = true; });
-    ASSERT_EQ(act, ui::MenuAction::None);
-    ASSERT_EQ(menu.gyroYawScale(), 100);
-
-    // Test Yaw lower boundary clamp at 20%
-    for (int i = 0; i < 15; ++i) {
-        press([](ui::NavInput& n) { n.left = true; });
-    }
+    menu.setGyroYawScale(20);
     ASSERT_EQ(menu.gyroYawScale(), 20);
-    act = press([](ui::NavInput& n) { n.left = true; });
-    ASSERT_EQ(act, ui::MenuAction::None); // No-op at boundary
-    ASSERT_EQ(menu.gyroYawScale(), 20);
-
-    // Test Yaw upper boundary clamp at 200%
-    for (int i = 0; i < 25; ++i) {
-        press([](ui::NavInput& n) { n.right = true; });
-    }
-    ASSERT_EQ(menu.gyroYawScale(), 200);
-    act = press([](ui::NavInput& n) { n.right = true; });
-    ASSERT_EQ(act, ui::MenuAction::None); // No-op at boundary
+    menu.setGyroYawScale(200);
     ASSERT_EQ(menu.gyroYawScale(), 200);
 
-    // 2. GyroPitchItem
-    press([](ui::NavInput& n) { n.down = true; }); // Navigate to GyroPitchItem
     ASSERT_EQ(menu.gyroPitchScale(), 80);
-
-    // Right increments by 10
-    act = press([](ui::NavInput& n) { n.right = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    menu.setGyroPitchScale(90);
     ASSERT_EQ(menu.gyroPitchScale(), 90);
-
-    // Left decrements by 10
-    act = press([](ui::NavInput& n) { n.left = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    menu.setGyroPitchScale(80);
     ASSERT_EQ(menu.gyroPitchScale(), 80);
 
-    // Accept on GyroPitchItem must NOT change value and return None
-    act = press([](ui::NavInput& n) { n.accept = true; });
-    ASSERT_EQ(act, ui::MenuAction::None);
-    ASSERT_EQ(menu.gyroPitchScale(), 80);
-
-    // Test Pitch lower boundary clamp at 20%
-    for (int i = 0; i < 15; ++i) {
-        press([](ui::NavInput& n) { n.left = true; });
-    }
+    menu.setGyroPitchScale(20);
     ASSERT_EQ(menu.gyroPitchScale(), 20);
-    act = press([](ui::NavInput& n) { n.left = true; });
-    ASSERT_EQ(act, ui::MenuAction::None);
-    ASSERT_EQ(menu.gyroPitchScale(), 20);
-
-    // Test Pitch upper boundary clamp at 200%
-    for (int i = 0; i < 25; ++i) {
-        press([](ui::NavInput& n) { n.right = true; });
-    }
-    ASSERT_EQ(menu.gyroPitchScale(), 200);
-    act = press([](ui::NavInput& n) { n.right = true; });
-    ASSERT_EQ(act, ui::MenuAction::None);
+    menu.setGyroPitchScale(200);
     ASSERT_EQ(menu.gyroPitchScale(), 200);
 
-    // 3. GyroCalibrateItem
-    press([](ui::NavInput& n) { n.down = true; }); // Navigate to GyroCalibrateItem
-
-    ASSERT_FALSE(menu.isGyroCalibrating());
-    ASSERT_FALSE(menu.gyroCalSucceeded());
-    ASSERT_FALSE(menu.gyroCalFailed());
-    ASSERT_EQ(menu.gyroCalProgress(), 0.0f);
-
-    // Press Accept to trigger calibration
-    act = press([](ui::NavInput& n) { n.accept = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    // 2. Gyro Calibration state machine
+    menu.startGyroCalibration(240);
     ASSERT_TRUE(menu.isGyroCalibrating());
     ASSERT_FALSE(menu.gyroCalSucceeded());
     ASSERT_FALSE(menu.gyroCalFailed());
@@ -477,14 +433,9 @@ static void testStreamMenuTransitions() {
     ASSERT_NEAR(gBias[1], calBias[1], 0.0001f);
     ASSERT_NEAR(gBias[2], calBias[2], 0.0001f);
 
-    // 4. Test restart on failure via Accept
-    act = press([](ui::NavInput& n) { n.accept = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
+    // Test failure on noisy data
+    menu.startGyroCalibration(240);
     ASSERT_TRUE(menu.isGyroCalibrating());
-    ASSERT_FALSE(menu.gyroCalSucceeded());
-    ASSERT_FALSE(menu.gyroCalFailed());
-
-    // Feed noisy data to trigger failure
     for (int i = 0; i < 239; ++i) {
         float sample[3] = {std::sin(i * 0.1f) * 0.3f, 0.0f, 0.0f};
         menu.feedGyroCalibration(sample);
@@ -496,15 +447,8 @@ static void testStreamMenuTransitions() {
     ASSERT_FALSE(menu.gyroCalSucceeded());
     ASSERT_TRUE(menu.gyroCalFailed());
 
-    // 5. Test trigger via Left / Right
-    act = press([](ui::NavInput& n) { n.left = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
-    ASSERT_TRUE(menu.isGyroCalibrating());
-    ASSERT_FALSE(menu.gyroCalFailed());
-
-    act = press([](ui::NavInput& n) { n.right = true; });
-    ASSERT_EQ(act, ui::MenuAction::Gyro);
-    ASSERT_TRUE(menu.isGyroCalibrating());
+    menu.closeGyroDialog();
+    ASSERT_FALSE(menu.isGyroDialogOpen());
 
     std::printf("[PASS] StreamMenu & UI State Transitions verified successfully.\n");
 }

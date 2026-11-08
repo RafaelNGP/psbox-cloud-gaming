@@ -524,7 +524,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   }
 }
 
-//* Landscape Layout Positions (Exact Layout Studio Alignment) */
+/* Landscape Layout Positions (Exact Layout Studio Alignment) */
 @media (orientation: landscape) and (min-width: 521px) {
   .gamepad-status-bar {
     display: none !important;

@@ -3,7 +3,6 @@
 #include "ui/stream_menu.h"
 
 #include "ui/cloud_time.h"
-
 #include "ui/strings.h"
 #include "ui/input_mode.h"
 #include "ui/pad_glyphs.h"
@@ -19,6 +18,8 @@ namespace {
 
 constexpr Color kDark = rgba(20, 20, 20);
 constexpr Color kWarnColor = rgba(255, 176, 32);  // the connection warning
+constexpr int kBitrates[] = {-1, 0, 15, 20, 25, 30, 35, 40, 45, 50};
+constexpr int kBitratesCount = sizeof(kBitrates) / sizeof(kBitrates[0]);
 
 const char* resolutionName(int r) { return r == 1 ? "720p" : r == 2 ? tr(Str::ResBest) : "1080p"; }
 
@@ -30,17 +31,32 @@ std::string fmt(const char* f, double v) {
 
 }  // namespace
 
+bool StreamMenu::itemInTab(int item, MenuTab tab) const {
+    if (tab == MenuTab::General) {
+        return item == XboxButton || item == Profile || item == Stats ||
+               item == Upscaler || item == Sharpness || item == Deband ||
+               item == Resolution || item == VideoDecoderItem || item == FpsLimiterItem ||
+               item == BitrateLimiterItem || item == VrrItem ||
+               item == SmartGlassItem || item == ReloadStreamItem || item == Leave;
+    } else { // Controls
+        return item == PlayerItem || item == ConfirmItem || item == Triggers ||
+               item == DeadzoneItem || item == PadSpeakerVolumeItem ||
+               item == TouchpadShortcutsItem || item == GyroItem;
+    }
+}
+
 bool StreamMenu::itemShown(int item) const {
+    if (!itemInTab(item, activeTab_)) return false;
     switch (item) {
+    case VideoDecoderItem: return true;
+    case FpsLimiterItem: return true;
+    case BitrateLimiterItem: return true;
+    case VrrItem: return caps_.highRefresh;
     case Upscaler: return caps_.upscalers;
     case Sharpness: return caps_.sharpen;
     case Deband: return caps_.deband;
     case Triggers: return caps_.triggerRumble || caps_.adaptiveTriggers;
-    case GyroItem:
-    case GyroLevelItem:
-    case GyroYawItem:
-    case GyroPitchItem:
-    case GyroCalibrateItem: return caps_.gyro;
+    case GyroItem: return caps_.gyro;
     case PadSpeakerVolumeItem: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case TouchpadShortcutsItem: return caps_.touchpad;
     case PlayerItem: return usbOwnerPlayer_ >= 0;
@@ -49,9 +65,18 @@ bool StreamMenu::itemShown(int item) const {
     }
 }
 
+void StreamMenu::selectFirstItem() {
+    for (int i = 0; i < ItemCount; ++i) {
+        if (itemShown(i)) {
+            selected_ = i;
+            return;
+        }
+    }
+}
+
 void StreamMenu::setCapabilities(const UiCaps& caps) {
     caps_ = caps;
-    while (!itemShown(selected_)) selected_ = (selected_ + 1) % ItemCount;  // off a row that went away
+    while (!itemShown(selected_)) selectFirstItem();
 }
 
 void StreamMenu::setProfileValues(int resolution, int sharpness, int deband, int upscaler,
@@ -84,6 +109,7 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     micLevel_ = micLevel;
     micMuted_ = micMuted;
     padSpeakerVolume_ = std::clamp(padSpeakerVolume, 0, 100);
+    activeTab_ = MenuTab::General;
     selected_ = XboxButton;
     resolution_ = applied_ = resolution;
     resolutionAsked_ = false;
@@ -91,10 +117,34 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     statsCustomIndex_ = 0;
     touchpadCustomizing_ = false;
     touchpadCustomIndex_ = 0;
+    gyroDialog_.close();
+}
+
+void StreamMenu::update(uint64_t nowMs) {
+    if (!open_) return;
+    if (gyroDialog_.isOpen()) {
+        gyroDialog_.update(nowMs);
+    }
 }
 
 MenuAction StreamMenu::handle(const NavInput& in) {
     if (!open_) return MenuAction::None;
+
+    if (gyroDialog_.isOpen()) {
+        gyroDialog_.handleInput(in);
+        if (!gyroDialog_.isOpen()) {
+            gyroLevel_ = gyroDialog_.level();
+            gyroYawScale_ = gyroDialog_.yawScale();
+            gyroPitchScale_ = gyroDialog_.pitchScale();
+            const float* b = gyroDialog_.bias();
+            if (b) {
+                gyroBias_[0] = b[0]; gyroBias_[1] = b[1]; gyroBias_[2] = b[2];
+            }
+            return MenuAction::Gyro;
+        }
+        return MenuAction::None;
+    }
+
     if (statsCustomizing_) {
         if (in.back) {
             statsCustomizing_ = false;
@@ -118,6 +168,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         }
         return MenuAction::None;
     }
+
     if (touchpadCustomizing_) {
         if (in.back) {
             touchpadCustomizing_ = false;
@@ -154,13 +205,28 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         }
         return MenuAction::None;
     }
+
     if (in.back || in.options) {
         open_ = false;
         return MenuAction::Close;
     }
-    // Up / down over the items shown (the Xbox button always is).
+
+    // Shoulder tabs switching (L1 / R1)
+    if (in.l1) {
+        activeTab_ = (activeTab_ == MenuTab::Controls) ? MenuTab::General : MenuTab::Controls;
+        selectFirstItem();
+        return MenuAction::None;
+    }
+    if (in.r1) {
+        activeTab_ = (activeTab_ == MenuTab::General) ? MenuTab::Controls : MenuTab::General;
+        selectFirstItem();
+        return MenuAction::None;
+    }
+
+    // Up / down within active tab
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
     if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
+
     if (selected_ == PlayerItem && (in.left || in.right || in.accept)) {
         usbOwnerPlayer_ = (usbOwnerPlayer_ + (in.left ? 3 : 1)) % 4;
         return MenuAction::Player;
@@ -177,12 +243,38 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         pos = in.left ? (pos + n - 1) % n : (pos + 1) % n;
         resolution_ = kResolutionOrder[pos];
     }
+    if (selected_ == VideoDecoderItem && (in.left || in.right || in.accept)) {
+        videoDecoder_ = (videoDecoder_ == 0) ? 1 : 0;
+        return MenuAction::VideoDecoder;
+    }
+    if (selected_ == FpsLimiterItem && (in.left || in.right)) {
+        static constexpr int kFpsLimits[4] = {0, 30, 60, 120};
+        int pos = 0;
+        for (int i = 0; i < 4; ++i) {
+            if (kFpsLimits[i] == fpsLimit_) pos = i;
+        }
+        pos = in.left ? (pos + 3) % 4 : (pos + 1) % 4;
+        fpsLimit_ = kFpsLimits[pos];
+        return MenuAction::FpsLimiter;
+    }
+    if (selected_ == BitrateLimiterItem && (in.left || in.right)) {
+        int pos = 1; // default to Auto (0)
+        for (int i = 0; i < kBitratesCount; ++i) {
+            if (kBitrates[i] == maxBitrateMbps_) pos = i;
+        }
+        pos = in.left ? (pos + kBitratesCount - 1) % kBitratesCount : (pos + 1) % kBitratesCount;
+        maxBitrateMbps_ = kBitrates[pos];
+        return MenuAction::BitrateLimiter;
+    }
+    if (selected_ == VrrItem && (in.left || in.right || in.accept)) {
+        highRefresh_ = !highRefresh_;
+        return MenuAction::VrrToggle;
+    }
     if ((selected_ == Sharpness && (in.left || in.right)) || (selected_ == Sharpness && in.accept)) {
         sharpness_ = in.left ? (sharpness_ + 3) % 4 : (sharpness_ + 1) % 4;
         return MenuAction::Sharpness;
     }
     if (selected_ == Upscaler && (in.left || in.right || in.accept)) {
-        // FSR, FSR + clean-up, AI, AI + clean-up (values 0, 2, 1, 3).
         static constexpr int kOrder[4] = {0, 2, 1, 3};
         int pos = 0;
         for (int i = 0; i < 4; ++i)
@@ -191,7 +283,6 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         return MenuAction::Upscaler;
     }
     if (selected_ == Deband && (in.left || in.right || in.accept)) {
-        // Off, low, high, auto (follows the bitrate).
         deband_ = in.left ? (deband_ + 3) % 4 : (deband_ + 1) % 4;
         return MenuAction::Deband;
     }
@@ -208,35 +299,13 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         circleConfirms_ = !circleConfirms_;
         return MenuAction::ConfirmButton;
     }
-    if (selected_ == GyroItem && (in.left || in.right || in.accept)) {
-        gyroMode_ = in.left ? (gyroMode_ + 2) % 3 : (gyroMode_ + 1) % 3;  // off, always, while aiming
+    if (selected_ == GyroItem && (in.left || in.right)) {
+        gyroMode_ = (gyroMode_ == 0) ? 1 : 0;
         return MenuAction::Gyro;
     }
-    if (selected_ == GyroLevelItem && (in.left || in.right)) {
-        int level = std::clamp(gyroLevel_ + (in.right ? 1 : -1), 1, 10);
-        if (level == gyroLevel_) return MenuAction::None;
-        gyroLevel_ = level;
-        return MenuAction::Gyro;
-    }
-    if (selected_ == GyroYawItem && (in.left || in.right)) {
-        int s = std::clamp(gyroYawScale_ + (in.right ? 10 : -10), 20, 200);
-        if (s != gyroYawScale_) {
-            gyroYawScale_ = s;
-            input::setGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
-            return MenuAction::Gyro;
-        }
-    }
-    if (selected_ == GyroPitchItem && (in.left || in.right)) {
-        int s = std::clamp(gyroPitchScale_ + (in.right ? 10 : -10), 20, 200);
-        if (s != gyroPitchScale_) {
-            gyroPitchScale_ = s;
-            input::setGyroCalibration(gyroBias_, gyroYawScale_ / 100.0f, gyroPitchScale_ / 100.0f);
-            return MenuAction::Gyro;
-        }
-    }
-    if (selected_ == GyroCalibrateItem && (in.accept || in.left || in.right)) {
-        startGyroCalibration(240);
-        return MenuAction::Gyro;
+    if (selected_ == GyroItem && in.accept) {
+        gyroDialog_.open(0, "");
+        return MenuAction::None;
     }
     if (selected_ == PadSpeakerVolumeItem && (in.left || in.right)) {
         int newVol = std::clamp(padSpeakerVolume_ + (in.right ? 5 : -5), 0, 100);
@@ -262,6 +331,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         stats_ = true;
         return MenuAction::Stats;
     }
+
     if (!in.accept) return MenuAction::None;
     switch (selected_) {
     case XboxButton: open_ = false; return MenuAction::XboxButton;
@@ -409,24 +479,67 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         return c;
     }
 
-    const int titleEnd = fonts_.bold.draw(c, tr(Str::MenuTitle), kPad, 34, 30, kWhite);
-    // The account's cloud time left, right of the title (a limited account
-    // only): orange from 15 minutes shown, when the notices start; red at none.
+    // Header: Title and Cloud Time
+    const int titleEnd = fonts_.bold.draw(c, tr(Str::MenuTitle), kPad, 30, 28, kWhite);
     if (info.cloudTimeSeconds >= 0) {
         const std::string left = trf(Str::CloudTimeLeft, formatCloudTime(info.cloudTimeSeconds));
-        const int w = fonts_.semibold.measure(left, 17);
+        const int w = fonts_.semibold.measure(left, 16);
         const int x = kMenuW - kPad - w;
         if (x - 24 > titleEnd + 16) {
             const Color col = info.cloudTimeSeconds <= 0        ? rgba(240, 100, 100)
                               : info.cloudTimeSeconds < 16 * 60 ? rgba(255, 160, 40)
                                                                  : kGray;
-            drawClockIcon(c, x - 14.0f, 34 + 15.0f, 8.0f, col);
-            fonts_.semibold.draw(c, left, x, fonts_.semibold.centeredY(34, 30, 17), 17, col);
+            drawClockIcon(c, x - 14.0f, 30 + 13.0f, 7.5f, col);
+            fonts_.semibold.draw(c, left, x, fonts_.semibold.centeredY(30, 28, 16), 16, col);
         }
     }
 
-    // The items: the selected one white, like the Xbox guide.
-    constexpr int kRowH = 36, kTop = 76, kPx = 19, kMaxVisible = 13;
+    // Tabs Header: [L1]  Geral  |  Controles  [R1]
+    int tabY = 66, tabH = 34;
+    {
+        int bx = kPad;
+        // L1 badge
+        c.fillRect({bx, tabY + 4, 34, 24}, rgba(255, 255, 255, 30), 4);
+        fonts_.bold.draw(c, "L1", bx + 8, fonts_.bold.centeredY(tabY + 4, 24, 14), 14, kWhite);
+        bx += 42;
+
+        // Geral Tab
+        bool genActive = (activeTab_ == MenuTab::General);
+        const char* tabGen = "Geral";
+        int gw = fonts_.semibold.measure(tabGen, 18) + 24;
+        Rect genRect{bx, tabY, gw, tabH};
+        if (genActive) {
+            c.fillRect(genRect, rgba(255, 255, 255, 24), 6);
+            c.fillRect({genRect.x + 6, genRect.y + genRect.h - 3, genRect.w - 12, 3}, kGreen, 2);
+        }
+        fonts_.semibold.draw(c, tabGen, genRect.x + 12, fonts_.semibold.centeredY(genRect.y, genRect.h, 18), 18,
+                             genActive ? kWhite : kDim);
+        bx += gw + 10;
+
+        // Separator
+        fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, rgba(80, 80, 80));
+        bx += 16;
+
+        // Controles Tab
+        bool ctrlActive = (activeTab_ == MenuTab::Controls);
+        const char* tabCtrl = "Controles";
+        int cw = fonts_.semibold.measure(tabCtrl, 18) + 24;
+        Rect ctrlRect{bx, tabY, cw, tabH};
+        if (ctrlActive) {
+            c.fillRect(ctrlRect, rgba(255, 255, 255, 24), 6);
+            c.fillRect({ctrlRect.x + 6, ctrlRect.y + ctrlRect.h - 3, ctrlRect.w - 12, 3}, kGreen, 2);
+        }
+        fonts_.semibold.draw(c, tabCtrl, ctrlRect.x + 12, fonts_.semibold.centeredY(ctrlRect.y, ctrlRect.h, 18), 18,
+                             ctrlActive ? kWhite : kDim);
+        bx += cw + 10;
+
+        // R1 badge
+        c.fillRect({bx, tabY + 4, 34, 24}, rgba(255, 255, 255, 30), 4);
+        fonts_.bold.draw(c, "R1", bx + 7, fonts_.bold.centeredY(tabY + 4, 24, 14), 14, kWhite);
+    }
+
+    // The Items List
+    constexpr int kRowH = 38, kTop = 108, kPx = 18, kMaxVisible = 14;
     int shownList[ItemCount];
     int totalShown = 0;
     int selIdx = 0;
@@ -440,45 +553,40 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
     }
     int visibleCount = std::min(totalShown, kMaxVisible);
-    const Language lang = language();
-    const bool pt = (lang == Language::PortugueseBR);
-    const bool es = (lang == Language::Spanish);
-    const bool fr = (lang == Language::French);
-    const bool de = (lang == Language::German);
-    const bool it = (lang == Language::Italian);
 
-    int shown = 0;  // the items on screen so far
     for (int v = 0; v < visibleCount; ++v) {
         int i = shownList[startIdx + v];
-        Rect row{kPad - 16, kTop + shown++ * kRowH, kMenuW - 2 * (kPad - 16), kRowH - 4};
+        Rect row{kPad - 16, kTop + v * kRowH, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
         Color fg = sel ? kDark : kWhite;
         int ty = fonts_.semibold.centeredY(row.y, row.h, kPx);
+
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
                             : i == PlayerItem          ? tr(Str::MenuPlayer)
                             : i == Profile             ? tr(Str::Profile)
                             : i == Stats               ? tr(Str::MenuStats)
+                            : i == Resolution          ? tr(Str::MenuResolution)
+                            : i == VideoDecoderItem    ? tr(Str::VideoDecoder)
+                            : i == FpsLimiterItem      ? tr(Str::FpsLimit)
+                            : i == BitrateLimiterItem  ? tr(Str::BitrateCap)
+                            : i == VrrItem             ? tr(Str::HighRefresh)
                             : i == Sharpness           ? tr(Str::MenuSharpness)
                             : i == Deband              ? tr(Str::MenuDeband)
                             : i == Upscaler            ? tr(Str::MenuUpscaler)
-                            : i == Resolution          ? tr(Str::MenuResolution)
+                            : i == ConfirmItem         ? tr(Str::ConfirmButton)
                             : i == Triggers            ? tr(Str::TriggerRumble)
                             : i == DeadzoneItem        ? tr(Str::Deadzone)
-                            : i == ConfirmItem         ? tr(Str::ConfirmButton)
-                            : i == GyroItem            ? tr(Str::Gyro)
-                            : i == GyroLevelItem       ? tr(Str::GyroIntensity)
-                            : i == GyroYawItem         ? (pt ? "Giroscópio Horizontal (Yaw)" : es ? "Giroscopio Horizontal (Yaw)" : fr ? "Gyro Horizontal (Yaw)" : de ? "Gyro Horizontal (Yaw)" : it ? "Giroscopio Orizzontale (Yaw)" : "Gyro Horizontal (Yaw)")
-                            : i == GyroPitchItem       ? (pt ? "Giroscópio Vertical (Pitch)" : es ? "Giroscopio Vertical (Pitch)" : fr ? "Gyro Vertical (Pitch)" : de ? "Gyro Vertikal (Pitch)" : it ? "Giroscopio Verticale (Pitch)" : "Gyro Vertical (Pitch)")
-                            : i == GyroCalibrateItem   ? (pt ? "Calibração do Giroscópio" : es ? "Calibración del Giroscopio" : fr ? "Calibration du Gyroscope" : de ? "Gyro-Kalibrierung" : it ? "Calibrazione Giroscopio" : "Gyro Calibration")
                             : i == PadSpeakerVolumeItem ? tr(Str::PadSpeakerVolume)
                             : i == TouchpadShortcutsItem ? tr(Str::TouchpadShortcuts)
-                            : i == SmartGlassItem        ? "SmartGlass Web Gamepad"
-                            : i == ReloadStreamItem      ? tr(Str::ReloadStream)
+                            : i == GyroItem            ? tr(Str::Gyro)
+                            : i == SmartGlassItem      ? "SmartGlass Web Gamepad"
+                            : i == ReloadStreamItem    ? tr(Str::ReloadStream)
                             : homeConsole_             ? tr(Str::MenuEndStream)
                                                        : tr(Str::MenuLeave);
         fonts_.semibold.draw(c, label, row.x + 16, ty, kPx, fg);
         std::string value;
+
         if (i == PlayerItem) {
             value = std::to_string(usbOwnerPlayer_ + 1);
             if (sel) value = "< " + value + " >";
@@ -491,9 +599,37 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = tr(stats_ ? Str::On : Str::Off);
             if (sel) value = "< " + value + " >";
         }
+        if (i == Resolution) {
+            value = resolutionName(resolution_);
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == VideoDecoderItem) {
+            value = (videoDecoder_ == 1) ? tr(Str::VideoDecoderSw) : tr(Str::VideoDecoderHw);
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == FpsLimiterItem) {
+            value = (fpsLimit_ == 0) ? tr(Str::FpsUnlimited) : (std::to_string(fpsLimit_) + " fps");
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == BitrateLimiterItem) {
+            value = (maxBitrateMbps_ == -1) ? tr(Str::BitrateUnlimited)
+                    : (maxBitrateMbps_ == 0)  ? tr(Str::BitrateAuto)
+                                              : (std::to_string(maxBitrateMbps_) + " Mbps");
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == VrrItem) {
+            value = highRefresh_ ? "120 Hz (VRR)" : "60 Hz";
+            if (sel) value = "< " + value + " >";
+        }
         if (i == Sharpness) {
             static constexpr Str kLevels[] = {Str::SharpOff, Str::SharpLow, Str::SharpMedium, Str::SharpHigh};
             value = tr(kLevels[sharpness_]);
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == Deband) {
+            static constexpr Str kLevels[] = {Str::SharpOff, Str::SharpLow, Str::SharpHigh};
+            value = deband_ == 3 ? trf(Str::DebandAuto, tr(kLevels[std::clamp(debandInUse_, 0, 2)]))
+                                 : tr(kLevels[std::clamp(deband_, 0, 2)]);
             if (sel) value = "< " + value + " >";
         }
         if (i == Upscaler) {
@@ -503,14 +639,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                                      : "FSR";
             if (sel) value = "< " + value + " >";
         }
-        if (i == Deband) {
-            static constexpr Str kLevels[] = {Str::SharpOff, Str::SharpLow, Str::SharpHigh};
-            value = deband_ == 3 ? trf(Str::DebandAuto, tr(kLevels[std::clamp(debandInUse_, 0, 2)]))
-                                 : tr(kLevels[std::clamp(deband_, 0, 2)]);
-            if (sel) value = "< " + value + " >";
-        }
-        if (i == Resolution) {
-            value = resolutionName(resolution_);
+        if (i == ConfirmItem) {
+            value = circleConfirms_ ? "○" : "×";
             if (sel) value = "< " + value + " >";
         }
         if (i == Triggers) {
@@ -523,34 +653,6 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = std::to_string(deadzone_) + " %";
             if (sel) value = "< " + value + " >";
         }
-        if (i == GyroItem) {
-            value = tr(gyroMode_ == 1 ? Str::GyroAlways : gyroMode_ == 2 ? Str::GyroAiming : Str::Off);
-            if (sel) value = "< " + value + " >";
-        }
-        if (i == GyroLevelItem) {
-            value = std::to_string(gyroLevel_) + " / 10";
-            if (sel) value = "< " + value + " >";
-        }
-        if (i == GyroYawItem) {
-            value = std::to_string(gyroYawScale_) + " %";
-            if (sel) value = "< " + value + " >";
-        }
-        if (i == GyroPitchItem) {
-            value = std::to_string(gyroPitchScale_) + " %";
-            if (sel) value = "< " + value + " >";
-        }
-        if (i == GyroCalibrateItem) {
-            if (calibrating_) {
-                value = (pt ? "Calibrando " : "Calibrating ") + std::to_string(static_cast<int>(calProgress_ * 100.0f)) + " %";
-            } else if (calSucceeded_) {
-                value = pt ? "Calibrado (0-Drift)" : "Calibrated (0-Drift)";
-            } else if (calFailed_) {
-                value = pt ? "Falhou (Movimento)" : "Failed (Motion)";
-            } else {
-                value = pt ? "Calibrar Controle" : "Calibrate Pad 0";
-            }
-            if (sel) value = "< " + value + " >";
-        }
         if (i == PadSpeakerVolumeItem) {
             value = padSpeakerVolume_ == 0 ? tr(Str::Mute) : std::to_string(padSpeakerVolume_) + " %";
             if (sel) value = "< " + value + " >";
@@ -559,19 +661,21 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = tr(touchpadShortcuts_ == input::defaultTouchpadShortcuts() ? Str::ProfileDefault : Str::ProfileCustom);
             if (sel) value = "< " + value + " >";
         }
+        if (i == GyroItem) {
+            value = (gyroMode_ != 0) ? "ATIVADO" : "DESATIVADO";
+            if (sel) value = "< " + value + " >";
+        }
         if (i == SmartGlassItem) {
             value = smartGlassOpen_ ? tr(Str::On) : tr(Str::Off);
             if (sel) value = "< " + value + " >";
         }
-        if (i == ConfirmItem) {
-            value = circleConfirms_ ? "○" : "×";
-            if (sel) value = "< " + value + " >";
-        }
+
         if (!value.empty()) {
             int w = fonts_.semibold.measure(value, kPx);
             fonts_.semibold.draw(c, value, row.x + row.w - 16 - w, ty, kPx, sel ? kDark : kGray);
         }
     }
+
     if (totalShown > kMaxVisible) {
         int trackH = visibleCount * kRowH - 8;
         int trackX = kMenuW - 14;
@@ -581,148 +685,88 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         int thumbY = trackY + (trackH - thumbH) * startIdx / (totalShown - kMaxVisible);
         c.fillRect({trackX, thumbY, 4, thumbH}, kGray, 2);
     }
-    int y = kTop + shown * kRowH + 4;
-    if (resolutionAsked_) {
-        fonts_.regular.draw(c, tr(Str::ResolutionNote), kPad, y, 16, kDim);
-        y += 20;
-    }
-    y += 4;
 
-    // The connection.
-    c.fillRect({kPad, y, kMenuW - 2 * kPad, 2}, rgba(60, 60, 60));
-    y += 12;
-    auto line = [&](Str label, const std::string& value) {
-        fonts_.regular.draw(c, tr(label), kPad, y, 17, kGray);
-        int w = fonts_.semibold.measure(value, 17);
-        fonts_.semibold.draw(c, value, kMenuW - kPad - w, y, 17, kWhite);
-        y += 22;
-    };
-    const std::string none = "-";
-    line(Str::StatRegion, info.region.empty() ? none : info.region);
-    line(Str::StatLatency, info.rttMs > 0 ? std::to_string(info.rttMs) + " ms" : none);
-    line(Str::StatBitrate, info.mbps > 0 ? fmt("%.1f Mbps", info.mbps) : none);
-    std::string frames = info.fps > 0 ? fmt("%.0f fps", info.fps) : none;
-    if (info.width > 0) frames = std::to_string(info.width) + "x" + std::to_string(info.height) + "  " + frames;
-    line(Str::StatFrameRate, frames);
-    line(Str::StatLoss, fmt("%.1f %%", info.lossPct));
-    line(Str::StatDecode, info.decodeMs > 0 ? (fmt("%.1f ms", info.decodeMs) + (info.isHwDecode ? " (HW)" : " (SW)")) : none);
-    line(Str::StatOnScreen, info.onScreenMs > 0 ? fmt("%.1f ms", info.onScreenMs) : none);
+    // LOWER SECTION (Utilizing lower empty third):
+    // 1. Connection Statistics: 2 Columns at y = 716
+    c.fillRect({kPad, 704, kMenuW - 2 * kPad, 2}, rgba(60, 60, 60));
+    telemetry_.drawTwoColumnStats(c, fonts_, kPad, 716, kMenuW - 2 * kPad, 85, info);
 
-    // The controllers: numbered pads, each connected one with its user.
-    y += 8;
-    fonts_.regular.draw(c, tr(Str::Controllers), kPad, y, 20, kGray);
+    // 2. Controllers Header & Microphone VU Meter at y = 824
+    c.fillRect({kPad, 812, kMenuW - 2 * kPad, 1}, rgba(50, 50, 50));
+    fonts_.regular.draw(c, tr(Str::Controllers), kPad, 824, 18, kGray);
 
-    // Real-time Mic VU meter bar on the right side of the Controllers line:
     {
         int barW = 140, barH = 12;
         int barX = kMenuW - kPad - barW;
-        int barY = y + 4;
+        int barY = 826;
         std::string micLabel = tr(Str::MenuMicrophone);
-        int mw = fonts_.regular.measure(micLabel, 16);
-        fonts_.regular.draw(c, micLabel, barX - mw - 10, y + 2, 16, micMuted_ ? kDim : kGray);
+        int mw = fonts_.regular.measure(micLabel, 15);
+        fonts_.regular.draw(c, micLabel, barX - mw - 10, 824, 15, micMuted_ ? kDim : kGray);
 
-        // Dark background pill
         c.fillRect({barX, barY, barW, barH}, rgba(40, 40, 40), 6);
         c.strokeRect({barX, barY, barW, barH}, rgba(70, 70, 70), 1, 6);
 
         if (micMuted_) {
-            int tw = fonts_.semibold.measure(tr(Str::MicMuted), 13);
-            fonts_.semibold.draw(c, tr(Str::MicMuted), barX + (barW - tw) / 2, barY - 1, 13, rgba(230, 120, 50));
+            int tw = fonts_.semibold.measure(tr(Str::MicMuted), 12);
+            fonts_.semibold.draw(c, tr(Str::MicMuted), barX + (barW - tw) / 2, barY - 1, 12, rgba(230, 120, 50));
         } else {
             float lvl = std::clamp(micLevel_, 0.0f, 1.0f);
             int fillW = static_cast<int>(lvl * (barW - 4));
             if (fillW > 0) {
-                // Vibrant green sound level bar
                 c.fillRect({barX + 2, barY + 2, fillW, barH - 4}, rgba(30, 215, 96), 4);
                 if (lvl > 0.85f) {
-                    // Yellow peak indicator
                     int peakW = static_cast<int>((lvl - 0.85f) / 0.15f * (barW - 4));
                     c.fillRect({barX + barW - 2 - peakW, barY + 2, peakW, barH - 4}, rgba(255, 204, 0), 4);
                 }
             } else {
-                // Minimum idle listening dot
                 c.fillCircle(barX + 7, barY + barH / 2, 2.5f, rgba(30, 215, 96, 160));
             }
         }
     }
 
-    y += 28;
+    // 3. Controller Slots at y = 852
     const int slotW = (kMenuW - 2 * kPad) / static_cast<int>(pads_.size());
     for (int i = 0; i < static_cast<int>(pads_.size()); ++i) {
         int sx = kPad + i * slotW;
         constexpr int kIconW = 56;
-        drawSlotIcon(c, fonts_.bold, sx + (slotW - kIconW) / 2, y, kIconW, i, pads_[i], kPanel,
+        drawSlotIcon(c, fonts_.bold, sx + (slotW - kIconW) / 2, 852, kIconW, i, pads_[i], kPanel,
                      fonts_.hasIcons ? &fonts_.icons : nullptr);
         if (!pads_[i].connected || pads_[i].name.empty()) continue;
         auto name = fonts_.regular.wrap(pads_[i].name, 15, slotW - 8, 1);
         if (!name.empty())
             fonts_.regular.draw(c, name[0], sx + (slotW - fonts_.regular.measure(name[0], 15)) / 2,
-                                y + padIconHeight(kIconW) + 2, 15, kGray);
+                                852 + padIconHeight(kIconW) + 2, 15, kGray);
         if (i == 0) {
             if (micMuted_) {
-                // Orange mic dot matching DualSense hardware mute LED
-                c.fillCircle(sx + (slotW + kIconW) / 2 - 2, y + 8, 3.5f, rgba(230, 120, 50));
+                c.fillCircle(sx + (slotW + kIconW) / 2 - 2, 852 + 8, 3.5f, rgba(230, 120, 50));
             } else {
-                // Little green mic dot next to controller 1
-                c.fillCircle(sx + (slotW + kIconW) / 2 - 2, y + 8, 3.5f, rgba(30, 215, 96));
+                c.fillCircle(sx + (slotW + kIconW) / 2 - 2, 852 + 8, 3.5f, rgba(30, 215, 96));
             }
         }
     }
 
-    // Cross selects, Circle goes back to the game (swapped with Circle confirming).
+    // 4. Gestures and Button Hints at bottom
+    c.fillRect({kPad, 930, kMenuW - 2 * kPad, 1}, rgba(50, 50, 50));
     int hy = kMenuH - 50, x = kPad;
     {
-        // The touchpad's gestures, small, above the button hints.
-        // (Without a touchpad: the buttons and keys that do the same.)
         Str hint = g_keyboardHints ? Str::MenuKeyHint : caps_.touchpad ? Str::MenuGestureHint : Str::MenuButtonHint;
-        auto lines = fonts_.regular.wrap(tr(hint), 16, kMenuW - 2 * kPad, 2);
-        int gy = hy - 14 - static_cast<int>(lines.size()) * 22;
+        auto lines = fonts_.regular.wrap(tr(hint), 15, kMenuW - 2 * kPad, 2);
+        int gy = 944;
         for (const auto& l : lines) {
-            fonts_.regular.draw(c, l, kPad, gy, 16, kDim);
-            gy += 22;
+            fonts_.regular.draw(c, l, kPad, gy, 15, kDim);
+            gy += 20;
         }
     }
+
+    // Side Card: SmartGlass Web Gamepad QR Card
     if (smartGlassOpen_) {
         const int cardX = kMenuW + kCardGap;
         const int cardY = 204;
-        const Rect card{cardX, cardY, kCardW, 640};
-        c.fillRect(card, rgba(20, 24, 34, 245), 20);
-        c.strokeRect(card, rgba(16, 124, 65, 200), 2, 20);
-
-        int cy = card.y + 36;
-        const char* title = "SMARTGLASS GAMEPAD";
-        int tw = fonts_.bold.measure(title, 26);
-        fonts_.bold.draw(c, title, card.x + (card.w - tw) / 2, cy, 26, kWhite);
-        cy += 38;
-
-        std::string sub = "Scan with your phone to use as controller or touch remote";
-        auto lines = fonts_.regular.wrap(sub, 16, card.w - 48, 2);
-        for (const auto& l : lines) {
-            int lw = fonts_.regular.measure(l, 16);
-            fonts_.regular.draw(c, l, card.x + (card.w - lw) / 2, cy, 16, kGray);
-            cy += 22;
-        }
-        cy += 16;
-
-        std::string url = "http://" + platform::localIPv4() + ":8080/gamepad";
-        uint8_t qrBuf[qrcodegen_BUFFER_LEN_MAX], tmpBuf[qrcodegen_BUFFER_LEN_MAX];
-        int qrCardW = 340;
-        if (qrcodegen_encodeText(url.c_str(), tmpBuf, qrBuf, qrcodegen_Ecc_LOW,
-                                 qrcodegen_VERSION_MIN, qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true)) {
-            int n = qrcodegen_getSize(qrBuf);
-            int mod = 300 / (n + 2);
-            qrCardW = mod * (n + 2) + 40;
-        }
-        Rect qrBox = drawQr(c, url, card.x + (card.w + qrCardW) / 2, cy, 300, qrcodegen_Ecc_LOW);
-        cy += (qrBox.w <= 0 ? 340 : qrBox.h) + 24;
-
-        Rect pill{card.x + 32, cy, card.w - 64, 46};
-        c.fillRect(pill, rgba(0, 0, 0, 140), 12);
-        c.strokeRect(pill, rgba(255, 255, 255, 40), 1, 12);
-        int uw = fonts_.semibold.measure(url, 20);
-        fonts_.semibold.draw(c, url, pill.x + (pill.w - uw) / 2, fonts_.semibold.centeredY(pill.y, pill.h, 20), 20, rgba(74, 222, 128));
+        WebControlCard::drawCard(c, fonts_, cardX, cardY, kCardW, 640);
     }
-    if (g_keyboardHints) {  // Enter / Esc as key caps
+
+    // Action Hints
+    if (g_keyboardHints) {
         auto cap = [&](const char* key) {
             int kw = fonts_.bold.measure(key, 15) + 18;
             c.fillRect({x, hy, kw, 26}, rgba(255, 255, 255, 30), 6);
@@ -731,15 +775,27 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             return kw;
         };
         int kw = cap("Enter");
-        x = fonts_.semibold.draw(c, selected_ == Stats ? tr(Str::StatsCustomize) : tr(Str::Select), x + kw + 8, hy, 20, kGray) + 32;
+        x = fonts_.semibold.draw(c, selected_ == Stats ? tr(Str::StatsCustomize) : tr(Str::Select), x + kw + 8, hy, 20, kGray) + 24;
         kw = cap("Esc");
-        fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, hy, 20, kGray);
+        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, hy, 20, kGray) + 24;
+        kw = cap("Q/E");
+        fonts_.semibold.draw(c, "Aba", x + kw + 8, hy, 20, kGray);
         return c;
     }
+
     icon(!circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, selected_ == Stats ? tr(Str::StatsCustomize) : tr(Str::Select), x + 34, hy, 20, kGray) + 32;
+    const char* confirmLabel = (selected_ == Stats) ? tr(Str::StatsCustomize)
+                             : (selected_ == GyroItem) ? "Abrir Roda"
+                             : tr(Str::Select);
+    x = fonts_.semibold.draw(c, confirmLabel, x + 34, hy, 20, kGray) + 24;
     icon(circleConfirms_, x, hy);
-    fonts_.semibold.draw(c, tr(Str::Back), x + 34, hy, 20, kGray);
+    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, hy, 20, kGray) + 24;
+
+    // L1/R1 Tab Switch Hint
+    c.fillRect({x, hy + 2, 54, 22}, rgba(255, 255, 255, 30), 4);
+    fonts_.bold.draw(c, "L1/R1", x + 6, fonts_.bold.centeredY(hy + 2, 22, 13), 13, kWhite);
+    fonts_.semibold.draw(c, "Abas", x + 60, hy, 20, kGray);
+
     return c;
 }
 
@@ -747,6 +803,7 @@ void StreamMenu::recordFrametime(float ms) const {
     if (ms <= 0.0f || ms > 250.0f) return;
     frametimes_.push_back(ms);
     if (frametimes_.size() > 60) frametimes_.erase(frametimes_.begin());
+    telemetry_.recordFrametime(ms);
 }
 
 Canvas StreamMenu::renderStats(const StreamInfo& info) const {
@@ -799,31 +856,7 @@ Canvas StreamMenu::renderStats(const StreamInfo& info) const {
     if (!warn.empty()) fonts_.semibold.draw(c, warn, 14 + tw, 8, kPx, kWarnColor);
 
     if (showGraph) {
-        // Row 2: Frametime sparkline bars (last 60 frames)
-        int graphX = 14;
-        int graphY = 32;
-        int graphH = 22;
-        int graphW = w - 28;
-        // Draw subtle baseline
-        c.line(graphX, graphY + graphH, graphX + graphW, graphY + graphH, 1.0f, rgba(80, 80, 80, 160));
-        // Target 60fps line (16.7ms out of 40ms scale = ~9px above baseline)
-        float targetLineY = (graphY + graphH) - (16.7f / 40.0f) * graphH;
-        c.line(graphX, targetLineY, graphX + graphW, targetLineY, 1.0f, rgba(60, 160, 90, 120));
-
-        if (!frametimes_.empty()) {
-            size_t count = frametimes_.size();
-            float barW = std::max(2.0f, static_cast<float>(graphW) / 60.0f - 1.0f);
-            float step = barW + 1.0f;
-            for (size_t i = 0; i < count; ++i) {
-                float ms = frametimes_[i];
-                float norm = std::clamp(ms / 40.0f, 0.08f, 1.0f);
-                float bh = norm * graphH;
-                float bx = graphX + i * step;
-                if (bx + barW > graphX + graphW) break;
-                Color barColor = ms <= 17.5f ? rgba(40, 200, 60) : ms <= 33.3f ? rgba(255, 190, 40) : rgba(255, 60, 60);
-                c.fillRect({static_cast<int>(bx), static_cast<int>(graphY + graphH - bh), static_cast<int>(barW), static_cast<int>(bh)}, barColor);
-            }
-        }
+        telemetry_.drawSparkline(c, 14, 32, w - 28, 22);
     }
     return c;
 }

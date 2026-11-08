@@ -10,6 +10,9 @@
 #include "ui/font.h"
 #include "ui/pad_icons.h"
 #include "input/gyro.h"
+#include "ui/components/gyro_wheel_dialog.h"
+#include "ui/components/telemetry_overlay.h"
+#include "ui/components/web_control_card.h"
 
 #include <string>
 
@@ -46,7 +49,14 @@ enum StatsIndicator : uint32_t {
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, PadSpeakerVolume,
-    TouchpadShortcuts, Player, SmartGlassToggle, ReloadStream
+    TouchpadShortcuts, Player, SmartGlassToggle, ReloadStream,
+    VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
+};
+
+enum class MenuTab {
+    General = 0,
+    Controls,
+    TabCount
 };
 
 class StreamMenu {
@@ -71,9 +81,13 @@ public:
     void open(int resolution, bool stats, int sharpness = 0, int deband = 1, int upscaler = 0, bool homeConsole = false,
               bool allow1440 = true, bool hasCustomProfile = false, int triggerStrength = 2, int deadzone = 15,
               bool circleConfirms = false, float micLevel = 0.0f, bool micMuted = false, int padSpeakerVolume = 100);
-    void close() { open_ = false; statsCustomizing_ = false; touchpadCustomizing_ = false; }
+    void close() { open_ = false; statsCustomizing_ = false; touchpadCustomizing_ = false; gyroDialog_.close(); }
     bool isOpen() const { return open_; }
     MenuAction handle(const NavInput& in);
+
+    MenuTab tab() const { return activeTab_; }
+    void setTab(MenuTab t) { activeTab_ = t; selectFirstItem(); }
+
     int resolution() const { return resolution_; }
     bool statsOn() const { return stats_; }
     void setStatsOn(bool s) { stats_ = s; }
@@ -99,6 +113,16 @@ public:
     void setPadSpeakerVolume(int vol) { padSpeakerVolume_ = vol; }
     bool smartGlassOpen() const { return smartGlassOpen_; }
     void setSmartGlassOpen(bool open) { smartGlassOpen_ = open; }
+
+    int videoDecoder() const { return videoDecoder_; }
+    void setVideoDecoder(int d) { videoDecoder_ = d; }
+    int fpsLimit() const { return fpsLimit_; }
+    void setFpsLimit(int f) { fpsLimit_ = f; }
+    int maxBitrateMbps() const { return maxBitrateMbps_; }
+    void setMaxBitrateMbps(int b) { maxBitrateMbps_ = b; }
+    bool highRefresh() const { return highRefresh_; }
+    void setHighRefresh(bool h) { highRefresh_ = h; }
+
     // Gyro aiming: mode (input::GyroMode) and intensity 1..input::kGyroLevels.
     int gyroMode() const { return gyroMode_; }
     int gyroLevel() const { return gyroLevel_; }
@@ -115,6 +139,14 @@ public:
     float gyroCalProgress() const { return calProgress_; }
     bool gyroCalSucceeded() const { return calSucceeded_; }
     bool gyroCalFailed() const { return calFailed_; }
+
+    // GyroWheelDialog integration
+    bool isGyroDialogOpen() const { return gyroDialog_.isOpen(); }
+    void openGyroDialog(const std::string& gameKey = "") { gyroDialog_.open(0, gameKey); }
+    void closeGyroDialog() { gyroDialog_.close(); }
+    void drawGyroDialog(Canvas& c) { gyroDialog_.draw(c, fonts_, 0, 0, c.width(), c.height()); }
+    void update(uint64_t nowMs);
+
     bool micMuted() const { return micMuted_; }
     void setMicMuted(bool muted) { micMuted_ = muted; }
     float micLevel() const { return micLevel_; }
@@ -146,34 +178,39 @@ public:
     // "Unstable connection", on its own (when the statistics line is off).
     Canvas renderWarning() const;
 
-private:
     enum Item {
-        XboxButton,
-        PlayerItem,
+        // Tab General
+        XboxButton = 0,
         Profile,
         Stats,
         Upscaler,
         Sharpness,
         Deband,
         Resolution,
-        Triggers,
-        DeadzoneItem,
-        ConfirmItem,
-        GyroItem,
-        GyroLevelItem,
-        GyroYawItem,
-        GyroPitchItem,
-        GyroCalibrateItem,
-        PadSpeakerVolumeItem,
-        TouchpadShortcutsItem,
+        VideoDecoderItem,
+        FpsLimiterItem,
+        BitrateLimiterItem,
+        VrrItem,
         SmartGlassItem,
         ReloadStreamItem,
         Leave,
+
+        // Tab Controls
+        PlayerItem,
+        ConfirmItem,
+        Triggers,
+        DeadzoneItem,
+        PadSpeakerVolumeItem,
+        TouchpadShortcutsItem,
+        GyroItem,
+
         ItemCount
     };
 
-    // Whether `item` is in the menu with caps_.
+private:
+    bool itemInTab(int item, MenuTab tab) const;
     bool itemShown(int item) const;
+    void selectFirstItem();
 
     const Fonts& fonts_;
     UiCaps caps_;
@@ -184,8 +221,14 @@ private:
     bool touchpadCustomizing_ = false;
     int touchpadCustomIndex_ = 0;
     input::TouchpadShortcuts touchpadShortcuts_ = input::defaultTouchpadShortcuts();
+
+    MenuTab activeTab_ = MenuTab::General;
     int selected_ = XboxButton;
     int resolution_ = 0, applied_ = 0;
+    int videoDecoder_ = 0;
+    int fpsLimit_ = 0;
+    int maxBitrateMbps_ = 0;
+    bool highRefresh_ = false;
     int sharpness_ = 0, deband_ = 1, upscaler_ = 0, debandInUse_ = 1;
     bool resolutionAsked_ = false;
     bool circleConfirms_ = false;
@@ -208,6 +251,9 @@ private:
     int usbOwnerPlayer_ = -1;
     bool smartGlassOpen_ = false;
     mutable std::vector<float> frametimes_;
+
+    GyroWheelDialog gyroDialog_;
+    mutable TelemetryOverlay telemetry_;
 };
 
 }  // namespace xc::ui

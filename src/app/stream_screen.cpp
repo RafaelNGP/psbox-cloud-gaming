@@ -397,6 +397,10 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             int padVol = 100;
             {
                 std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                menu_.setVideoDecoder(hasCustomProfile_ ? g_settings.perGame[gameKey_].videoDecoder : g_settings.videoDecoder);
+                menu_.setFpsLimit(hasCustomProfile_ ? g_settings.perGame[gameKey_].fpsLimit : g_settings.fpsLimit);
+                menu_.setMaxBitrateMbps(g_settings.maxBitrateMbps);
+                menu_.setHighRefresh(hasCustomProfile_ ? g_settings.perGame[gameKey_].highRefresh : g_settings.highRefresh);
                 padVol = g_settings.padSpeakerVolume;
             }
             menu_.open(streamResolution_, showStats_, sharpness_, deband_, upscaler_, g_playingHome, allow1440,
@@ -483,6 +487,50 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     ++g_settingsVersion;
                 }
                 break;
+            case ui::MenuAction::VideoDecoder: {
+                int dec = menu_.videoDecoder();
+                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                if (hasCustomProfile_) g_settings.perGame[gameKey_].videoDecoder = dec;
+                else g_settings.videoDecoder = dec;
+                g_settings.save(settingsPath());
+                app::SettingsManager::instance().load(settingsPath());
+                refreshSettingsUiLocked();
+                break;
+            }
+            case ui::MenuAction::FpsLimiter: {
+                int lim = menu_.fpsLimit();
+                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                if (hasCustomProfile_) g_settings.perGame[gameKey_].fpsLimit = lim;
+                else g_settings.fpsLimit = lim;
+                g_settings.save(settingsPath());
+                app::SettingsManager::instance().load(settingsPath());
+                refreshSettingsUiLocked();
+                if (g_player) g_player->setFpsLimit(lim);
+                break;
+            }
+            case ui::MenuAction::BitrateLimiter: {
+                int mbps = menu_.maxBitrateMbps();
+                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                g_settings.maxBitrateMbps = mbps;
+                g_settings.save(settingsPath());
+                app::SettingsManager::instance().load(settingsPath());
+                refreshSettingsUiLocked();
+                if (g_player) g_player->setMaxBitrate(mbps);
+                break;
+            }
+            case ui::MenuAction::VrrToggle: {
+                bool vrr = menu_.highRefresh();
+                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                if (hasCustomProfile_) g_settings.perGame[gameKey_].highRefresh = vrr;
+                else g_settings.highRefresh = vrr;
+                g_settings.save(settingsPath());
+                app::SettingsManager::instance().load(settingsPath());
+                refreshSettingsUiLocked();
+                highRefresh_ = vrr && !g_autoplay.hz60 && display::setHighRefresh(true);
+                if (!highRefresh_) display::setHighRefresh(false);
+                if (g_player) g_player->setHighRefreshOutput(highRefresh_);
+                break;
+            }
             case ui::MenuAction::ProfileToggle: {
                 hasCustomProfile_ = menu_.hasCustomProfile();
                 std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
@@ -950,7 +998,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         }
     }
     uint64_t nowMs = platform::nowMs();
-    bool menuRedraw = menu_.isOpen() && (nowMs - lastMenuRedrawMs_ >= 40);
+    bool menuRedraw = menu_.isOpen() && (nowMs - lastMenuRedrawMs_ >= (menu_.isGyroDialogOpen() ? 16 : 40));
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
     uint64_t toasts = platform::toastsEnabled() ? platform::toasts().version(nowMs) : 0;
@@ -964,12 +1012,20 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             info = g_streamInfo;
         }
         if (menu_.isOpen()) {
+            menu_.update(nowMs);
             float micLvl = g_player ? g_player->micLevel() : 0.0f;
             bool micMuted = g_player ? (g_player->micMuted() || g_player->isMicHardwareMuted()) : false;
             menu_.setMicLevel(micLvl);
             menu_.setMicMuted(micMuted);
-            ui::Canvas c = menu_.renderMenu(info);
-            display::setOverlay(c.data(), ui::StreamMenu::kMenuX, ui::StreamMenu::kMenuY, c.width(), c.height(), 235);
+            if (menu_.isGyroDialogOpen()) {
+                ui::Canvas c(display::kWidth, display::kHeight);
+                c.clear(0);
+                menu_.drawGyroDialog(c);
+                display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
+            } else {
+                ui::Canvas c = menu_.renderMenu(info);
+                display::setOverlay(c.data(), ui::StreamMenu::kMenuX, ui::StreamMenu::kMenuY, c.width(), c.height(), 235);
+            }
         } else if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);
             display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);

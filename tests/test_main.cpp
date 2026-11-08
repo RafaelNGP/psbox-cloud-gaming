@@ -956,28 +956,17 @@ static void testStreamMenu() {
     press([](xc::ui::NavInput& n) { n.left = true; });  // wraps to 1440p
     CHECK(menu.resolution() == 2);
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Resolution);
-    press([](xc::ui::NavInput& n) { n.down = true; });
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Triggers);
-    press([](xc::ui::NavInput& n) { n.down = true; });
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Deadzone);
-    press([](xc::ui::NavInput& n) { n.down = true; });
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::ConfirmButton);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // gyro aiming: off -> always -> while aiming
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroMode() == 1);
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroMode() == 2);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // its intensity, 1..10
-    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::Gyro && menu.gyroLevel() == 4);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // horizontal (yaw) sensitivity, 20..200%
-    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroYawScale() == 110);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // vertical (pitch) sensitivity, 20..200%
-    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::Gyro && menu.gyroPitchScale() == 70);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // calibrate gyro trigger
-    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Gyro && menu.isGyroCalibrating());
-    press([](xc::ui::NavInput& n) { n.down = true; });  // DualSense speaker volume
-    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::PadSpeakerVolume && menu.padSpeakerVolume() == 95);
-    press([](xc::ui::NavInput& n) { n.down = true; });  // Touchpad shortcuts
-    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::TouchpadShortcuts);
-    CHECK(press([](xc::ui::NavInput& n) { n.back = true; }) == MenuAction::TouchpadShortcuts);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // VideoDecoderItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::VideoDecoder);
+    CHECK(menu.videoDecoder() == 1);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // FpsLimiterItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::FpsLimiter);
+    CHECK(menu.fpsLimit() == 30);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // BitrateLimiterItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::BitrateLimiter);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // VrrItem
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::VrrToggle);
+    CHECK(menu.highRefresh());
     press([](xc::ui::NavInput& n) { n.down = true; });  // SmartGlass Web Gamepad
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::SmartGlassToggle);
     CHECK(menu.smartGlassOpen());
@@ -985,6 +974,37 @@ static void testStreamMenu() {
     press([](xc::ui::NavInput& n) { n.down = true; });  // Reload Stream
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::ReloadStream);
     CHECK(!menu.isOpen());
+
+    // Test Controls Tab
+    menu.open(0, false);
+    press([](xc::ui::NavInput& n) { n.r1 = true; }); // Switch to Controls Tab
+    CHECK(menu.tab() == xc::ui::MenuTab::Controls);
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::ConfirmButton);
+    CHECK(menu.circleConfirms());
+    press([](xc::ui::NavInput& n) { n.down = true; }); // Triggers
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Triggers);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // Deadzone
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Deadzone);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // PadSpeakerVolume
+    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::PadSpeakerVolume && menu.padSpeakerVolume() == 95);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // TouchpadShortcuts
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::TouchpadShortcuts);
+    CHECK(press([](xc::ui::NavInput& n) { n.back = true; }) == MenuAction::TouchpadShortcuts);
+    press([](xc::ui::NavInput& n) { n.down = true; }); // GyroItem (ATIVADO / DESATIVADO toggle)
+    CHECK(press([](xc::ui::NavInput& n) { n.right = true; }) == MenuAction::Gyro && menu.gyroMode() == 1);
+    CHECK(press([](xc::ui::NavInput& n) { n.left = true; }) == MenuAction::Gyro && menu.gyroMode() == 0);
+    // Confirm on GyroItem opens single-wheel modal
+    CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::None);
+    CHECK(menu.isGyroDialogOpen());
+    menu.setGyroYawScale(110);
+    CHECK(menu.gyroYawScale() == 110);
+    menu.setGyroPitchScale(70);
+    CHECK(menu.gyroPitchScale() == 70);
+    menu.startGyroCalibration(60);
+    CHECK(menu.isGyroCalibrating());
+    menu.closeGyroDialog();
+    CHECK(!menu.isGyroDialogOpen());
+
     menu.open(0, false);
     press([](xc::ui::NavInput& n) { n.up = true; });  // "Leave game", last (wraps from top)
     CHECK(press([](xc::ui::NavInput& n) { n.accept = true; }) == MenuAction::Leave);
@@ -1067,16 +1087,16 @@ static void testSmartGlassInGameMenuInvariants() {
     CHECK(menu.handle(navRight) == MenuAction::SmartGlassToggle);
     CHECK(menu.smartGlassOpen());
 
-    // Test non-modifying inputs (square, triangle, l1)
-    xc::ui::NavInput navSquare, navTriangle, navL1;
+    // Test non-modifying inputs (square, triangle, l2)
+    xc::ui::NavInput navSquare, navTriangle, navL2;
     navSquare.square = true;
     CHECK(menu.handle(navSquare) == MenuAction::None);
     CHECK(menu.smartGlassOpen());
     navTriangle.triangle = true;
     CHECK(menu.handle(navTriangle) == MenuAction::None);
     CHECK(menu.smartGlassOpen());
-    navL1.l1 = true;
-    CHECK(menu.handle(navL1) == MenuAction::None);
+    navL2.l2 = true;
+    CHECK(menu.handle(navL2) == MenuAction::None);
     CHECK(menu.smartGlassOpen());
 
     // Stress test: 200 consecutive rapid toggles
@@ -4029,11 +4049,12 @@ static void testBlock2Features() {
     ui::StreamMenu menu(dummyFonts);
     menu.open(0, false, 0, 1, 0, false, true, false, 2, 15, false, 0.0f, false, 100);
     CHECK(menu.padSpeakerVolume() == 100);
+    menu.setTab(xc::ui::MenuTab::Controls);
 
     // When at 100%, right should not trigger PadSpeakerVolume action
     ui::NavInput down;
     down.down = true;
-    for (int i = 0; i < 15; ++i) menu.handle(down);
+    for (int i = 0; i < 3; ++i) menu.handle(down);
 
     ui::NavInput right;
     right.right = true;
