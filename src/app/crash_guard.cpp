@@ -305,7 +305,7 @@ void install(const std::string& markerPath) {
         appendStr(crashLine, sizeof crashLine, clen, "crash: terminate pc=");
         appendCodeAddr(crashLine, sizeof crashLine, clen, caller ? caller - 1 : 0);
         appendStr(crashLine, sizeof crashLine, clen, " addr=0x0");
-#if defined(__ORBIS__)
+#if defined(__ORBIS__) || defined(__PROSPERO__) || defined(XCLOUD_PS5)
         if (auto ep = std::current_exception()) {
             try {
                 std::rethrow_exception(ep);

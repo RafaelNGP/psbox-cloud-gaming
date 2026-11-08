@@ -122,6 +122,7 @@ void applyControllerSettings() {
 bool saveSettings(const ui::SettingsChoice& choice) {
     bool languageChanged, fullscreenChanged;
     bool queueAlertToggledOn = false;
+    Settings snapshot;
     {
         std::lock_guard<std::mutex> lock(g_settingsMutex);
         std::string language = g_settings.language;
@@ -132,10 +133,11 @@ bool saveSettings(const ui::SettingsChoice& choice) {
         languageChanged = g_settings.language != language;
         fullscreenChanged = g_settings.desktopFullscreen != fullscreen;
         g_settings.save(settingsPath());  // warns itself
-        SettingsManager::instance().load(settingsPath());
+        snapshot = g_settings;
         XC_LOGI("settings saved: language %s, %s, region %s", g_settings.language.c_str(), g_settings.resolution.c_str(),
                 g_settings.region.empty() ? "auto" : g_settings.region.c_str());
     }
+    SettingsManager::instance().syncFrom(snapshot);
     applyControllerSettings();
     if (queueAlertToggledOn) {
         XC_LOGI("settings: queue-ready alert toggled on; playing test chime and rumble");
@@ -488,6 +490,7 @@ bool coreStartup() {
         /*updateSettings=*/[](const json::Value& root) -> bool {
             bool changed = false;
             int padSpeakerVol = -1;
+            Settings snapshot;
             {
                 std::lock_guard<std::mutex> lock(g_settingsMutex);
                 if (root.has("voiceRouting")) {
@@ -686,11 +689,12 @@ bool coreStartup() {
                 }
                 if (changed) {
                     g_settings.save(settingsPath());
-                    SettingsManager::instance().load(settingsPath());
                     refreshSettingsUiLocked();
+                    snapshot = g_settings;
                 }
             }
             if (changed) {
+                SettingsManager::instance().syncFrom(snapshot);
                 applyControllerSettings();
                 if (padSpeakerVol >= 0) {
                     media::setPadSpeakerVolume(padSpeakerVol);

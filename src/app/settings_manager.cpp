@@ -55,6 +55,17 @@ bool SettingsManager::load(const std::string& path) {
     return ok;
 }
 
+void SettingsManager::syncFrom(const Settings& s) {
+    SettingsChangeEvent ev;
+    {
+        std::unique_lock<std::shared_mutex> lock(mutex_);
+        settings_ = s;
+        uint64_t v = version_.fetch_add(1, std::memory_order_acq_rel) + 1;
+        g_settingsVersion.store(v, std::memory_order_relaxed);
+    }
+    notifyListeners(ev);
+}
+
 bool SettingsManager::save() {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     return saveLocked();

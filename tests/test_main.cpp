@@ -91,6 +91,10 @@
 
 using namespace xc;
 
+namespace xc::app {
+extern std::mutex g_settingsMutex;
+}
+
 static int g_failures = 0;
 #define CHECK(cond)                                                          \
     do {                                                                     \
@@ -510,6 +514,41 @@ static void testGeneralSettingsR2() {
         patch2.set("fpsLimit", static_cast<int64_t>(45));
         CHECK(mgr.updateFromJson(patch2, true));
         CHECK(mgr.get().fpsLimit == 0);
+    }
+
+    // 3b. SettingsManager syncFrom & deadlock safety
+    {
+        auto& mgr = xc::app::SettingsManager::instance();
+        uint64_t vBefore = mgr.version();
+        xc::app::Settings s = mgr.get();
+        s.maxBitrateMbps = 42;
+        s.fpsLimit = 120;
+        s.videoDecoder = 1;
+
+        bool listenerCalled = false;
+        int dummyTag = 123;
+        mgr.subscribe(&dummyTag, [&](const xc::app::SettingsChangeEvent& ev) {
+            listenerCalled = true;
+            // Verify listener can read settings safely without deadlock
+            auto readSettings = mgr.get();
+            (void)readSettings;
+        });
+
+        mgr.syncFrom(s);
+        CHECK(listenerCalled);
+        CHECK(mgr.version() > vBefore);
+        CHECK(mgr.get().maxBitrateMbps == 42);
+        CHECK(mgr.get().fpsLimit == 120);
+        CHECK(mgr.get().videoDecoder == 1);
+
+        // Verify deadlock safety: even if a caller holds g_settingsMutex, syncFrom must NOT deadlock
+        {
+            std::lock_guard<std::mutex> lock(xc::app::g_settingsMutex);
+            s.fpsLimit = 60;
+            mgr.syncFrom(s);
+            CHECK(mgr.get().fpsLimit == 60);
+        }
+        mgr.unsubscribe(&dummyTag);
     }
 
     // 4. StreamPlayer FPS Limit & Bitrate Cap API

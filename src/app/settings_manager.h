@@ -34,6 +34,7 @@ public:
     // Lifecycle and persistence
     bool load(const std::string& path = "");
     bool save();
+    void syncFrom(const Settings& s);
 
     // Thread-safe reads (Shared Lock)
     Settings get() const;

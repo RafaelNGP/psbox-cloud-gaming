@@ -490,43 +490,59 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 break;
             case ui::MenuAction::VideoDecoder: {
                 int dec = menu_.videoDecoder();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].videoDecoder = dec;
-                else g_settings.videoDecoder = dec;
-                g_settings.save(settingsPath());
-                app::SettingsManager::instance().load(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].videoDecoder = dec;
+                    else g_settings.videoDecoder = dec;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
             case ui::MenuAction::FpsLimiter: {
                 int lim = menu_.fpsLimit();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].fpsLimit = lim;
-                else g_settings.fpsLimit = lim;
-                g_settings.save(settingsPath());
-                app::SettingsManager::instance().load(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].fpsLimit = lim;
+                    else g_settings.fpsLimit = lim;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 if (g_player) g_player->setFpsLimit(lim);
                 break;
             }
             case ui::MenuAction::BitrateLimiter: {
                 int mbps = menu_.maxBitrateMbps();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                g_settings.maxBitrateMbps = mbps;
-                g_settings.save(settingsPath());
-                app::SettingsManager::instance().load(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.maxBitrateMbps = mbps;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 if (g_player) g_player->setMaxBitrate(mbps);
                 break;
             }
             case ui::MenuAction::VrrToggle: {
                 bool vrr = menu_.highRefresh();
-                std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
-                if (hasCustomProfile_) g_settings.perGame[gameKey_].highRefresh = vrr;
-                else g_settings.highRefresh = vrr;
-                g_settings.save(settingsPath());
-                app::SettingsManager::instance().load(settingsPath());
-                refreshSettingsUiLocked();
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].highRefresh = vrr;
+                    else g_settings.highRefresh = vrr;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 highRefresh_ = vrr && !g_autoplay.hz60 && display::setHighRefresh(true);
                 if (!highRefresh_) display::setHighRefresh(false);
                 if (g_player) g_player->setHighRefreshOutput(highRefresh_);
