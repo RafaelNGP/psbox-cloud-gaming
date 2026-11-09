@@ -115,7 +115,7 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     if (decoder_) return true;
     int rc = sceSysmoduleLoadModule(kVideodecModule);
     XC_LOGI("hwdec: sysmodule %u -> 0x%08x", kVideodecModule, static_cast<unsigned>(rc));
-    if (rc != 0) return false;
+    if (rc != 0 && rc != static_cast<int>(0x80020063)) return false;
 
     // A GPU compute queue for the decoder's own work.
     Vdec2ComputeMemory compute{};
@@ -123,15 +123,28 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     rc = sceVideodec2QueryComputeMemoryInfo(&compute);
     size_t computeSize = align16k(compute.cpuGpuSize);
     XC_LOGI("hwdec: compute memory 0x%08x: %zu bytes", static_cast<unsigned>(rc), computeSize);
-    if (rc != 0) return false;
+    if (rc != 0 || computeSize == 0) {
+        // Prospero native compute memory size: 0x498000 bytes
+        computeSize = 0x498000;
+        XC_LOGI("hwdec: using Prospero compute size fallback %zu bytes", computeSize);
+    }
     compute.cpuGpu = directMemory(computeSize, kCpuGpuRw);
     compute.cpuGpuSize = computeSize;
     if (!compute.cpuGpu) return false;
-    Vdec2ComputeConfig computeConfig{};
-    computeConfig.size = sizeof computeConfig;
-    rc = sceVideodec2AllocateComputeQueue(&computeConfig, &compute, &computeQueue_);
-    XC_LOGI("hwdec: compute queue 0x%08x", static_cast<unsigned>(rc));
-    if (rc != 0) return false;
+
+    void* queue = nullptr;
+    for (uint16_t pipe = 0; pipe < 5; ++pipe) {
+        Vdec2ComputeConfig computeConfig{};
+        computeConfig.size = sizeof computeConfig;
+        computeConfig.pipeId = pipe;
+        rc = sceVideodec2AllocateComputeQueue(&computeConfig, &compute, &queue);
+        XC_LOGI("hwdec: compute queue pipe %u -> 0x%08x (queue=%p)", pipe, static_cast<unsigned>(rc), queue);
+        if (rc == 0 && queue) {
+            computeQueue_ = queue;
+            break;
+        }
+    }
+    if (!computeQueue_) return false;
 
     // H.264 High up to level 5.1, coded 1920x1088; depth 1 for latency.
     Vdec2DecoderConfig config{};
@@ -145,7 +158,8 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     config.maxDpbFrames = 4;
     config.pipelineDepth = 1;
     config.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
-    config.cpuPriority = 700;
+    config.cpuPriority = 250;
+    config.cpuAffinity = 0x1FFF;
     config.optimizeProgressive = 1;
     Vdec2DecoderMemory memory{};
     memory.size = sizeof memory;

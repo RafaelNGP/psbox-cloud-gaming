@@ -141,6 +141,7 @@ private:
     bool pending_ = false;
     int failuresLogged_ = 0;
     double lastQp_ = -1;
+    uint32_t qpSampleCounter_ = 0;
 };
 
 class AudioDecoder {

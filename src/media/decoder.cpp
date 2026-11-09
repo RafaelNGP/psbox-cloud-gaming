@@ -104,28 +104,46 @@ public:
 
     uint32_t readBits(int n) {
         if (n <= 0) return 0;
-        if (n > 32) {
+        if (n > 32 || bitPos_ + n > size_ * 8) {
             error_ = true;
             return 0;
         }
         uint32_t val = 0;
-        for (int i = 0; i < n; ++i) {
-            val = (val << 1) | readBit();
-            if (error_) return 0;
+        while (n > 0) {
+            size_t bitOffset = bitPos_ & 7;
+            size_t byteOffset = bitPos_ >> 3;
+            int bitsInByte = 8 - static_cast<int>(bitOffset);
+            int take = std::min(n, bitsInByte);
+            uint8_t byte = data_[byteOffset];
+            uint32_t chunk = (byte >> (bitsInByte - take)) & ((1u << take) - 1u);
+            val = (val << take) | chunk;
+            bitPos_ += take;
+            n -= take;
         }
         return val;
     }
 
     uint32_t readUe() {
         int leadingZeros = 0;
-        while (!error_ && readBit() == 0) {
-            ++leadingZeros;
-            if (leadingZeros > 31) {
-                error_ = true;
-                return 0;
+        while (!error_ && bitPos_ < size_ * 8) {
+            size_t bitOffset = bitPos_ & 7;
+            size_t byteOffset = bitPos_ >> 3;
+            uint8_t byte = static_cast<uint8_t>(data_[byteOffset] << bitOffset);
+            if (byte != 0) {
+                int z = __builtin_clz(static_cast<unsigned int>(byte) << 24);
+                leadingZeros += z;
+                bitPos_ += z + 1;
+                break;
+            } else {
+                int bitsLeft = 8 - static_cast<int>(bitOffset);
+                leadingZeros += bitsLeft;
+                bitPos_ += bitsLeft;
             }
         }
-        if (error_) return 0;
+        if (error_ || leadingZeros > 31) {
+            error_ = true;
+            return 0;
+        }
         if (leadingZeros == 0) return 0;
         uint32_t info = readBits(leadingZeros);
         return ((1u << leadingZeros) - 1u) + info;
@@ -473,18 +491,18 @@ int H264BitstreamParser::parseSliceHeaderQp(const uint8_t* payload, size_t paylo
 double H264BitstreamParser::parseAccessUnitQp(const uint8_t* data, size_t len) {
     if (!data || len < 4) return -1.0;
 
-    size_t scOffsets[64];
+    // Fast-path: SPS, PPS and the first slice header are always within the first few KB.
+    // Scanning the full access unit (which can be 20-50KB) wastes CPU cycles on the critical path.
+    const size_t scanLimit = std::min<size_t>(len, 4096);
+    size_t scOffsets[16];
     size_t scCount = 0;
-    for (size_t i = 0; i + 2 < len && scCount < 64; ++i) {
+    for (size_t i = 0; i + 2 < scanLimit && scCount < 16; ++i) {
         if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
             scOffsets[scCount++] = i;
             i += 2;
         }
     }
     if (scCount == 0) return -1.0;
-
-    double qpSum = 0.0;
-    int sliceCount = 0;
 
     for (size_t k = 0; k < scCount; ++k) {
         size_t nalStart = scOffsets[k] + 3;
@@ -508,13 +526,14 @@ double H264BitstreamParser::parseAccessUnitQp(const uint8_t* data, size_t len) {
         } else if (nalUnitType == 1 || nalUnitType == 5) {
             int qp = parseSliceHeaderQp(payload, payloadLen, nalUnitType, nalRefIdc);
             if (qp >= 0) {
-                qpSum += qp;
-                ++sliceCount;
+                // In streaming, all slices in an access unit share the base frame QP.
+                // Stopping at the first slice eliminates parsing subsequent slices.
+                return static_cast<double>(qp);
             }
         }
     }
 
-    return sliceCount > 0 ? (qpSum / sliceCount) : -1.0;
+    return -1.0;
 }
 
 void disableSimd() {
@@ -556,6 +575,7 @@ bool VideoDecoder::init(int threads, bool preferHw) {
     consecutiveHwErrors_ = 0;
     consecutivePending_ = 0;
     lastQp_ = -1;
+    qpSampleCounter_ = 0;
     h264Parser_.reset();
 
     // 1. Hardware video decoder (PS5 libSceVideodec2 via HwDecoder)
@@ -654,9 +674,15 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
 
     // --- Path 1: PS5 Hardware Decoder (libSceVideodec2) ---
     if (isHw_ && hw_.ready()) {
-        double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
-        if (parsedQp >= 0) {
-            lastQp_ = parsedQp;
+        const bool isKey = (len >= 5) && (data[0] == 0 && data[1] == 0 &&
+            ((data[2] == 1 && ((data[3] & 0x1F) == 5 || (data[3] & 0x1F) == 7)) ||
+             (data[2] == 0 && data[3] == 1 && ((data[4] & 0x1F) == 5 || (data[4] & 0x1F) == 7))));
+
+        if (lastQp_ < 0 || isKey || (++qpSampleCounter_ % 8 == 0)) {
+            double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
+            if (parsedQp >= 0) {
+                lastQp_ = parsedQp;
+            }
         }
 
         HwDecoder::Picture hp;
