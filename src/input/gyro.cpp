@@ -138,6 +138,8 @@ void resetGyroPosture(GyroState& s) {
     s.injected[1] = 0.0f;
     s.x = 0.0f;
     s.y = 0.0f;
+    s.steerX = 0.0f;
+    s.steerAngle = 0.0f;
     s.up[0] = 0.0f;
     s.up[1] = 1.0f;
     s.up[2] = 0.0f;
@@ -201,37 +203,48 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         }
     }
 
-    // The turn about the room's vertical: flat, that is the pad's yaw alone.
-    const float yaw = w[0] * s.up[0] + w[1] * s.up[1] + w[2] * s.up[2];
-    // Horizon pitch axis orthogonal to live s.up (reduces to +w[0] when flat or upside down)
-    float px0 = 1.0f - s.up[0] * s.up[0];
-    float px1 = -s.up[0] * s.up[1];
-    float px2 = -s.up[0] * s.up[2];
-    float pxLen = std::sqrt(px0 * px0 + px1 * px1 + px2 * px2);
-    if (pxLen > 1e-3f) {
-        float invPx = 1.0f / pxLen;
-        px0 *= invPx;
-        px1 *= invPx;
-        px2 *= invPx;
-    } else {
-        px0 = 1.0f;
-        px1 = 0.0f;
-        px2 = 0.0f;
-    }
-    const float pitchRate = w[0] * px0 + w[1] * px1 + w[2] * px2;
-    constexpr float kNoise = 0.015f;
-    auto deadband = [](float v) { return std::abs(v) < kNoise ? 0.0f : v - std::copysign(kNoise, v); };
+    // 3. Player Space Gyro with Combined Yaw and Roll (JSL / Steam Input standard)
+    // The world vertical projection from gravity:
+    const float wWorldProj = w[0] * s.up[0] + w[1] * s.up[1] + w[2] * s.up[2];
 
-    // 3. Decoupled sensitivity scaling
+    // Total angular rate in turning plane (Y-Z plane of controller):
+    const float yzMag = std::sqrt(w[1] * w[1] + w[2] * w[2]);
+
+    // In player space, when controller is held near flat, rolling the wrists (w[2])
+    // naturally rotates the aim horizontally without losing input:
+    float yaw = wWorldProj;
+    if (yzMag > 1e-5f) {
+        float rollContrib = w[2] * (1.0f - std::abs(s.up[2]));
+        float combinedTurn = wWorldProj + rollContrib;
+        float maxAllowed = std::max(yzMag, std::abs(wWorldProj));
+        yaw = std::copysign(std::min(std::abs(combinedTurn) * 1.4142f, maxAllowed), combinedTurn);
+    }
+
+    // Pitch: decoupled local pitch w[0] (standard in modern player-space aiming)
+    const float pitchRate = w[0];
+
+    // Smooth adaptive deadband: suppresses stationary IMU noise without sharp cliff for micro-aiming
+    constexpr float kNoiseMin = 0.0105f;
+    constexpr float kNoiseMax = 0.0220f;
+    auto smoothDeadband = [](float v) -> float {
+        float av = std::abs(v);
+        if (av <= kNoiseMin) return 0.0f;
+        if (av >= kNoiseMax) return v;
+        float t = (av - kNoiseMin) / (kNoiseMax - kNoiseMin);
+        float blend = t * t * (3.0f - 2.0f * t); // C1 continuous smoothstep
+        return v * blend;
+    };
+
+    // 4. Decoupled sensitivity scaling
     const float baseScale = 0.16f * std::clamp(level, 1, kGyroLevels);
     // In closed-loop aiming, preserve full calibrated velocity above noise floor so slow
     // fine-aiming matches target derivative without static deadband lag.
     const float tx_ff = s.aimingActive
-        ? (std::abs(yaw) < kNoise ? 0.0f : -yaw * baseScale * effYawScale)
-        : (-deadband(yaw) * baseScale * effYawScale);
+        ? (std::abs(yaw) < kNoiseMin ? 0.0f : -yaw * baseScale * effYawScale)
+        : (-smoothDeadband(yaw) * baseScale * effYawScale);
     const float ty_ff = s.aimingActive
-        ? (std::abs(pitchRate) < kNoise ? 0.0f : -pitchRate * baseScale * effPitchScale)
-        : (-deadband(pitchRate) * baseScale * effPitchScale);
+        ? (std::abs(pitchRate) < kNoiseMin ? 0.0f : -pitchRate * baseScale * effPitchScale)
+        : (-smoothDeadband(pitchRate) * baseScale * effPitchScale);
 
     float tx = tx_ff;
     float ty = ty_ff;
@@ -271,9 +284,9 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         } else {
             // Software SO(3) fallback: integrate calibrated body angular velocity above noise floor
             const float wg[3] = {
-                std::abs(w[0]) >= kNoise ? w[0] : 0.0f,
-                std::abs(w[1]) >= kNoise ? w[1] : 0.0f,
-                std::abs(w[2]) >= kNoise ? w[2] : 0.0f,
+                smoothDeadband(w[0]),
+                smoothDeadband(w[1]),
+                smoothDeadband(w[2]),
             };
             const float wMag = std::sqrt(wg[0] * wg[0] + wg[1] * wg[1] + wg[2] * wg[2]);
             const float dPhi = wMag * dt;
@@ -315,26 +328,20 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         const float ry = yr * angScale;
         const float rz = zr * angScale;
 
-        // World vertical yaw in anchor body frame (100% accurate even when held tilted)
+        // World vertical yaw in anchor body frame
         const float ux = s.baseUp[0], uy = s.baseUp[1], uz = s.baseUp[2];
-        s.targetAngle[0] = rx * ux + ry * uy + rz * uz;
-
-        // Horizon pitch axis orthogonal to gravity (removes roll-induced yaw->pitch crosstalk)
-        float ex0 = 1.0f - ux * ux;
-        float ex1 = -ux * uy;
-        float ex2 = -ux * uz;
-        float exLen = std::sqrt(ex0 * ex0 + ex1 * ex1 + ex2 * ex2);
-        if (exLen > 1e-3f) {
-            float invEx = 1.0f / exLen;
-            ex0 *= invEx;
-            ex1 *= invEx;
-            ex2 *= invEx;
+        float rTurn = rx * ux + ry * uy + rz * uz;
+        float rzMag = std::sqrt(ry * ry + rz * rz);
+        if (rzMag > 1e-6f) {
+            float rRollExtra = rz * (1.0f - std::abs(uz));
+            float rCombined = rTurn + rRollExtra;
+            s.targetAngle[0] = std::copysign(std::min(std::abs(rCombined), rzMag), rCombined);
         } else {
-            ex0 = 1.0f;
-            ex1 = 0.0f;
-            ex2 = 0.0f;
+            s.targetAngle[0] = rTurn;
         }
-        s.targetAngle[1] = rx * ex0 + ry * ex1 + rz * ex2;
+
+        // Decoupled pitch tracking without yaw/roll cross-talk
+        s.targetAngle[1] = rx;
 
         targetInjectedX = -s.targetAngle[0] * baseScale * effYawScale;
         targetInjectedY = -s.targetAngle[1] * baseScale * effPitchScale;
@@ -348,7 +355,7 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
     }
 
     constexpr float kLift = 0.12f;
-    constexpr float kBlendRange = 0.010f;
+    constexpr float kBlendRange = 0.025f;
     if (s.aimingActive && tx_ff == 0.0f && ty_ff == 0.0f && std::hypot(errX, errY) < 5e-5f) {
         s.x = s.y = 0.0f;
         x = y = 0.0f;
@@ -384,6 +391,121 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
             s.injected[1] += (y / outMag) * effMag * dt;
         }
     }
+}
+
+float gyroToSteering(const float rawW[3], const float* accel, int level, GyroState& s,
+                     const float* orientationQuat, float dt) {
+    if (!rawW || !std::isfinite(rawW[0]) || !std::isfinite(rawW[1]) || !std::isfinite(rawW[2])) {
+        return 0.0f;
+    }
+    if (dt <= 0.0f || !std::isfinite(dt)) dt = 0.004f;
+    else dt = std::clamp(dt, 0.0005f, 0.050f);
+
+    float effBias[3] = {s.bias[0], s.bias[1], s.bias[2]};
+    if (effBias[0] == 0.0f && effBias[1] == 0.0f && effBias[2] == 0.0f && g_hasGlobalGyroBias) {
+        effBias[0] = g_globalGyroBias[0];
+        effBias[1] = g_globalGyroBias[1];
+        effBias[2] = g_globalGyroBias[2];
+        s.bias[0] = effBias[0];
+        s.bias[1] = effBias[1];
+        s.bias[2] = effBias[2];
+    }
+    float effScale = s.yawScale > 0.0f ? s.yawScale : 1.0f;
+    if (effScale == 1.0f && g_hasGlobalGyroScales) {
+        effScale = g_globalYawScale;
+    }
+
+    const float wz = rawW[2] - effBias[2];
+    const float wy = rawW[1] - effBias[1];
+
+    // 1. Calculate roll angle from gravity accelerometer
+    float rollAccel = 0.0f;
+    bool hasAccelRoll = false;
+    if (accel && std::isfinite(accel[0]) && std::isfinite(accel[1]) && std::isfinite(accel[2])) {
+        float ax = accel[0], ay = accel[1], az = accel[2];
+        float amag = std::sqrt(ax * ax + ay * ay + az * az);
+        if (amag >= 0.4f && amag <= 2.2f) {
+            float ayz = std::sqrt(ay * ay + az * az);
+            if (ayz > 0.05f) {
+                // When right grip dips down, ax > 0 -> steer right (+); when left grip dips down, ax < 0 -> steer left (-)
+                rollAccel = std::atan2(ax, ayz);
+                hasAccelRoll = true;
+            }
+        }
+    }
+
+    // 2. Hardware quaternion fallback / enhancement if available
+    float qNorm[4];
+    if (isValidUnitQuat(orientationQuat, qNorm)) {
+        // Roll from orientation quaternion: 2*(w*z + x*y)
+        float sinRoll = 2.0f * (qNorm[3] * qNorm[2] + qNorm[0] * qNorm[1]);
+        sinRoll = std::clamp(sinRoll, -1.0f, 1.0f);
+        float rollQuat = std::asin(sinRoll);
+        if (!hasAccelRoll) {
+            rollAccel = rollQuat;
+            hasAccelRoll = true;
+        }
+    }
+
+    // 3. Update room vertical estimation for steering rate projection
+    float accUp[3];
+    if (normalizeAccelUp(accel, accUp)) {
+        if (!s.upInitialized) {
+            for (int i = 0; i < 3; ++i) s.up[i] = accUp[i];
+            s.upInitialized = true;
+        } else {
+            const float alpha = 1.0f - std::exp(-dt / 2.0f);
+            for (int i = 0; i < 3; ++i) s.up[i] += (accUp[i] - s.up[i]) * alpha;
+        }
+        float n = std::sqrt(s.up[0] * s.up[0] + s.up[1] * s.up[1] + s.up[2] * s.up[2]);
+        if (n > 1e-3f) {
+            float invN = 1.0f / n;
+            for (float& u : s.up) u *= invN;
+        }
+    }
+
+    // 4. Complementary filter: integrate gyro angular velocity & blend towards reference roll
+    // Effective steering turn rate combines roll (wz) and tilted yaw (wy)
+    float steerRate = wz;
+    if (s.upInitialized) {
+        steerRate = wz * std::abs(s.up[1]) + wy * std::abs(s.up[2]);
+        if (wz < 0.0f && wy < 0.0f) steerRate = -std::abs(steerRate);
+        else if (wz > 0.0f && wy > 0.0f) steerRate = std::abs(steerRate);
+        else steerRate = wz;
+    }
+
+    if (!hasAccelRoll) {
+        // Pure gyro integration with gradual center decay
+        s.steerAngle += steerRate * dt;
+        s.steerAngle *= std::exp(-dt / 1.5f);
+    } else {
+        // Fast complementary filter (tau = 0.12s): sub-millisecond gyro response + drift-free gravity reference
+        s.steerAngle += steerRate * dt;
+        const float alpha = 1.0f - std::exp(-dt / 0.12f);
+        s.steerAngle += (rollAccel - s.steerAngle) * alpha;
+    }
+
+    // 5. Map steering angle to [-1.0, +1.0] deflection
+    // Lock-to-lock max angle: 45 deg default at level 5, 25 deg at level 10, 90 deg at level 1
+    const float baseMaxAngle = (45.0f * 3.14159265f / 180.0f) / (std::clamp(level, 1, 10) / 5.0f);
+    const float maxAngle = std::max(0.15f, baseMaxAngle / std::max(0.2f, effScale));
+
+    // Smooth deadzone around center: ~1.5 deg = 0.026 rad
+    constexpr float kDeadzone = 0.026f;
+    float absAngle = std::abs(s.steerAngle);
+    float targetSteer = 0.0f;
+    if (absAngle > kDeadzone) {
+        float span = maxAngle - kDeadzone;
+        float u = std::clamp((absAngle - kDeadzone) / span, 0.0f, 1.0f);
+        // Slightly progressive steering curve (60% linear, 40% quadratic) for natural car feel
+        float curve = 0.60f * u + 0.40f * u * u;
+        targetSteer = std::copysign(std::min(1.0f, curve), s.steerAngle);
+    }
+
+    // 5ms low-pass easing to remove high-frequency hand tremor
+    const float ease = 1.0f - std::exp(-dt / 0.005f);
+    s.steerX += (targetSteer - s.steerX) * ease;
+    return std::clamp(s.steerX, -1.0f, 1.0f);
 }
 
 }  // namespace xc::input

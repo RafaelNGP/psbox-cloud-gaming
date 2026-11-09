@@ -12,10 +12,19 @@
 namespace xc::input {
 
 constexpr int kGyroLevels = 10;  // intensity 1..kGyroLevels
-enum GyroMode { kGyroOff, kGyroAlways, kGyroAiming };  // kGyroAiming: while L2 is held
+enum GyroMode {
+    kGyroOff = 0,
+    kGyroAlways = 1,        // Gyro Aiming: right stick (Always)
+    kGyroAiming = 2,        // Gyro Aiming: right stick (while L2 is held)
+    kGyroSteering = 3,      // Steering Wheel: left stick X (Always)
+    kGyroSteeringDrive = 4, // Steering Wheel: left stick X (while R2 is held)
+};
+constexpr int kGyroModeCount = 5;
 
 struct GyroState {
     float x = 0, y = 0;            // the push given, eased (normalized effective drive)
+    float steerX = 0;              // steering wheel eased deflection (-1..1)
+    float steerAngle = 0;          // complementary filter integrated steering roll angle (rad)
     float up[3] = {0, 1, 0};       // the room's up in the pad's axes, eased
     float baseUp[3] = {0, 1, 0};   // room's up in anchor body axes
     float bias[3] = {0, 0, 0};     // zero-drift static calibration offset
@@ -113,6 +122,12 @@ struct GyroCalibrator {
 // `dt`: polling time step in seconds (defaults to 0.004f = 250 Hz).
 void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& s, float& x, float& y,
                  const float* orientationQuat = nullptr, float dt = 0.004f);
+
+// `rawW`: the pad's angular velocity (rad/s; x pitch, y yaw, z roll), `accel`
+// what its accelerometer reads (g) -> steering deflection to add to left stick X
+// (pad convention: -1.0 full left, +1.0 full right).
+float gyroToSteering(const float rawW[3], const float* accel, int level, GyroState& s,
+                     const float* orientationQuat = nullptr, float dt = 0.004f);
 
 // Global gyro calibration & hardware probing
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale);

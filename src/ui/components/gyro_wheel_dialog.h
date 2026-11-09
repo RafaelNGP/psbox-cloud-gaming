@@ -16,11 +16,10 @@ namespace xc::ui {
 class GyroWheelDialog {
 public:
     enum class Item {
-        Intensity = 0,
+        Calibrate = 0,
+        Intensity,
         YawScale,
         PitchScale,
-        Calibrate,
-        DemoMode,
         ItemCount
     };
 
@@ -65,12 +64,9 @@ private:
     int pitchScale_ = 80;   // 20..200%
     float bias_[3] = {0.0f, 0.0f, 0.0f};
 
-    Item selected_ = Item::Intensity;
+    Item selected_ = Item::Calibrate;
     input::GyroCalibrator calibrator_;
     input::GyroState gyroState_{};
-
-    bool demoMode_ = false;
-    float demoPhase_ = 0.0f;
 
     float rawVector_[3] = {0.0f, 0.0f, 0.0f};
     float outStick_[2] = {0.0f, 0.0f};

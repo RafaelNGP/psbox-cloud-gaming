@@ -35,8 +35,7 @@ void GyroWheelDialog::open(int slot, const std::string& gameKey) {
     open_ = true;
     slot_ = slot;
     gameKey_ = gameKey;
-    selected_ = Item::Intensity;
-    demoMode_ = false;
+    selected_ = Item::Calibrate;
     calSuccess_ = false;
     calFailed_ = false;
     calDoneTime_ = 0;
@@ -45,7 +44,6 @@ void GyroWheelDialog::open(int slot, const std::string& gameKey) {
 
 void GyroWheelDialog::close() {
     open_ = false;
-    demoMode_ = false;
     calibrator_.reset();
 }
 
@@ -173,9 +171,6 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
                 pitchScale_ = std::max(20, pitchScale_ - 10);
                 applyToSettings();
                 break;
-            case Item::DemoMode:
-                demoMode_ = !demoMode_;
-                break;
             default:
                 break;
         }
@@ -193,9 +188,6 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
                 pitchScale_ = std::min(200, pitchScale_ + 10);
                 applyToSettings();
                 break;
-            case Item::DemoMode:
-                demoMode_ = !demoMode_;
-                break;
             default:
                 break;
         }
@@ -204,8 +196,6 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
     if (in.accept) {
         if (selected_ == Item::Calibrate) {
             startCalibration();
-        } else if (selected_ == Item::DemoMode) {
-            demoMode_ = !demoMode_;
         }
     }
 
@@ -218,14 +208,7 @@ void GyroWheelDialog::update(uint64_t nowMs) {
     if (!open_) return;
     lastNowMs_ = nowMs;
 
-    if (demoMode_) {
-        demoPhase_ += 0.05f;
-        rawVector_[0] = std::sin(demoPhase_) * 0.45f;
-        rawVector_[1] = std::cos(demoPhase_ * 1.3f) * 0.45f;
-        rawVector_[2] = 0.0f;
-    } else {
-        input::pollPadRawGyro(slot_, rawVector_);
-    }
+    input::pollPadRawGyro(slot_, rawVector_);
 
     if (calibrator_.state == input::GyroCalibrator::State::Calibrating) {
         bool done = calibrator_.feed(rawVector_);
@@ -257,18 +240,17 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     if (!open_) return;
 
     // Full screen darkening overlay
-    c.fillRect({0, 0, kW, kH}, rgba(0, 0, 0, 180));
+    constexpr int kW = 1920, kH = 1080;
+    c.fillRect({0, 0, kW, kH}, rgba(0, 0, 0, 160));
+
+    (void)x; (void)y; (void)w; (void)h;
 
     // Modal panel
-    int pw = (w > 0) ? w : 1120;
-    int ph = (h > 0) ? h : 620;
-    int px = (x > 0) ? x : (kW - pw) / 2;
-    int py = (y > 0) ? y : (kH - ph) / 2 - 20;
-
-    Rect panel{px, py, pw, ph};
-    c.fillRect({panel.x + 8, panel.y + 12, panel.w, panel.h}, rgba(0, 0, 0, 140), 24); // shadow
-    c.fillRect(panel, kPanel, 20);
-    c.strokeRect(panel, rgba(255, 255, 255, 50), 2, 20);
+    constexpr int modalW = 1140, modalH = 640;
+    Rect panel{(kW - modalW) / 2, (kH - modalH) / 2 - 30, modalW, modalH};
+    c.fillRect({panel.x + 8, panel.y + 12, panel.w, panel.h}, rgba(0, 0, 0, 120), 26); // shadow
+    c.fillRect(panel, kPanel, 24);
+    c.strokeRect(panel, rgba(255, 255, 255, 50), 2, 24);
 
     // Title
     fonts.bold.draw(c, tr(Str::Gyro), panel.x + 48, panel.y + 40, 36, kWhite);
@@ -277,8 +259,8 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     // LEFT SIDE: Single Test Wheel
     // -------------------------------------------------------------
     const float cx = static_cast<float>(panel.x + 230);
-    const float cy = static_cast<float>(panel.y + 300);
-    const float R = 150.0f;
+    const float cy = static_cast<float>(panel.y + 285);
+    const float R = 145.0f;
 
     // Wheel background & concentric circles
     c.fillCircle(cx, cy, R, rgba(255, 255, 255, 12));
@@ -317,21 +299,23 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     c.fillCircle(rawDotX, rawDotY, 9.0f, kRawSensorColor);
     c.fillCircle(outDotX, outDotY, 12.0f, kGameOutputColor);
 
-    // Legend below wheel
-    int ly = static_cast<int>(cy + R + 28);
-    c.fillCircle(cx - 140.0f, ly + 9.0f, 7.0f, kRawSensorColor);
-    fonts.regular.draw(c, tr(Str::GyroSensorPos), static_cast<int>(cx - 124.0f), ly, 18, kGray);
+    // Legend below wheel (stacked vertically to prevent text collision across languages)
+    int ly1 = static_cast<int>(cy + R + 22);
+    int ly2 = ly1 + 26;
+    float legX = cx - 120.0f;
+    c.fillCircle(legX, ly1 + 9.0f, 7.0f, kRawSensorColor);
+    fonts.regular.draw(c, tr(Str::GyroSensorPos), static_cast<int>(legX + 16.0f), ly1, 18, kGray);
 
-    c.fillCircle(cx + 40.0f, ly + 9.0f, 9.0f, kGameOutputColor);
-    fonts.regular.draw(c, tr(Str::GyroGameOutput), static_cast<int>(cx + 56.0f), ly, 18, kGray);
+    c.fillCircle(legX, ly2 + 9.0f, 8.0f, kGameOutputColor);
+    fonts.regular.draw(c, tr(Str::GyroGameOutput), static_cast<int>(legX + 16.0f), ly2, 18, kGray);
 
     // -------------------------------------------------------------
     // RIGHT SIDE: Lateral Adjustment Sliders & Controls
     // -------------------------------------------------------------
-    int rx = panel.x + 470;
-    int rw = panel.w - 520;
-    int ry = panel.y + 110;
-    constexpr int rowH = 68;
+    int rx = panel.x + 460;
+    int rw = panel.w - 508;
+    int ry = panel.y + 116;
+    constexpr int rowH = 70;
 
     auto drawRow = [&](Item it, const std::string& label, const std::string& val, bool isBtn = false) {
         bool chosen = (selected_ == it);
@@ -361,16 +345,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
         ry += rowH;
     };
 
-    // Item 0: Sensitivity (1..10)
-    drawRow(Item::Intensity, tr(Str::GyroSensitivityIntensity), fmt("%d / 10", level_));
-
-    // Item 1: Horizontal (Yaw) scale
-    drawRow(Item::YawScale, tr(Str::GyroYawSensitivity), fmt("%d %%", yawScale_));
-
-    // Item 2: Vertical (Pitch) scale
-    drawRow(Item::PitchScale, tr(Str::GyroPitchSensitivity), fmt("%d %%", pitchScale_));
-
-    // Item 3: Calibration button / progress
+    // Row 0: Calibration button / progress
     std::string calLabel = tr(Str::GyroCalibrateAction);
     if (isCalibrating()) {
         int pct = static_cast<int>(calibrationProgress() * 100.0f);
@@ -390,12 +365,18 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
         c.fillRect({barBox.x, barBox.y, fw, barBox.h}, kGameOutputColor, 4);
     }
 
-    // Item 4: Demo / Auto-movement toggle
-    drawRow(Item::DemoMode, tr(Str::GyroDemoMode), demoMode_ ? tr(Str::Activated) : tr(Str::Deactivated));
+    // Row 1: Sensitivity (1..10)
+    drawRow(Item::Intensity, tr(Str::GyroSensitivityIntensity), fmt("%d / 10", level_));
+
+    // Row 2: Horizontal (Yaw) scale
+    drawRow(Item::YawScale, tr(Str::GyroYawSensitivity), fmt("%d %%", yawScale_));
+
+    // Row 3: Vertical (Pitch) scale
+    drawRow(Item::PitchScale, tr(Str::GyroPitchSensitivity), fmt("%d %%", pitchScale_));
 
     // Help text at bottom
     fonts.regular.draw(c, tr(Str::GyroTestHelp),
-                       panel.x + 48, panel.y + panel.h - 70, 18, kDim);
+                       panel.x + 48, panel.y + panel.h - 60, 18, kDim);
 
     // Footer Hints
     c.fillRect({0, kH - 64, kW, 64}, kBg);
@@ -412,7 +393,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     };
 
     drawHint(PadButton::Circle, tr(Str::Back));
-    const char* actLabel = (selected_ == Item::Calibrate || selected_ == Item::DemoMode) ? tr(Str::Select) : tr(Str::Adjust);
+    const char* actLabel = (selected_ == Item::Calibrate) ? tr(Str::Select) : tr(Str::Adjust);
     drawHint(PadButton::Cross, actLabel);
 }
 
