@@ -40,6 +40,55 @@ std::vector<std::pair<size_t, size_t>> splitAccessUnits(const uint8_t* data, siz
 // Restricts FFmpeg to plain C code paths (diagnostics); call before init().
 void disableSimd();
 
+struct H264Sps {
+    bool valid = false;
+    uint32_t profileIdc = 0;
+    uint32_t spsId = 0;
+    uint32_t chromaFormatIdc = 1;
+    bool separateColourPlane = false;
+    uint32_t log2MaxFrameNumMinus4 = 0;
+    uint32_t picOrderCntType = 0;
+    uint32_t log2MaxPicOrderCntLsbMinus4 = 0;
+    bool deltaPicOrderAlwaysZero = false;
+    bool frameMbsOnly = true;
+};
+
+struct H264Pps {
+    bool valid = false;
+    uint32_t ppsId = 0;
+    uint32_t spsId = 0;
+    bool entropyCodingMode = false;
+    bool bottomFieldPicOrderPresent = false;
+    uint32_t numSliceGroupsMinus1 = 0;
+    uint32_t numRefIdxL0DefaultActiveMinus1 = 0;
+    uint32_t numRefIdxL1DefaultActiveMinus1 = 0;
+    bool weightedPred = false;
+    uint32_t weightedBipredIdc = 0;
+    int32_t picInitQpMinus26 = 0;
+    bool redundantPicCntPresent = false;
+};
+
+class H264BitstreamParser {
+public:
+    H264BitstreamParser();
+    void reset();
+
+    // Parses NAL units in Annex-B access unit (updates SPS/PPS state and returns average Slice QP, or -1.0 if none)
+    double parseAccessUnitQp(const uint8_t* data, size_t len);
+
+    // Individual NAL parsers
+    bool parseSps(const uint8_t* payload, size_t payloadLen);
+    bool parsePps(const uint8_t* payload, size_t payloadLen);
+    int parseSliceHeaderQp(const uint8_t* payload, size_t payloadLen, uint8_t nalUnitType, uint8_t nalRefIdc);
+
+    const H264Sps* getSps(uint32_t id) const { return (id < 32 && spsMap_[id].valid) ? &spsMap_[id] : nullptr; }
+    const H264Pps* getPps(uint32_t id) const { return (id < 256 && ppsMap_[id].valid) ? &ppsMap_[id] : nullptr; }
+
+private:
+    H264Sps spsMap_[32];
+    H264Pps ppsMap_[256];
+};
+
 class VideoDecoder {
 public:
     VideoDecoder() = default;
@@ -70,6 +119,10 @@ public:
     int hwPixFmt() const { return hwPixFmt_; }
     void setHardware(bool hw) { isHw_ = hw; }
 
+    H264BitstreamParser& h264Parser() { return h264Parser_; }
+    const H264BitstreamParser& h264Parser() const { return h264Parser_; }
+    double parseAccessUnitQp(const uint8_t* data, size_t len) { return h264Parser_.parseAccessUnitQp(data, len); }
+
 private:
     AVCodecContext* ctx_ = nullptr;
     AVFrame* frame_ = nullptr;
@@ -78,6 +131,7 @@ private:
     void* hwDeviceCtx_ = nullptr;  // AVBufferRef*
     int hwPixFmt_ = -1;           // enum AVPixelFormat
     HwDecoder hw_;
+    H264BitstreamParser h264Parser_;
     bool preferHw_ = true;
     bool isHw_ = false;
     int consecutiveHwErrors_ = 0;

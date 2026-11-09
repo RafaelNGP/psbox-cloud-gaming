@@ -83,6 +83,440 @@ std::vector<std::pair<size_t, size_t>> splitAccessUnits(const uint8_t* data, siz
     return aus;
 }
 
+namespace {
+
+class BitReader {
+public:
+    BitReader(const uint8_t* data, size_t size) : data_(data), size_(size) {}
+
+    bool hasError() const { return error_; }
+
+    uint32_t readBit() {
+        if (bitPos_ >= size_ * 8) {
+            error_ = true;
+            return 0;
+        }
+        uint8_t byte = data_[bitPos_ >> 3];
+        uint32_t bit = (byte >> (7 - (bitPos_ & 7))) & 1;
+        ++bitPos_;
+        return bit;
+    }
+
+    uint32_t readBits(int n) {
+        if (n <= 0) return 0;
+        if (n > 32) {
+            error_ = true;
+            return 0;
+        }
+        uint32_t val = 0;
+        for (int i = 0; i < n; ++i) {
+            val = (val << 1) | readBit();
+            if (error_) return 0;
+        }
+        return val;
+    }
+
+    uint32_t readUe() {
+        int leadingZeros = 0;
+        while (!error_ && readBit() == 0) {
+            ++leadingZeros;
+            if (leadingZeros > 31) {
+                error_ = true;
+                return 0;
+            }
+        }
+        if (error_) return 0;
+        if (leadingZeros == 0) return 0;
+        uint32_t info = readBits(leadingZeros);
+        return ((1u << leadingZeros) - 1u) + info;
+    }
+
+    int32_t readSe() {
+        uint32_t codeNum = readUe();
+        if (error_) return 0;
+        if (codeNum & 1) {
+            return static_cast<int32_t>((codeNum + 1) >> 1);
+        } else {
+            return -static_cast<int32_t>(codeNum >> 1);
+        }
+    }
+
+private:
+    const uint8_t* data_ = nullptr;
+    size_t size_ = 0;
+    size_t bitPos_ = 0;
+    bool error_ = false;
+};
+
+size_t unescapeRbsp(const uint8_t* src, size_t srcLen, uint8_t* dst, size_t dstMax) {
+    size_t d = 0;
+    int zeros = 0;
+    for (size_t i = 0; i < srcLen && d < dstMax; ++i) {
+        uint8_t b = src[i];
+        if (zeros >= 2 && b == 3) {
+            zeros = 0;
+            continue;
+        }
+        if (b == 0) {
+            ++zeros;
+        } else {
+            zeros = 0;
+        }
+        dst[d++] = b;
+    }
+    return d;
+}
+
+}  // namespace
+
+H264BitstreamParser::H264BitstreamParser() {
+    reset();
+}
+
+void H264BitstreamParser::reset() {
+    for (auto& s : spsMap_) s = H264Sps{};
+    for (auto& p : ppsMap_) p = H264Pps{};
+
+    // Stream default fallback
+    spsMap_[0].valid = true;
+    spsMap_[0].spsId = 0;
+    spsMap_[0].chromaFormatIdc = 1;
+    spsMap_[0].frameMbsOnly = true;
+
+    ppsMap_[0].valid = true;
+    ppsMap_[0].ppsId = 0;
+    ppsMap_[0].spsId = 0;
+    ppsMap_[0].entropyCodingMode = true;
+    ppsMap_[0].picInitQpMinus26 = 0;
+}
+
+bool H264BitstreamParser::parseSps(const uint8_t* payload, size_t payloadLen) {
+    if (!payload || payloadLen == 0) return false;
+    uint8_t rbsp[256];
+    size_t rbspLen = unescapeRbsp(payload, std::min<size_t>(payloadLen, 256), rbsp, sizeof(rbsp));
+    if (rbspLen == 0) return false;
+
+    BitReader br(rbsp, rbspLen);
+    H264Sps sps;
+    sps.profileIdc = br.readBits(8);
+    br.readBits(8); // constraint_set flags + reserved
+    br.readBits(8); // level_idc
+    sps.spsId = br.readUe();
+    if (sps.spsId >= 32 || br.hasError()) return false;
+
+    if (sps.profileIdc == 100 || sps.profileIdc == 110 || sps.profileIdc == 122 || sps.profileIdc == 244 ||
+        sps.profileIdc == 44 || sps.profileIdc == 83 || sps.profileIdc == 86 || sps.profileIdc == 118 ||
+        sps.profileIdc == 128 || sps.profileIdc == 138 || sps.profileIdc == 139 || sps.profileIdc == 134 ||
+        sps.profileIdc == 135) {
+        sps.chromaFormatIdc = br.readUe();
+        if (sps.chromaFormatIdc == 3) {
+            sps.separateColourPlane = br.readBit() != 0;
+        }
+        br.readUe(); // bit_depth_luma_minus8
+        br.readUe(); // bit_depth_chroma_minus8
+        br.readBit(); // qpprime_y_zero_transform_bypass_flag
+        if (br.readBit()) { // seq_scaling_matrix_present_flag
+            int count = (sps.chromaFormatIdc != 3) ? 8 : 12;
+            for (int i = 0; i < count && !br.hasError(); ++i) {
+                if (br.readBit()) {
+                    int size = (i < 6) ? 16 : 64;
+                    int lastScale = 8, nextScale = 8;
+                    for (int j = 0; j < size && !br.hasError(); ++j) {
+                        if (nextScale != 0) {
+                            int delta = br.readSe();
+                            nextScale = (lastScale + delta + 256) % 256;
+                        }
+                        lastScale = (nextScale == 0) ? lastScale : nextScale;
+                    }
+                }
+            }
+        }
+    }
+
+    sps.log2MaxFrameNumMinus4 = br.readUe();
+    sps.picOrderCntType = br.readUe();
+    if (sps.picOrderCntType == 0) {
+        sps.log2MaxPicOrderCntLsbMinus4 = br.readUe();
+    } else if (sps.picOrderCntType == 1) {
+        sps.deltaPicOrderAlwaysZero = br.readBit() != 0;
+        br.readSe(); // offset_for_non_ref_pic
+        br.readSe(); // offset_for_top_to_bottom_field
+        uint32_t numRefFramesInCycle = br.readUe();
+        for (uint32_t i = 0; i < numRefFramesInCycle && !br.hasError(); ++i) {
+            br.readSe();
+        }
+    }
+
+    br.readUe(); // max_num_ref_frames
+    br.readBit(); // gaps_in_frame_num_value_allowed_flag
+    br.readUe(); // pic_width_in_mbs_minus1
+    br.readUe(); // pic_height_in_map_units_minus1
+    sps.frameMbsOnly = br.readBit() != 0;
+
+    if (!br.hasError()) {
+        sps.valid = true;
+        spsMap_[sps.spsId] = sps;
+        return true;
+    }
+    return false;
+}
+
+bool H264BitstreamParser::parsePps(const uint8_t* payload, size_t payloadLen) {
+    if (!payload || payloadLen == 0) return false;
+    uint8_t rbsp[256];
+    size_t rbspLen = unescapeRbsp(payload, std::min<size_t>(payloadLen, 256), rbsp, sizeof(rbsp));
+    if (rbspLen == 0) return false;
+
+    BitReader br(rbsp, rbspLen);
+    H264Pps pps;
+    pps.ppsId = br.readUe();
+    if (pps.ppsId >= 256 || br.hasError()) return false;
+    pps.spsId = br.readUe();
+    pps.entropyCodingMode = br.readBit() != 0;
+    pps.bottomFieldPicOrderPresent = br.readBit() != 0;
+    pps.numSliceGroupsMinus1 = br.readUe();
+    if (pps.numSliceGroupsMinus1 > 0) {
+        uint32_t type = br.readUe();
+        if (type == 0) {
+            for (uint32_t i = 0; i <= pps.numSliceGroupsMinus1 && !br.hasError(); ++i) br.readUe();
+        } else if (type == 2) {
+            for (uint32_t i = 0; i < pps.numSliceGroupsMinus1 && !br.hasError(); ++i) {
+                br.readUe(); br.readUe();
+            }
+        } else if (type >= 3 && type <= 5) {
+            br.readBit(); br.readUe();
+        } else if (type == 6) {
+            uint32_t picSize = br.readUe();
+            int bits = 0;
+            uint32_t temp = pps.numSliceGroupsMinus1;
+            while (temp > 0) { bits++; temp >>= 1; }
+            for (uint32_t i = 0; i <= picSize && !br.hasError(); ++i) br.readBits(bits);
+        }
+    }
+
+    pps.numRefIdxL0DefaultActiveMinus1 = br.readUe();
+    pps.numRefIdxL1DefaultActiveMinus1 = br.readUe();
+    pps.weightedPred = br.readBit() != 0;
+    pps.weightedBipredIdc = br.readBits(2);
+    pps.picInitQpMinus26 = br.readSe();
+    br.readSe(); // pic_init_qs_minus26
+    br.readSe(); // chroma_qp_index_offset
+    br.readBit(); // deblocking_filter_control_present_flag
+    br.readBit(); // constrained_intra_pred_flag
+    pps.redundantPicCntPresent = br.readBit() != 0;
+
+    if (!br.hasError()) {
+        pps.valid = true;
+        ppsMap_[pps.ppsId] = pps;
+        return true;
+    }
+    return false;
+}
+
+int H264BitstreamParser::parseSliceHeaderQp(const uint8_t* payload, size_t payloadLen, uint8_t nalUnitType, uint8_t nalRefIdc) {
+    if (!payload || payloadLen == 0) return -1;
+
+    uint8_t rbsp[256];
+    size_t rbspLen = unescapeRbsp(payload, std::min<size_t>(payloadLen, 256), rbsp, sizeof(rbsp));
+    if (rbspLen == 0) return -1;
+
+    BitReader br(rbsp, rbspLen);
+    br.readUe(); // first_mb_in_slice
+    uint32_t sliceType = br.readUe();
+    uint32_t sliceTypeMod = sliceType % 5; // 0: P, 1: B, 2: I, 3: SP, 4: SI
+    uint32_t ppsId = br.readUe();
+    if (ppsId >= 256 || br.hasError()) return -1;
+
+    const H264Pps& pps = ppsMap_[ppsId].valid ? ppsMap_[ppsId] : ppsMap_[0];
+    uint32_t spsId = pps.spsId < 32 ? pps.spsId : 0;
+    const H264Sps& sps = spsMap_[spsId].valid ? spsMap_[spsId] : spsMap_[0];
+
+    if (sps.separateColourPlane) {
+        br.readBits(2); // colour_plane_id
+    }
+
+    uint32_t frameNumBits = sps.log2MaxFrameNumMinus4 + 4;
+    br.readBits(static_cast<int>(frameNumBits));
+
+    bool fieldPicFlag = false;
+    if (!sps.frameMbsOnly) {
+        fieldPicFlag = br.readBit() != 0;
+        if (fieldPicFlag) {
+            br.readBit(); // bottom_field_flag
+        }
+    }
+
+    if (nalUnitType == 5) {
+        br.readUe(); // idr_pic_id
+    }
+
+    if (sps.picOrderCntType == 0) {
+        uint32_t pocLsbBits = sps.log2MaxPicOrderCntLsbMinus4 + 4;
+        br.readBits(static_cast<int>(pocLsbBits));
+        if (pps.bottomFieldPicOrderPresent && !fieldPicFlag) {
+            br.readSe(); // delta_pic_order_cnt_bottom
+        }
+    } else if (sps.picOrderCntType == 1 && !sps.deltaPicOrderAlwaysZero) {
+        br.readSe(); // delta_pic_order_cnt[0]
+        if (pps.bottomFieldPicOrderPresent && !fieldPicFlag) {
+            br.readSe(); // delta_pic_order_cnt[1]
+        }
+    }
+
+    if (pps.redundantPicCntPresent) {
+        br.readUe(); // redundant_pic_cnt
+    }
+
+    if (sliceTypeMod == 1) { // B slice
+        br.readBit(); // direct_spatial_mv_pred_flag
+    }
+
+    uint32_t numRefIdxL0 = pps.numRefIdxL0DefaultActiveMinus1;
+    uint32_t numRefIdxL1 = pps.numRefIdxL1DefaultActiveMinus1;
+    if (sliceTypeMod == 0 || sliceTypeMod == 3 || sliceTypeMod == 1) { // P, SP, B
+        if (br.readBit()) { // num_ref_idx_active_override_flag
+            numRefIdxL0 = br.readUe();
+            if (sliceTypeMod == 1) {
+                numRefIdxL1 = br.readUe();
+            }
+        }
+    }
+
+    // ref_pic_list_modification()
+    if (nalUnitType != 20 && nalUnitType != 21) {
+        if (sliceTypeMod != 2 && sliceTypeMod != 4) { // not I and not SI
+            if (br.readBit()) { // ref_pic_list_modification_flag_l0
+                while (!br.hasError()) {
+                    uint32_t idc = br.readUe();
+                    if (idc == 3 || br.hasError()) break;
+                    br.readUe(); // abs_diff_pic_num_minus1 or long_term_pic_num
+                }
+            }
+        }
+        if (sliceTypeMod == 1) { // B
+            if (br.readBit()) { // ref_pic_list_modification_flag_l1
+                while (!br.hasError()) {
+                    uint32_t idc = br.readUe();
+                    if (idc == 3 || br.hasError()) break;
+                    br.readUe();
+                }
+            }
+        }
+    }
+
+    // pred_weight_table()
+    if ((pps.weightedPred && (sliceTypeMod == 0 || sliceTypeMod == 3)) ||
+        (pps.weightedBipredIdc == 1 && sliceTypeMod == 1)) {
+        br.readUe(); // luma_log2_weight_denom
+        if (sps.chromaFormatIdc != 0) {
+            br.readUe(); // chroma_log2_weight_denom
+        }
+        for (uint32_t i = 0; i <= numRefIdxL0 && !br.hasError(); ++i) {
+            if (br.readBit()) {
+                br.readSe(); // luma_weight_l0
+                br.readSe(); // luma_offset_l0
+            }
+            if (sps.chromaFormatIdc != 0 && br.readBit()) {
+                for (int j = 0; j < 2; ++j) {
+                    br.readSe(); // chroma_weight_l0
+                    br.readSe(); // chroma_offset_l0
+                }
+            }
+        }
+        if (sliceTypeMod == 1) {
+            for (uint32_t i = 0; i <= numRefIdxL1 && !br.hasError(); ++i) {
+                if (br.readBit()) {
+                    br.readSe(); // luma_weight_l1
+                    br.readSe(); // luma_offset_l1
+                }
+                if (sps.chromaFormatIdc != 0 && br.readBit()) {
+                    for (int j = 0; j < 2; ++j) {
+                        br.readSe(); // chroma_weight_l1
+                        br.readSe(); // chroma_offset_l1
+                    }
+                }
+            }
+        }
+    }
+
+    // dec_ref_pic_marking()
+    if (nalRefIdc != 0) {
+        if (nalUnitType == 5) {
+            br.readBit(); // no_output_of_prior_pics_flag
+            br.readBit(); // long_term_reference_flag
+        } else {
+            if (br.readBit()) { // adaptive_ref_pic_marking_mode_flag
+                while (!br.hasError()) {
+                    uint32_t mmco = br.readUe();
+                    if (mmco == 0 || br.hasError()) break;
+                    if (mmco == 1 || mmco == 3) br.readUe();
+                    if (mmco == 2) br.readUe();
+                    if (mmco == 3 || mmco == 6) br.readUe();
+                    if (mmco == 4) br.readUe();
+                }
+            }
+        }
+    }
+
+    // cabac_init_idc
+    if (pps.entropyCodingMode && sliceTypeMod != 2 && sliceTypeMod != 4) {
+        br.readUe(); // cabac_init_idc
+    }
+
+    int32_t sliceQpDelta = br.readSe();
+    if (br.hasError()) return -1;
+
+    int qp = 26 + pps.picInitQpMinus26 + sliceQpDelta;
+    return std::clamp(qp, 0, 51);
+}
+
+double H264BitstreamParser::parseAccessUnitQp(const uint8_t* data, size_t len) {
+    if (!data || len < 4) return -1.0;
+
+    size_t scOffsets[64];
+    size_t scCount = 0;
+    for (size_t i = 0; i + 2 < len && scCount < 64; ++i) {
+        if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] == 1) {
+            scOffsets[scCount++] = i;
+            i += 2;
+        }
+    }
+    if (scCount == 0) return -1.0;
+
+    double qpSum = 0.0;
+    int sliceCount = 0;
+
+    for (size_t k = 0; k < scCount; ++k) {
+        size_t nalStart = scOffsets[k] + 3;
+        size_t nextSc = (k + 1 < scCount) ? scOffsets[k + 1] : len;
+        size_t nalEnd = nextSc;
+        while (nalEnd > nalStart && data[nalEnd - 1] == 0) {
+            --nalEnd;
+        }
+        if (nalStart >= nalEnd) continue;
+
+        uint8_t header = data[nalStart];
+        uint8_t nalUnitType = header & 0x1F;
+        uint8_t nalRefIdc = (header >> 5) & 3;
+        const uint8_t* payload = data + nalStart + 1;
+        size_t payloadLen = nalEnd - (nalStart + 1);
+
+        if (nalUnitType == 7) {
+            parseSps(payload, payloadLen);
+        } else if (nalUnitType == 8) {
+            parsePps(payload, payloadLen);
+        } else if (nalUnitType == 1 || nalUnitType == 5) {
+            int qp = parseSliceHeaderQp(payload, payloadLen, nalUnitType, nalRefIdc);
+            if (qp >= 0) {
+                qpSum += qp;
+                ++sliceCount;
+            }
+        }
+    }
+
+    return sliceCount > 0 ? (qpSum / sliceCount) : -1.0;
+}
+
 void disableSimd() {
     av_force_cpu_flags(0);
     XC_LOGW("FFmpeg SIMD disabled (cpu flags 0)");
@@ -121,6 +555,8 @@ bool VideoDecoder::init(int threads, bool preferHw) {
     isHw_ = false;
     consecutiveHwErrors_ = 0;
     consecutivePending_ = 0;
+    lastQp_ = -1;
+    h264Parser_.reset();
 
     // 1. Hardware video decoder (PS5 libSceVideodec2 via HwDecoder)
     if (preferHw_) {
@@ -218,6 +654,11 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
 
     // --- Path 1: PS5 Hardware Decoder (libSceVideodec2) ---
     if (isHw_ && hw_.ready()) {
+        double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
+        if (parsedQp >= 0) {
+            lastQp_ = parsedQp;
+        }
+
         HwDecoder::Picture hp;
         bool ok = hw_.decode(data, len, tag, hp);
         if (ok && !hp.error) {
@@ -329,6 +770,11 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
         double sum = 0;
         for (unsigned i = 0; i < par->nb_blocks; ++i) sum += par->qp + av_video_enc_params_block(par, i)->delta_qp;
         lastQp_ = par->nb_blocks ? sum / par->nb_blocks : par->qp;
+    } else {
+        double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
+        if (parsedQp >= 0) {
+            lastQp_ = parsedQp;
+        }
     }
     if (frame_->decode_error_flags || (frame_->flags & AV_FRAME_FLAG_CORRUPT)) {
         needsKeyframe_ = true;
