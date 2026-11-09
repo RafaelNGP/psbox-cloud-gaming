@@ -842,12 +842,18 @@ void scan() {
 
         // For GenericHid, verify HID report descriptor BEFORE detaching kernel driver so keyboards/mice
         // are never severed from Orbis libSceKeyboard / libSceMouse.
-        if (det.protocol == UsbPadProtocol::GenericHid && p_sceUsbdControlTransfer) {
-            uint8_t reportDesc[512] = {};
-            int r = p_sceUsbdControlTransfer(h, 0x81, 0x06, 0x2200, det.interfaceNum, reportDesc, sizeof(reportDesc), 200);
-            if (r > 0 && (isKeyboardOrMouseReportDescriptor(reportDesc, static_cast<size_t>(r)) ||
-                          !isGamepadReportDescriptor(reportDesc, static_cast<size_t>(r)))) {
-                XC_LOGI("usb pad: ignoring non-gamepad HID device (%04x:%04x, if %u)",
+        if (det.protocol == UsbPadProtocol::GenericHid) {
+            bool verifiedGamepad = false;
+            if (p_sceUsbdControlTransfer) {
+                uint8_t reportDesc[512] = {};
+                int r = p_sceUsbdControlTransfer(h, 0x81, 0x06, 0x2200, det.interfaceNum, reportDesc, sizeof(reportDesc), 300);
+                if (r > 0 && isGamepadReportDescriptor(reportDesc, static_cast<size_t>(r)) &&
+                    !isKeyboardOrMouseReportDescriptor(reportDesc, static_cast<size_t>(r))) {
+                    verifiedGamepad = true;
+                }
+            }
+            if (!verifiedGamepad) {
+                XC_LOGI("usb pad: rejecting unverified / non-gamepad HID device (%04x:%04x, if %u)",
                         desc.idVendor, desc.idProduct, det.interfaceNum);
                 p_sceUsbdClose(h);
                 g_ignored.insert(key);

@@ -115,7 +115,7 @@ bool pollWhere(int player, int except, ControllerState& out) {
 bool isBootKeyboardOrMouse(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol) {
     if (ifaceClass != 0x03) return false;
     if (ifaceProtocol == 0x01 || ifaceProtocol == 0x02) return true;
-    if (ifaceSubclass == 0x01 && (ifaceProtocol == 0x01 || ifaceProtocol == 0x02)) return true;
+    if (ifaceSubclass == 0x01) return true;
     return false;
 }
 
@@ -410,7 +410,7 @@ bool probeUsbPadPs4(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_
                 if (isBootKeyboardOrMouse(ifClass, ifSubClass, ifProto)) {
                     continue;
                 }
-                if (hasBootKbdOrMouse && (!reportDesc || reportLen == 0)) {
+                if (!reportDesc || reportLen == 0) {
                     continue;
                 }
                 if (reportDesc && reportLen > 0) {
