@@ -48,7 +48,7 @@ bool hasIdrSlice(const std::vector<uint8_t>& au) {
 }  // namespace
 
 void AudioLatency::reset() {
-    nextMs = 0, targetMs = 40, warm = false, lowNext = 0;
+    nextMs = 0, targetMs = 50, warm = false, lowNext = 0;
     for (size_t& l : lows) l = SIZE_MAX;
     media::audioQueue().setRefill(0);
 }
@@ -74,7 +74,7 @@ void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
         calmSinceMs = now;
         return;
     }
-    if (now - calmSinceMs >= 30000 && targetMs > 45) {
+    if (now - calmSinceMs >= 30000 && targetMs > 50) {
         targetMs -= 5, calmSinceMs = now;
         XC_LOGI("audio: steady for 30s, target %d ms", targetMs);
     }

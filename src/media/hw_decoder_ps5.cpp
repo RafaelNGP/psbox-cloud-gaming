@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #include "media/hw_decoder.h"
 
+#include "platform/platform.h"
 #include "util/log.h"
 
 #include <algorithm>
@@ -133,7 +134,8 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     if (!compute.cpuGpu) return false;
 
     void* queue = nullptr;
-    for (uint16_t pipe = 0; pipe < 5; ++pipe) {
+    const uint16_t pipeOrder[] = {1, 2, 3, 4, 0};
+    for (uint16_t pipe : pipeOrder) {
         Vdec2ComputeConfig computeConfig{};
         computeConfig.size = sizeof computeConfig;
         computeConfig.pipeId = pipe;
@@ -146,28 +148,43 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     }
     if (!computeQueue_) return false;
 
-    // H.264 High up to level 5.1, coded 1920x1088; depth 1 for latency.
+    // H.264 High up to level 4.2 (1080p60 stream), DPB depth 2 for ultra-low latency; fallback to 5.1 / 4.
+    struct Preset {
+        uint32_t profile;
+        uint32_t maxLevel;
+        int32_t dpbFrames;
+    };
+    const Preset presets[] = {
+        {100, 42, 2},
+        {100, 51, 4},
+    };
     Vdec2DecoderConfig config{};
-    config.size = sizeof config;
-    config.resourceType = 1;
-    config.codecType = 1;
-    config.profile = 100;
-    config.maxLevel = 51;
-    config.maxWidth = maxWidth;
-    config.maxHeight = maxHeight;
-    config.maxDpbFrames = 4;
-    config.pipelineDepth = 1;
-    config.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
-    config.cpuPriority = 250;
-    config.cpuAffinity = 0x1FFF;
-    config.optimizeProgressive = 1;
     Vdec2DecoderMemory memory{};
-    memory.size = sizeof memory;
-    rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
-    XC_LOGI("hwdec: decoder memory 0x%08x: cpu %llu, gpu %llu, cpu+gpu %llu, frame %llu (align %u)",
-            static_cast<unsigned>(rc), static_cast<unsigned long long>(memory.cpuSize),
-            static_cast<unsigned long long>(memory.gpuSize), static_cast<unsigned long long>(memory.cpuGpuSize),
-            static_cast<unsigned long long>(memory.maxFrameSize), memory.frameAlignment);
+    for (const auto& p : presets) {
+        config = Vdec2DecoderConfig{};
+        config.size = sizeof config;
+        config.resourceType = 1;
+        config.codecType = 1;
+        config.profile = p.profile;
+        config.maxLevel = p.maxLevel;
+        config.maxWidth = maxWidth;
+        config.maxHeight = maxHeight;
+        config.maxDpbFrames = p.dpbFrames;
+        config.pipelineDepth = 1;
+        config.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
+        config.cpuPriority = 700;  // Standard Sony thread priority (SCE_KERNEL_PRIO_FIFO_DEFAULT)
+        config.cpuAffinity = 0;    // Any core (unconstrained)
+        config.optimizeProgressive = 1;
+        memory = Vdec2DecoderMemory{};
+        memory.size = sizeof memory;
+        rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+        XC_LOGI("hwdec: query profile=%u level=%u dpb=%d -> 0x%08x: cpu %llu, gpu %llu, cpu+gpu %llu, frame %llu",
+                p.profile, p.maxLevel, p.dpbFrames, static_cast<unsigned>(rc),
+                static_cast<unsigned long long>(memory.cpuSize),
+                static_cast<unsigned long long>(memory.gpuSize), static_cast<unsigned long long>(memory.cpuGpuSize),
+                static_cast<unsigned long long>(memory.maxFrameSize));
+        if (rc == 0) break;
+    }
     if (rc != 0) return false;
     size_t cpuSize = align16k(memory.cpuSize);
     rc = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpuSize, 0x03, 0, "PSBoxVdecCpu");
@@ -198,20 +215,29 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     Vdec2Frame frame{sizeof(Vdec2Frame), frameBuffer_, frameBufferSize_, 0, 0};
     Vdec2Output info{};
     info.size = sizeof info;
+    uint64_t t0 = platform::nowUs();
     int rc = sceVideodec2Decode(decoder_, &in, &frame, &info);
+    uint64_t tDecode = platform::nowUs() - t0;
+    bool flushed = false;
+    uint64_t tFlush = 0;
     // Depth 1: a picture not out yet is flushed out.
     if (rc == 0 && !info.valid) {
+        flushed = true;
+        uint64_t tf0 = platform::nowUs();
         info = Vdec2Output{};
         info.size = sizeof info;
         rc = sceVideodec2Flush(decoder_, &frame, &info);
+        tFlush = platform::nowUs() - tf0;
     }
     static int logged = 0;
-    if ((rc != 0 || info.valid) && logged < 12) {
+    if (logged < 15) {
         ++logged;
-        XC_LOGI("hwdec: decode 0x%08x: valid %u error %u pictures %u, %ux%u pitch %u (%u bytes), format %u, "
+        XC_LOGI("hwdec: decode 0x%08x: valid %u error %u (decode %llu us, flush %llu us, flushed=%d), %ux%u pitch %u (%u bytes), "
                 "%llu bytes at %s",
-                static_cast<unsigned>(rc), info.valid, info.error, info.pictureCount, info.width, info.height,
-                info.pitch, info.pitchBytes, info.frameFormat, static_cast<unsigned long long>(info.bufferSize),
+                static_cast<unsigned>(rc), info.valid, info.error,
+                static_cast<unsigned long long>(tDecode), static_cast<unsigned long long>(tFlush), flushed ? 1 : 0,
+                info.width, info.height, info.pitch, info.pitchBytes,
+                static_cast<unsigned long long>(info.bufferSize),
                 info.buffer == frameBuffer_ ? "our buffer" : "another address");
     }
     if (rc != 0 || !info.valid) return false;
