@@ -287,6 +287,38 @@ public:
         return false;
     }
 
+    bool isTitlePackageDeployed(const std::string& npCommId, const std::string& sonyTitleId) override {
+        if (npCommId.empty()) return false;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!initialized_) const_cast<TrophyBackendPS5*>(this)->init(0);
+
+        // Verify TROPHY.UCP exists and has valid header size
+        std::string ucpPath = "/user/trophy2/nobackup/conf/" + npCommId + "/TROPHY.UCP";
+        struct stat stUcp{};
+        if (::stat(ucpPath.c_str(), &stUcp) != 0 || stUcp.st_size < 1024) {
+            return false;
+        }
+
+        // Verify TRPTITLE.DAT exists for active user and is non-empty
+        char dataPath[256];
+        snprintf(dataPath, sizeof(dataPath), "/user/home/%08x/trophy2/nobackup/data/%s/TRPTITLE.DAT",
+                 userId_, npCommId.c_str());
+        struct stat stDat{};
+        if (::stat(dataPath, &stDat) != 0 || stDat.st_size == 0) {
+            return false;
+        }
+
+        // Verify appmeta param.json for synthetic cloud titles (non-retail)
+        if (!sonyTitleId.empty() && sonyTitleId != "PPSA99810" && !isRetailInstalledGame(sonyTitleId)) {
+            std::string paramJson = "/system_data/priv/appmeta/" + sonyTitleId + "/param.json";
+            struct stat stParam{};
+            if (::stat(paramJson.c_str(), &stParam) != 0 || stParam.st_size == 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) override {
         std::lock_guard<std::mutex> lock(mutex_);
         (void)err;

@@ -35,7 +35,7 @@ TrophySyncEngine::TrophySyncEngine(std::unique_ptr<ITrophyBackend> backend)
 TrophySyncEngine::~TrophySyncEngine() = default;
 
 void TrophySyncEngine::setBackend(std::unique_ptr<ITrophyBackend> backend) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     backend_ = std::move(backend);
     initialized_ = false;
 }
@@ -53,12 +53,74 @@ std::string TrophySyncEngine::trophyCachePath(const std::string& xboxTitleId) co
 }
 
 bool TrophySyncEngine::init(uint32_t userId) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!backend_) backend_.reset(createPlatformTrophyBackend());
     if (backend_) {
         initialized_ = backend_->init(userId);
     }
     return initialized_;
+}
+
+bool TrophySyncEngine::loadTitleCacheSummary(const std::string& xboxTitleId, TitleCacheSummary& outSummary) {
+    if (xboxTitleId.empty()) return false;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        auto it = fastCacheIndex_.find(xboxTitleId);
+        if (it != fastCacheIndex_.end()) {
+            outSummary = it->second;
+            return true;
+        }
+    }
+
+    std::string cacheFile = trophyCachePath(xboxTitleId);
+    std::string raw;
+    if (!platform::readFile(cacheFile, raw) || raw.empty()) {
+        return false;
+    }
+
+    auto j = json::parse(raw);
+    if (!j || !j->isObject()) {
+        return false;
+    }
+
+    TitleCacheSummary sum;
+    sum.schemaVersion = static_cast<int>((*j)["schemaVersion"].asInt(0));
+    sum.unlockedCount = static_cast<int>((*j)["unlockedCount"].asInt(-1));
+    sum.totalCount = static_cast<int>((*j)["totalCount"].asInt(-1));
+    sum.unlockedGamerscore = static_cast<int>((*j)["unlockedGamerscore"].asInt(-1));
+    sum.totalGamerscore = static_cast<int>((*j)["totalGamerscore"].asInt(0));
+    sum.npCommId = (*j)["npCommId"].str();
+    sum.sonyTitleId = (*j)["sonyTitleId"].str();
+    sum.titleName = (*j)["titleName"].str();
+    sum.lastSync = static_cast<time_t>((*j)["lastSync"].asInt(0));
+
+    const auto& ids = (*j)["unlockedIds"];
+    if (ids.isArray()) {
+        for (const auto& id : ids.items()) {
+            if (id.isString() && id.str() == "__PLATINUM__") {
+                sum.hasPlatinum = true;
+                break;
+            }
+        }
+    }
+
+    outSummary = sum;
+    {
+        std::lock_guard<std::recursive_mutex> lock(mutex_);
+        fastCacheIndex_[xboxTitleId] = sum;
+    }
+    return true;
+}
+
+void TrophySyncEngine::updateTitleCacheSummary(const std::string& xboxTitleId, const TitleCacheSummary& summary) {
+    if (xboxTitleId.empty()) return;
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    fastCacheIndex_[xboxTitleId] = summary;
+}
+
+void TrophySyncEngine::clearFastCache() {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    fastCacheIndex_.clear();
 }
 
 namespace {
@@ -237,10 +299,32 @@ bool TrophySyncEngine::syncTitleAchievements(const std::string& xblAuth, const s
         ~SyncDepthGuard() { d.fetch_sub(1); }
     } guard(syncingDepth_);
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) {
         if (!backend_) backend_.reset(createPlatformTrophyBackend());
         if (backend_) initialized_ = backend_->init(0);
+    }
+
+    // 0a. Fast Skip for 0% titles: If no achievements earned on Xbox Live, skip package build immediately
+    if (expectedEarned == 0 && xboxTitleId != "267695549") {
+        return true;
+    }
+
+    // 0b. Fast Delta Skip for unchanged titles:
+    // If expected counts match local cache snapshot and the backend confirms trophy files are already deployed
+    if (expectedEarned > 0 && expectedGamerscore >= 0) {
+        TitleCacheSummary summary;
+        if (loadTitleCacheSummary(xboxTitleId, summary) &&
+            summary.schemaVersion == 2 &&
+            summary.unlockedCount == expectedEarned &&
+            summary.unlockedGamerscore == expectedGamerscore &&
+            !summary.npCommId.empty()) {
+            if (backend_ && backend_->isTitlePackageDeployed(summary.npCommId, summary.sonyTitleId)) {
+                // Instant delta skip: 100% up-to-date and intact!
+                newlyUnlocked = 0;
+                return true;
+            }
+        }
     }
 
     // Load local cache snapshot first so unchanged titles can reuse cached definitions
@@ -550,40 +634,59 @@ bool TrophySyncEngine::syncTitleAchievements(const std::string& xblAuth, const s
     }
 
     // 7. Save updated cache atomically with rich profile information
-    json::Value out = json::Value::object();
-    out.set("schemaVersion", static_cast<int64_t>(2));
-    out.set("xboxTitleId", xboxTitleId);
-    out.set("npCommId", titleSet.npCommId);
-    out.set("sonyTitleId", titleSet.sonyTitleId);
-    out.set("titleName", titleSet.titleName);
-    out.set("unlockedCount", static_cast<int64_t>(ach.unlockedCount));
-    out.set("totalCount", static_cast<int64_t>(ach.totalCount));
-    out.set("unlockedGamerscore", static_cast<int64_t>(ach.unlockedGamerscore));
-    out.set("totalGamerscore", static_cast<int64_t>(ach.totalGamerscore));
-    out.set("lastSync", static_cast<int64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
+    // Avoid redundant disk writes if nothing changed (delta sync optimization)
+    bool cacheDirty = (newlyUnlocked > 0 || anyIconDownloaded || cacheContent.empty());
+    if (cacheDirty) {
+        json::Value out = json::Value::object();
+        out.set("schemaVersion", static_cast<int64_t>(2));
+        out.set("xboxTitleId", xboxTitleId);
+        out.set("npCommId", titleSet.npCommId);
+        out.set("sonyTitleId", titleSet.sonyTitleId);
+        out.set("titleName", titleSet.titleName);
+        out.set("unlockedCount", static_cast<int64_t>(ach.unlockedCount));
+        out.set("totalCount", static_cast<int64_t>(ach.totalCount));
+        out.set("unlockedGamerscore", static_cast<int64_t>(ach.unlockedGamerscore));
+        out.set("totalGamerscore", static_cast<int64_t>(ach.totalGamerscore));
+        out.set("lastSync", static_cast<int64_t>(std::chrono::system_clock::to_time_t(std::chrono::system_clock::now())));
 
-    json::Value arr = json::Value::array();
-    for (const auto& id : prevUnlocked) {
-        arr.push(id);
+        json::Value arr = json::Value::array();
+        for (const auto& id : prevUnlocked) {
+            arr.push(id);
+        }
+        out.set("unlockedIds", std::move(arr));
+
+        json::Value trophiesArr = json::Value::array();
+        for (const auto& def : titleSet.items) {
+            json::Value t = json::Value::object();
+            t.set("id", static_cast<int64_t>(def.trophyId));
+            t.set("name", def.name);
+            t.set("description", def.description);
+            t.set("grade", gradeToString(def.grade));
+            t.set("gamerscore", static_cast<int64_t>(def.gamerscore));
+            t.set("unlocked", def.unlocked);
+            if (!def.iconUrl.empty()) t.set("iconUrl", def.iconUrl);
+            if (!def.timeUnlocked.empty()) t.set("timeUnlocked", def.timeUnlocked);
+            trophiesArr.push(std::move(t));
+        }
+        out.set("trophies", std::move(trophiesArr));
+
+        platform::writeFileAtomic(cacheFile, out.dump());
     }
-    out.set("unlockedIds", std::move(arr));
 
-    json::Value trophiesArr = json::Value::array();
-    for (const auto& def : titleSet.items) {
-        json::Value t = json::Value::object();
-        t.set("id", static_cast<int64_t>(def.trophyId));
-        t.set("name", def.name);
-        t.set("description", def.description);
-        t.set("grade", gradeToString(def.grade));
-        t.set("gamerscore", static_cast<int64_t>(def.gamerscore));
-        t.set("unlocked", def.unlocked);
-        if (!def.iconUrl.empty()) t.set("iconUrl", def.iconUrl);
-        if (!def.timeUnlocked.empty()) t.set("timeUnlocked", def.timeUnlocked);
-        trophiesArr.push(std::move(t));
-    }
-    out.set("trophies", std::move(trophiesArr));
+    // Always update fast in-memory summary
+    TitleCacheSummary sum;
+    sum.schemaVersion = 2;
+    sum.unlockedCount = ach.unlockedCount;
+    sum.totalCount = ach.totalCount;
+    sum.unlockedGamerscore = ach.unlockedGamerscore;
+    sum.totalGamerscore = ach.totalGamerscore;
+    sum.npCommId = titleSet.npCommId;
+    sum.sonyTitleId = titleSet.sonyTitleId;
+    sum.titleName = titleSet.titleName;
+    sum.hasPlatinum = platinumAwarded || (prevUnlocked.count("__PLATINUM__") > 0);
+    sum.lastSync = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+    updateTitleCacheSummary(xboxTitleId, sum);
 
-    platform::writeFileAtomic(cacheFile, out.dump());
     return true;
 }
 
@@ -634,20 +737,35 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
         XC_LOGW("trophy back-sync: fetchAchievementHistoryTitles failed: %s", histErr.c_str());
     }
 
-    // 2. Query TitleHub batch images for history titles with earned achievements
+    // 2. Query TitleHub batch images ONLY for titles lacking displayImage and lacking local disk icon
     std::unordered_map<std::string, std::string> titleImages;
     if (!historyTitles.empty()) {
         std::vector<std::string> idsForBatch;
         idsForBatch.reserve(historyTitles.size());
-        idsForBatch.push_back("267695549");
         for (const auto& h : historyTitles) {
-            if (h.earnedAchievements > 0 && h.titleId != "267695549") {
-                idsForBatch.push_back(h.titleId);
+            if (h.earnedAchievements <= 0 && h.titleId != "267695549") continue;
+            // If displayImage is already provided by history/titles, TitleHub is not needed
+            if (!h.displayImage.empty()) continue;
+
+            // If cover icon already exists on disk in cache, TitleHub is not needed
+            TitleCacheSummary sum;
+            if (loadTitleCacheSummary(h.titleId, sum) && !sum.npCommId.empty()) {
+                std::string icon0 = trophyCacheDir() + "/icons/" + sum.npCommId + "/icon0.png";
+                struct stat stIcon{};
+                if (::stat(icon0.c_str(), &stIcon) == 0 && stIcon.st_size > 100) {
+                    continue;
+                }
             }
+            idsForBatch.push_back(h.titleId);
         }
-        std::string imgErr;
-        xcloud::fetchTitleHubBatchImages(xblAuth, idsForBatch, titleImages, imgErr, ui::gameLocale());
-        XC_LOGI("trophy back-sync: fetched %zu cover images via TitleHub batch", titleImages.size());
+        if (!idsForBatch.empty()) {
+            std::string imgErr;
+            xcloud::fetchTitleHubBatchImages(xblAuth, idsForBatch, titleImages, imgErr, ui::gameLocale());
+            XC_LOGI("trophy back-sync: fetched %zu cover images via TitleHub batch (%zu already had cover/cached)",
+                    titleImages.size(), historyTitles.size() - idsForBatch.size());
+        } else {
+            XC_LOGI("trophy back-sync: all titles already have cover images; skipped TitleHub batch");
+        }
     }
 
     // Always prioritize Fortnite first for focused verification (AGENTS.md §8.1)
@@ -743,7 +861,7 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
                     std::string np = (*j)["npCommId"].str();
                     std::string sony = (*j)["sonyTitleId"].str();
                     if (!np.empty() && !isRetailInstalledGame(sony)) {
-                        std::lock_guard<std::mutex> lock(mutex_);
+                        std::lock_guard<std::recursive_mutex> lock(mutex_);
                         if (!backend_) backend_.reset(createPlatformTrophyBackend());
                         if (backend_) {
                             int rem = 0;
@@ -756,7 +874,10 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
             }
             continue;
         }
-        if (progressCb) {
+        static uint64_t s_lastProgressMs = 0;
+        uint64_t now = platform::nowMs();
+        if (progressCb && (i == 0 || i + 1 == titlesToSync.size() || (now - s_lastProgressMs) >= 50)) {
+            s_lastProgressMs = now;
             progressCb(static_cast<int>(i), static_cast<int>(titlesToSync.size()), item.titleName);
         }
         static const int kBackoffSeconds[] = { 1, 2, 4 };
@@ -770,6 +891,10 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
                                       item.tileUrl, true, item.earnedAchievements, item.currentGamerscore)) {
                 totalTitles++;
                 totalTrophies += newlyUnlocked;
+                if (newlyUnlocked > 0 && progressCb) {
+                    s_lastProgressMs = platform::nowMs();
+                    progressCb(static_cast<int>(i + 1), static_cast<int>(titlesToSync.size()), item.titleName);
+                }
                 break;
             }
 
@@ -815,7 +940,8 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
 
 bool TrophySyncEngine::removeAllTrophies(int& removedCount, std::string& err) {
     removedCount = 0;
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    fastCacheIndex_.clear();
 
     std::set<std::pair<std::string, std::string>> titleSet;
     titleSet.insert({"NPWR20561_00", "PPSA01922"}); // Fortnite
@@ -1125,15 +1251,30 @@ void trophyThreadMain() {
             if (!historyTitles.empty()) {
                 std::vector<std::string> idsForBatch;
                 idsForBatch.reserve(historyTitles.size());
-                idsForBatch.push_back("267695549");
                 for (const auto& h : historyTitles) {
-                    if (h.earnedAchievements > 0 && h.titleId != "267695549") {
-                        idsForBatch.push_back(h.titleId);
+                    if (h.earnedAchievements <= 0 && h.titleId != "267695549") continue;
+                    // If displayImage is already provided by history/titles, TitleHub is not needed
+                    if (!h.displayImage.empty()) continue;
+
+                    // If cover icon already exists on disk in cache, TitleHub is not needed
+                    TitleCacheSummary sum;
+                    if (syncEngine().loadTitleCacheSummary(h.titleId, sum) && !sum.npCommId.empty()) {
+                        std::string icon0 = syncEngine().trophyCacheDir() + "/icons/" + sum.npCommId + "/icon0.png";
+                        struct stat stIcon{};
+                        if (::stat(icon0.c_str(), &stIcon) == 0 && stIcon.st_size > 100) {
+                            continue;
+                        }
                     }
+                    idsForBatch.push_back(h.titleId);
                 }
-                std::string imgErr;
-                xcloud::fetchTitleHubBatchImages(ctx.xblAuth, idsForBatch, titleImages, imgErr, ui::gameLocale());
-                XC_LOGI("trophy thread: fetched %zu cover images via TitleHub batch", titleImages.size());
+                if (!idsForBatch.empty()) {
+                    std::string imgErr;
+                    xcloud::fetchTitleHubBatchImages(ctx.xblAuth, idsForBatch, titleImages, imgErr, ui::gameLocale());
+                    XC_LOGI("trophy thread: fetched %zu cover images via TitleHub batch (%zu already had cover/cached)",
+                            titleImages.size(), historyTitles.size() - idsForBatch.size());
+                } else {
+                    XC_LOGI("trophy thread: all titles already have cover images; skipped TitleHub batch");
+                }
             }
 
             std::unordered_set<std::string> seenXboxTitles;
@@ -1242,7 +1383,7 @@ void trophyThreadMain() {
             bool ok = syncEngine().syncTitleAchievements(currentTask.xblAuth, currentTask.xuid,
                                                          currentTask.xboxTitleId, currentTask.titleName,
                                                          newlyUnlocked, err, currentTask.tileUrl,
-                                                         /*fetchTrophyIcons=*/true);
+                                                         /*fetchTrophyIcons=*/false);
             if (ok && newlyUnlocked > 0) {
                 XC_LOGI("trophy poll: unlocked %d trophies during stream for %s!",
                         newlyUnlocked, currentTask.titleName.c_str());
@@ -1465,7 +1606,12 @@ void trophyThreadMain() {
             int total = g_trophyTitlesTotal.load();
 
             if (ctx.progressCb && (!ctx.isStreaming || !ctx.isStreaming())) {
-                ctx.progressCb(true, done, total, currentTask.titleName);
+                static uint64_t s_lastThreadProgressMs = 0;
+                uint64_t now = platform::nowMs();
+                if (done == total || titleOk || (now - s_lastThreadProgressMs) >= 50) {
+                    s_lastThreadProgressMs = now;
+                    ctx.progressCb(true, done, total, currentTask.titleName);
+                }
             }
 
             // Check if batch is finished
@@ -1594,10 +1740,7 @@ bool dispatchStreamPoll(const std::string& xblAuth, const std::string& xuid,
     if (xboxTitleId.empty() || xblAuth.empty()) return false;
 
     if (!g_trophyThreadRunning.load()) {
-        int newlyUnlocked = 0;
-        std::string err;
-        return syncEngine().syncTitleAchievements(xblAuth, xuid, xboxTitleId, titleName,
-                                                  newlyUnlocked, err, tileUrl, true);
+        return false;
     }
 
     {

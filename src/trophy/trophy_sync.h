@@ -11,9 +11,23 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace xc::trophy {
+
+struct TitleCacheSummary {
+    int schemaVersion = 0;
+    int unlockedCount = -1;
+    int totalCount = -1;
+    int unlockedGamerscore = -1;
+    int totalGamerscore = -1;
+    std::string npCommId;
+    std::string sonyTitleId;
+    std::string titleName;
+    bool hasPlatinum = false;
+    time_t lastSync = 0;
+};
 
 class TrophySyncEngine {
 public:
@@ -59,12 +73,18 @@ public:
     std::string trophyCacheDir() const;
     std::string trophyCachePath(const std::string& xboxTitleId) const;
 
+    // Fast Delta Sync Cache Index (ultra-low overhead memory-backed cache summary)
+    bool loadTitleCacheSummary(const std::string& xboxTitleId, TitleCacheSummary& outSummary);
+    void updateTitleCacheSummary(const std::string& xboxTitleId, const TitleCacheSummary& summary);
+    void clearFastCache();
+
 private:
     std::unique_ptr<ITrophyBackend> backend_;
-    std::mutex mutex_;
+    std::recursive_mutex mutex_;
     std::atomic<bool> pollInFlight_{false};
     std::atomic<int> syncingDepth_{0};
     bool initialized_ = false;
+    std::unordered_map<std::string, TitleCacheSummary> fastCacheIndex_;
 };
 
 // Global singleton instance

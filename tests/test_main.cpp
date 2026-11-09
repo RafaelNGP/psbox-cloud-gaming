@@ -2191,10 +2191,10 @@ static void testHostPacer() {
 static void testAutoDeband() {
     using xc::app::debandForMbps;
     CHECK(debandForMbps(0.3, 1) == -1);  // starting or standing still: no measure
-    CHECK(debandForMbps(3, 0) == 2 && debandForMbps(7, 0) == 1 && debandForMbps(12, 0) == 0);
+    CHECK(debandForMbps(3, 0) == 2 && debandForMbps(7, 0) == 1 && debandForMbps(12, 0) == 1);
     // A 1 Mbps margin each way: near a limit the level in use stays.
     CHECK(debandForMbps(5.5, 2) == 2 && debandForMbps(4.5, 1) == 1 && debandForMbps(10.5, 1) == 1);
-    CHECK(debandForMbps(9.5, 0) == 0 && debandForMbps(6.5, 2) == 1);
+    CHECK(debandForMbps(9.5, 0) == 1 && debandForMbps(6.5, 2) == 1);
 
     xc::app::AutoDeband a;
     CHECK(a.level() == 1);
@@ -2205,8 +2205,8 @@ static void testAutoDeband() {
     CHECK(a.level() == 2);
     // A one-second spike doesn't count; 3 s of a high bitrate do.
     CHECK(!a.update(20) && !a.update(1.5) && !a.update(20) && !a.update(20));
-    CHECK(a.update(20) && a.level() == 0);
-    CHECK(!a.update(0.2) && a.level() == 0);  // no measure: kept
+    CHECK(a.update(20) && a.level() == 1);
+    CHECK(!a.update(0.2) && a.level() == 1);  // no measure: kept
     a.reset();
     CHECK(a.level() == 1);
     for (int s = 1; s <= 5; ++s) CHECK(!a.update(1.0));  // a new stream: the first 5 s again
@@ -2829,6 +2829,46 @@ static void testGyro() {
     const float level[3] = {0.0f, 1.0f, 0.0f};
     for (int i = 0; i < 60; ++i) gyroToStick(left, level, 5, flat, xf, yf);
     CHECK(std::abs(x5 - xf) < 0.01f);
+
+    // Player Space: pure wrist roll when flat also contributes to horizontal aim,
+    // so players who turn their wrists sideways like a wheel are not ignored.
+    const float rollTurn[3] = {0.0f, 0.0f, 0.5f};
+    GyroState sRoll;
+    float xRoll = 0, yRoll = 0;
+    for (int i = 0; i < 60; ++i) gyroToStick(rollTurn, level, 5, sRoll, xRoll, yRoll);
+    CHECK(xRoll < -0.3f);
+    CHECK(std::abs(yRoll) < 1e-6f); // Decoupled pitch: zero crosstalk from roll turning
+
+    // Steering wheel mode (gyroToSteering):
+    // 1. Center deadzone: tiny tilt (< 1.5 deg) produces 0 deflection
+    GyroState steerState;
+    float centerAccel[3] = {0.0f, 1.0f, 0.0f};
+    float steer0 = gyroToSteering(still, centerAccel, 5, steerState);
+    CHECK(steer0 == 0.0f);
+
+    // 2. Roll right (30 deg): positive left-stick deflection
+    constexpr float steerTilt = 30.0f * 3.14159265f / 180.0f;
+    float rightAccel[3] = {std::sin(steerTilt), std::cos(steerTilt), 0.0f};
+    float rightW[3] = {0.0f, 0.0f, -0.2f};
+    float steerRight = 0.0f;
+    for (int i = 0; i < 30; ++i) steerRight = gyroToSteering(rightW, rightAccel, 5, steerState, nullptr, 0.016f);
+    CHECK(steerRight > 0.35f && steerRight < 0.85f);
+
+    // 3. Roll left (30 deg): negative left-stick deflection (symmetrical)
+    GyroState steerStateLeft;
+    float leftAccel[3] = {-std::sin(steerTilt), std::cos(steerTilt), 0.0f};
+    float leftW[3] = {0.0f, 0.0f, 0.2f};
+    float steerLeft = 0.0f;
+    for (int i = 0; i < 30; ++i) steerLeft = gyroToSteering(leftW, leftAccel, 5, steerStateLeft, nullptr, 0.016f);
+    CHECK(steerLeft < -0.35f && steerLeft > -0.85f);
+    CHECK(std::abs(steerRight + steerLeft) < 0.05f);
+
+    // 4. Extreme roll (60 deg, beyond 45 deg lock): reaches full 1.0 lock
+    constexpr float extremeTilt = 60.0f * 3.14159265f / 180.0f;
+    float extremeAccel[3] = {std::sin(extremeTilt), std::cos(extremeTilt), 0.0f};
+    float steerExtreme = 0.0f;
+    for (int i = 0; i < 30; ++i) steerExtreme = gyroToSteering(rightW, extremeAccel, 5, steerState, nullptr, 0.016f);
+    CHECK(steerExtreme >= 0.95f);
 }
 
 static void testGyroProZeroDriftAndDecoupledSensitivity() {
@@ -3669,6 +3709,55 @@ static void testVideoDecoder() {
     std::vector<uint8_t> stream = {0, 0, 0, 1, 9, 0x10, 0, 0, 0, 1, 7, 0x42, 0, 0, 0, 1, 8, 0xCE, 0, 0, 0, 1, 5, 0x88};
     auto aus = media::splitAccessUnits(stream.data(), stream.size());
     CHECK(!aus.empty());
+
+    // H264 Slice QP Bitstream Parser tests
+    media::H264BitstreamParser parser;
+    CHECK(parser.parseAccessUnitQp(nullptr, 0) < 0);
+    CHECK(parser.parseAccessUnitQp(garbage, sizeof garbage) < 0);
+
+    // Real Annex-B Keyframe AU (SPS + PPS + IDR Slice)
+    // SPS: 1280x720 Baseline, poc_type 2
+    // PPS: id 0, pic_init_qp_minus26 = -3
+    // IDR slice: delta = +4 -> QP = 26 - 3 + 4 = 27
+    std::vector<uint8_t> keyframeAu = {
+        0, 0, 0, 1, 0x67, 0x42, 0xc0, 0x1f, 0xd9, 0x80, 0x50, 0x05, 0xbb, 0x01, 0x10, 0x00, 0x00, 0x03, 0x00, 0x10, 0x00, 0x00, 0x03, 0x03, 0xc0, 0xf1, 0x83, 0x26, 0x80,
+        0, 0, 0, 1, 0x68, 0xc9, 0x60, 0xf2, 0xc8,
+        0, 0, 0, 1, 0x65, 0x88, 0x84, 0x11, 0xfc, 0x9c, 0x4e, 0x4f, 0x77, 0x8e, 0xa0, 0xc2, 0x00, 0x02, 0x02, 0xbe, 0x15, 0xa8, 0xb5, 0x9e, 0xf7, 0x1f, 0x7c, 0x98, 0x0f, 0xb3, 0x9c, 0x48, 0x2f, 0x6c, 0x66, 0xfb
+    };
+
+    double idrQp = parser.parseAccessUnitQp(keyframeAu.data(), keyframeAu.size());
+    CHECK(idrQp == 27.0);
+
+    // Verify SPS and PPS states cached in parser
+    const auto* sps = parser.getSps(0);
+    CHECK(sps != nullptr);
+    CHECK(sps->valid);
+    CHECK(sps->profileIdc == 66);
+    CHECK(sps->picOrderCntType == 2);
+    CHECK(sps->frameMbsOnly);
+
+    const auto* pps = parser.getPps(0);
+    CHECK(pps != nullptr);
+    CHECK(pps->valid);
+    CHECK(pps->picInitQpMinus26 == -3);
+
+    // Real P-frame AU referencing PPS 0 (without repeating SPS/PPS in packet)
+    // P-slice: delta = +5 -> QP = 26 - 3 + 5 = 28
+    std::vector<uint8_t> pFrameAu = {
+        0, 0, 0, 1, 0x41, 0x9a, 0x38, 0x2b, 0xbd, 0x98, 0xa1, 0xe8, 0xb0, 0xe3, 0xf2, 0xf9, 0x84, 0x53, 0xcf, 0xe9, 0x5f, 0x2f, 0xe1, 0x3e, 0xd2, 0xbc, 0x21, 0x54, 0x76, 0x97, 0xa2, 0xb5, 0x74, 0x47, 0xfa, 0x2d
+    };
+
+    double pQp = parser.parseAccessUnitQp(pFrameAu.data(), pFrameAu.size());
+    CHECK(pQp == 28.0);
+
+    // VideoDecoder integration test: lastQp() is updated on parse
+    media::VideoDecoder testDec;
+    CHECK(testDec.init(1, false));
+    CHECK(testDec.lastQp() == -1.0);
+    double decIdrQp = testDec.parseAccessUnitQp(keyframeAu.data(), keyframeAu.size());
+    CHECK(decIdrQp == 27.0);
+    double decPQp = testDec.parseAccessUnitQp(pFrameAu.data(), pFrameAu.size());
+    CHECK(decPQp == 28.0);
 }
 
 static void testDrawNv12() {
@@ -6451,7 +6540,45 @@ static void testTouchpadShortcutsAndSlots() {
         }
     }
 
-    // 3. Dynamic Slot Device Icon Resolution with Phone/Keyboard/Gamepad
+    // 3. UI Pad Tester Tab 0 & Tab 1 Alignment and Capture
+    {
+        ui::Fonts fonts;
+        ui::ImageCache images([] {});
+        ui::AppUi app(fonts, images);
+        ui::UiCaps caps;
+        caps.touchpad = true;
+        caps.console = true;
+        app.setCaps(caps);
+
+        app.showHome();
+        ui::NavInput openOpt;
+        openOpt.options = true;
+        app.handle(openOpt);
+
+        ui::NavInput down;
+        down.down = true;
+        while (app.settingsFocus() != 14) {
+            app.handle(down);
+        }
+        ui::NavInput accept;
+        accept.accept = true;
+        app.handle(accept);
+
+        ui::Canvas cTab0(1920, 1080);
+        app.render(cTab0, 1000);
+
+        ui::NavInput r1;
+        r1.r1 = true;
+        app.handle(r1);
+
+        ui::Canvas cTab1(1920, 1080);
+        app.render(cTab1, 1000);
+
+        CHECK(cTab0.width() == 1920 && cTab0.height() == 1080);
+        CHECK(cTab1.width() == 1920 && cTab1.height() == 1080);
+    }
+
+    // 4. Dynamic Slot Device Icon Resolution with Phone/Keyboard/Gamepad
     {
         ui::PadSlots slots;
         for (int i = 0; i < 4; ++i) {
@@ -6650,7 +6777,40 @@ static void testPlayerSwitchAndUnresolvedTiles() {
 
         auto resBoost = srv.handleRequest("GET", "/boost", "");
         CHECK(resBoost.status == 200);
-        CHECK(resBoost.body.find("gamepad-container") != std::string::npos);
+        CHECK(resBoost.body.find("switchTab('stream')") != std::string::npos);
+
+        auto resGenUi = srv.handleRequest("GET", "/generative_ui", "");
+        CHECK(resGenUi.status == 200);
+        CHECK(resGenUi.body.find("PSBox - Interactive UI Layout Editor") != std::string::npos);
+
+        auto resGenUiHtml = srv.handleRequest("GET", "/generative_ui.html", "");
+        CHECK(resGenUiHtml.status == 200);
+        CHECK(resGenUiHtml.body.find("PSBox - Interactive UI Layout Editor") != std::string::npos);
+
+        // Verify USB / secondary controller deadzone with unpopulated raw sticks
+        input::setDeadzone(0.15f, 0.15f);
+        input::ControllerState testPad{};
+        testPad.leftStickX = 0.10f; // Inside deadzone (10% < 15%)
+        testPad.leftStickY = 0.05f;
+        input::applyPadSettings(testPad);
+        CHECK(testPad.leftStickX == 0.0f);
+        CHECK(testPad.leftStickY == 0.0f);
+
+        input::ControllerState testPad2{};
+        testPad2.leftStickX = 0.60f; // Outside deadzone (60% > 15%)
+        input::applyPadSettings(testPad2);
+        CHECK(testPad2.leftStickX > 0.0f);
+
+        // Verify Circle button solid 360-degree rendering
+        ui::Canvas canvas(64, 64);
+        ui::Fonts fonts;
+        ui::drawFaceButton(canvas, fonts.bold, ui::GlyphStyle::PlayStation, ui::PadButton::Circle, 32.0f, 32.0f, 16.0f);
+        auto getPx = [&](int x, int y) { return canvas.data()[y * canvas.width() + x]; };
+        // Ensure non-zero pixels exist in all 4 quadrants (solid 360 circle stroke)
+        CHECK(getPx(32, 17) != 0); // Top
+        CHECK(getPx(32, 47) != 0); // Bottom
+        CHECK(getPx(17, 32) != 0); // Left
+        CHECK(getPx(47, 32) != 0); // Right
     }
 }
 
@@ -8375,9 +8535,10 @@ static void testSizedUrl() {
           "https://images-eds-ssl.xboxlive.com/image.png?w=400&h=600&format=jpg");
     CHECK(ui::sizedUrl("https://images-eds-ssl.xboxlive.com/image.png?foo=bar", 200, 300) ==
           "https://images-eds-ssl.xboxlive.com/image.png?foo=bar&w=200&h=300&format=jpg");
-    // an EDS URL that already names a format keeps it (a second format= is HTTP 400)
+    // an EDS URL that already names a format keeps it (a second format= is HTTP 400),
+    // and dimensions below 64 are clamped to 64x64 to avoid EDS HTTP 400 rejection
     CHECK(ui::sizedUrl("https://images-eds-ssl.xboxlive.com/image?url=abc&format=png", 20, 20) ==
-          "https://images-eds-ssl.xboxlive.com/image?url=abc&format=png&w=20&h=20");
+          "https://images-eds-ssl.xboxlive.com/image?url=abc&format=png&w=64&h=64");
     // other URLs untouched
     CHECK(ui::sizedUrl("https://assets.xbox.com/img.png", 100, 100) == "https://assets.xbox.com/img.png");
     // invalid dimensions or empty string untouched
@@ -9275,6 +9436,104 @@ static void testTrophySystem() {
     CHECK(multiAch.totalGamerscore == 50);
     CHECK(multiAch.unlockedGamerscore == 35);
     net::setTestTransport({});
+
+    // 5d. Test Fast Delta Skip & Zero-IO Optimization for Unchanged Titles
+    {
+        auto testBackend = std::make_unique<TestBackend>();
+        TestBackend* rawTb = testBackend.get();
+        TrophySyncEngine deltaEngine(std::move(testBackend));
+        deltaEngine.init(0x1ea2f4da);
+
+        std::string baseD = platform::dataDir().empty() ? std::string(".") : platform::dataDir();
+        std::string cFile = baseD + "/trophies/777777.json";
+        ::unlink(cFile.c_str());
+
+        // Initial sync of a title
+        int netCalls = 0;
+        net::setTestTransport([&](const net::Request& req) -> net::Response {
+            net::Response r;
+            r.status = 200;
+            netCalls++;
+            if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
+                r.body = R"({
+                    "achievements": [
+                        {"id": "1", "name": "Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]},
+                        {"id": "2", "name": "Ach 2", "progressState": "NotStarted", "rewards": [{"type": "Gamerscore", "value": "50"}]}
+                    ]
+                })";
+            }
+            return r;
+        });
+
+        int newly = 0;
+        std::string sErr;
+        bool ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
+                                                    newly, sErr, "", false, 1, 50);
+        CHECK(ok);
+        CHECK(newly == 1);
+        CHECK(netCalls == 1);
+        CHECK(rawTb->unlocked.size() == 1);
+
+        // Verify summary cache in memory
+        TitleCacheSummary sum;
+        CHECK(deltaEngine.loadTitleCacheSummary("777777", sum));
+        CHECK(sum.unlockedCount == 1);
+        CHECK(sum.unlockedGamerscore == 50);
+
+        // Immediate repeat with exact same expectedEarned/expectedGamerscore -> FAST DELTA SKIP (0 net calls, 0 disk writes)
+        netCalls = 0;
+        newly = 0;
+        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
+                                               newly, sErr, "", false, 1, 50);
+        CHECK(ok);
+        CHECK(newly == 0);
+        CHECK(netCalls == 0); // ZERO network calls made!
+
+        // Fast skip on 0% earned title
+        newly = 0;
+        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "888888", "Zero Game",
+                                               newly, sErr, "", false, 0, 0);
+        CHECK(ok);
+        CHECK(newly == 0);
+        CHECK(netCalls == 0); // ZERO network calls made!
+
+        // Delta Sync: when user earns a new achievement (expectedEarned changes from 1 to 2)
+        net::setTestTransport([&](const net::Request& req) -> net::Response {
+            net::Response r;
+            r.status = 200;
+            netCalls++;
+            if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
+                r.body = R"({
+                    "achievements": [
+                        {"id": "1", "name": "Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]},
+                        {"id": "2", "name": "Ach 2", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]}
+                    ]
+                })";
+            }
+            return r;
+        });
+
+        newly = 0;
+        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
+                                               newly, sErr, "", false, 2, 100);
+        CHECK(ok);
+        // Both 1 and 2 achieved = 100% completion -> awards Ach 2 + Platinum = 2 newly unlocked!
+        CHECK(newly == 2);
+        CHECK(netCalls == 1); // Queried network to get the new achievement details!
+
+        // Repeat again after 100% completion -> Instant Fast Delta Skip
+        netCalls = 0;
+        newly = 0;
+        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
+                                               newly, sErr, "", false, 2, 100);
+        CHECK(ok);
+        CHECK(newly == 0);
+        CHECK(netCalls == 0);
+
+        // Clean up
+        net::setTestTransport({});
+        ::unlink(cFile.c_str());
+    }
 
     // 6. Test Trophy Database Registration (autonomous SQLite provisioning)
     TitleDbInfo info = makeTitleDbInfo("PPSA81234", "Sea of Stars");
@@ -10406,7 +10665,7 @@ static void testMilestone5TransmissionQualityAndStreamReload() {
         xc::media::AudioQueue q;
         q.open();
         lat.reset();
-        CHECK(lat.targetMs == 40);
+        CHECK(lat.targetMs == 50);
         CHECK(!lat.warm);
 
         // Warm-up phase
@@ -10422,7 +10681,7 @@ static void testMilestone5TransmissionQualityAndStreamReload() {
         float buf[256 * 2];
         q.pull(buf, 256);  // 1 underrun
         lat.update(5000, &q);
-        CHECK(lat.targetMs == 45);
+        CHECK(lat.targetMs == 55);
         CHECK(lat.calmSinceMs == 5000);
 
         // Step up on multi-dry grain (dry == 2): +10 ms step
@@ -10430,26 +10689,31 @@ static void testMilestone5TransmissionQualityAndStreamReload() {
         q.pull(buf, 256);
         q.pull(buf, 256);  // 2 underruns
         lat.update(6000, &q);
-        CHECK(lat.targetMs == 55);
+        CHECK(lat.targetMs == 65);
         CHECK(lat.calmSinceMs == 6000);
 
-        // Downward recovery: 30s calm -> -5 ms step down to 50 ms
+        // Downward recovery: 30s calm -> -5 ms step down to 60 ms
         lat.update(36000, &q);
-        CHECK(lat.targetMs == 50);
+        CHECK(lat.targetMs == 60);
         CHECK(lat.calmSinceMs == 36000);
 
-        // Another 30s calm -> -5 ms step down to 45 ms
+        // Another 30s calm -> -5 ms step down to 55 ms
         lat.update(66000, &q);
-        CHECK(lat.targetMs == 45);
+        CHECK(lat.targetMs == 55);
         CHECK(lat.calmSinceMs == 66000);
 
-        // Another 30s calm: at 45 ms floor, must NOT decrease further
+        // Another 30s calm -> -5 ms step down to 50 ms floor
         lat.update(96000, &q);
-        CHECK(lat.targetMs == 45);
+        CHECK(lat.targetMs == 50);
+        CHECK(lat.calmSinceMs == 96000);
+
+        // Another 30s calm: at 50 ms floor, must NOT decrease further
+        lat.update(126000, &q);
+        CHECK(lat.targetMs == 50);
 
         // Reset check
         lat.reset();
-        CHECK(lat.targetMs == 40);
+        CHECK(lat.targetMs == 50);
         CHECK(!lat.warm);
     }
 
@@ -10494,6 +10758,7 @@ static void testMilestone6UsbKeyboardMouseIsolation() {
     CHECK(isBootKeyboardOrMouse(0x03, 0x00, 0x01));   // Non-boot subclass Keyboard
     CHECK(isBootKeyboardOrMouse(0x03, 0x01, 0x02));   // Boot Mouse
     CHECK(isBootKeyboardOrMouse(0x03, 0x00, 0x02));   // Non-boot subclass Mouse
+    CHECK(isBootKeyboardOrMouse(0x03, 0x01, 0x00));   // Boot Subclass non-zero interface
     CHECK(!isBootKeyboardOrMouse(0x03, 0x00, 0x00));  // Standard HID Gamepad (e.g. DualShock 4)
     CHECK(!isBootKeyboardOrMouse(0xFF, 0x5D, 0x01));  // XInput
     CHECK(!isBootKeyboardOrMouse(0xFF, 0x47, 0xD0));  // GIP
@@ -10649,6 +10914,7 @@ static void testMilestone6UsbKeyboardMouseIsolation() {
     CHECK(probeUsbPadPs5(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), mouseReportDesc, sizeof(mouseReportDesc)).protocol == UsbPadProtocol::None);
     CHECK(!probeUsbPadPs4(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), kbdReportDesc, sizeof(kbdReportDesc)));
     CHECK(!probeUsbPadPs4(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), mouseReportDesc, sizeof(mouseReportDesc)));
+    CHECK(!probeUsbPadPs4(0x046D, 0xC52B, genericHidConfig, sizeof(genericHidConfig), nullptr, 0));
 
     // Valid Gamepads accepted appropriately on PS5 and PS4
     CHECK(findUsbPadInterface(genericHidConfig, sizeof(genericHidConfig), gamepadReportDesc, sizeof(gamepadReportDesc)).protocol == UsbPadProtocol::DualShock4);

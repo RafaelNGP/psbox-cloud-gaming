@@ -26,6 +26,11 @@ public:
     // Checks if trophy is already recorded as unlocked in backend
     virtual bool isTrophyUnlocked(const std::string& npCommId, int trophyId) = 0;
 
+    // Checks if title's trophy package and user data are already fully deployed and intact
+    virtual bool isTitlePackageDeployed(const std::string& npCommId, const std::string& sonyTitleId) {
+        (void)npCommId; (void)sonyTitleId; return true;
+    }
+
     // Flushes pending trophy commits to the system profile/database
     virtual void flush() {}
 
