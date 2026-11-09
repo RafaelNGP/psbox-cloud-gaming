@@ -107,6 +107,9 @@ public:
     int upscaler() const { return upscaler_; }
     bool hasCustomProfile() const { return hasCustomProfile_; }
     void setHasCustomProfile(bool custom) { hasCustomProfile_ = custom; }
+    bool showQr() const { return showQr_; }
+    void setShowQr(bool s) { showQr_ = s; }
+
     int triggerStrength() const { return triggerStrength_; }
     void setTriggerStrength(int strength) { triggerStrength_ = strength; }
     int triggerHz() const { return triggerHz_; }
@@ -277,6 +280,7 @@ private:
     int fpsLimit_ = 0;
     int maxBitrateMbps_ = 0;
     bool highRefresh_ = false;
+    bool showQr_ = true;
     int sharpness_ = 0, deband_ = 1, upscaler_ = 0, debandInUse_ = 1;
     bool resolutionAsked_ = false;
     bool circleConfirms_ = false;

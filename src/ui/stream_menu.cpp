@@ -243,6 +243,11 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         return MenuAction::Close;
     }
 
+    if (in.triangle) {
+        showQr_ = !showQr_;
+        return MenuAction::None;
+    }
+
     // Shoulder tabs switching (L1 / R1)
     if (in.l1) {
         activeTab_ = (activeTab_ == MenuTab::Controls) ? MenuTab::General : MenuTab::Controls;
@@ -346,7 +351,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         return MenuAction::ConfirmButton;
     }
     if (selected_ == GyroItem && (in.left || in.right)) {
-        gyroMode_ = in.right ? (gyroMode_ + 1) % 3 : (gyroMode_ + 2) % 3;
+        gyroMode_ = in.right ? (gyroMode_ + 1) % 5 : (gyroMode_ + 4) % 5;
         return MenuAction::Gyro;
     }
     if (selected_ == GyroItem && in.accept) {
@@ -573,10 +578,21 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     int tabY = 66, tabH = 34;
     {
         int bx = kPad;
+        constexpr int badgeW = 36, badgeH = 24;
+        const int badgeY = tabY + (tabH - badgeH) / 2;
+
+        auto drawBadge = [&](const char* text, int x) {
+            Rect r{x, badgeY, badgeW, badgeH};
+            c.fillRect(r, rgba(255, 255, 255, 30), 4);
+            int tw = fonts_.bold.measure(text, 14);
+            int tx = r.x + (r.w - tw) / 2;
+            int ty = fonts_.bold.centeredY(r.y, r.h, 14);
+            fonts_.bold.draw(c, text, tx, ty, 14, kWhite);
+        };
+
         // L1 badge
-        c.fillRect({bx, tabY + 4, 34, 24}, rgba(255, 255, 255, 30), 4);
-        fonts_.bold.draw(c, "L1", bx + 8, fonts_.bold.centeredY(tabY + 4, 24, 14), 14, kWhite);
-        bx += 42;
+        drawBadge("L1", bx);
+        bx += badgeW + 8;
 
         // General Tab
         bool genActive = (activeTab_ == MenuTab::General);
@@ -609,13 +625,11 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         bx += cw + 10;
 
         // R1 badge
-        c.fillRect({bx, tabY + 4, 34, 24}, rgba(255, 255, 255, 30), 4);
-        fonts_.bold.draw(c, "R1", bx + 7, fonts_.bold.centeredY(tabY + 4, 24, 14), 14, kWhite);
+        drawBadge("R1", bx);
     }
 
     // The Items List
     constexpr int kRowH = 38, kTop = 128, kPx = 18, kMaxVisible = 14;
-    constexpr int kLeaveGap = 32;
     int shownList[ItemCount];
     int totalShown = 0;
     int selIdx = 0;
@@ -632,7 +646,12 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
 
     for (int v = 0; v < visibleCount; ++v) {
         int i = shownList[startIdx + v];
-        int rowY = kTop + v * kRowH + ((activeTab_ == MenuTab::General && i == Leave) ? kLeaveGap : 0);
+        constexpr int kStatsSepY = 704;
+        constexpr int kLeaveMarginBottom = 18;
+        const int kLeaveTargetY = kStatsSepY - kLeaveMarginBottom - (kRowH - 4); // 704 - 18 - 34 = 652
+        int rowY = (activeTab_ == MenuTab::General && i == Leave)
+            ? std::max(kTop + v * kRowH + 16, kLeaveTargetY)
+            : (kTop + v * kRowH);
         Rect row{kPad - 16, rowY, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
@@ -745,6 +764,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         if (i == GyroItem) {
             value = tr(gyroMode_ == 1 ? Str::GyroAlways
                      : gyroMode_ == 2 ? Str::GyroAiming
+                     : gyroMode_ == 3 ? Str::GyroSteering
+                     : gyroMode_ == 4 ? Str::GyroSteeringDrive
                                       : Str::Off);
             if (sel) value = "< " + value + " >";
         }
@@ -858,24 +879,33 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
 
     // 4. Dynamic Description of Selected Option & Button Hints at bottom
+    const int hy = kMenuH - 46;
     c.fillRect({kPad, 930, kMenuW - 2 * kPad, 1}, rgba(50, 50, 50));
     {
         const char* desc = itemDescription(selected_);
         if (desc && desc[0] != '\0') {
-            auto lines = fonts_.regular.wrap(desc, 15, kMenuW - 2 * kPad, 2);
-            int gy = 944;
-            for (const auto& l : lines) {
-                fonts_.regular.draw(c, l, kPad, gy, 15, kDim);
-                gy += 20;
+            constexpr int kDescPx = 15;
+            constexpr int kLineH = 20;
+            auto lines = fonts_.regular.wrap(desc, kDescPx, kMenuW - 2 * kPad, 2);
+            if (!lines.empty()) {
+                const int nLines = static_cast<int>(lines.size());
+                const int textH = (nLines - 1) * kLineH + kDescPx;
+                const int boxTop = 930;
+                const int boxBottom = hy; // 1018
+                int gy = boxTop + (boxBottom - boxTop - textH) / 2;
+                for (const auto& l : lines) {
+                    fonts_.regular.draw(c, l, kPad, gy, kDescPx, kDim);
+                    gy += kLineH;
+                }
             }
         }
     }
 
-    // Side Card: SmartGlass Web Gamepad QR Card (permanent unless customizing)
-    if (!statsCustomizing_ && !touchpadCustomizing_) {
+    // Side Card: SmartGlass Web Gamepad QR Card (permanent unless customizing or hidden by user)
+    if (showQr_ && !statsCustomizing_ && !touchpadCustomizing_) {
         const int cardX = kMenuW + kCardGap;
         const int cardY = 204;
-        WebControlCard::drawCard(c, fonts_, cardX, cardY, kCardW, 640);
+        WebControlCard::drawCard(c, fonts_, cardX, cardY, kCardW, 640, "", "");
     }
 
     const bool subItem = (selected_ == Stats || selected_ == Triggers || selected_ == DeadzoneItem ||
@@ -884,7 +914,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                              : subItem              ? tr(Str::Adjust)
                                                     : tr(Str::Select);
 
-    int hy = kMenuH - 46, x = kPad;
+    int x = kPad;
 
     // Action Hints
     if (g_keyboardHints) {
@@ -896,18 +926,22 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             return kw;
         };
         int kw = cap("Enter");
-        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 24;
+        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
+        kw = cap("T");
+        x = fonts_.semibold.draw(c, "QR Code", x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
         kw = cap("Esc");
-        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 24;
+        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
         kw = cap("Q/E");
         fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray);
         return c;
     }
 
     icon(!circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, confirmLabel, x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 28;
+    x = fonts_.semibold.draw(c, confirmLabel, x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
+    ui::drawFaceButton(c, fonts_.bold, g_glyphStyle, PadButton::Triangle, static_cast<float>(x + 13), static_cast<float>(hy + 12), 13.0f);
+    x = fonts_.semibold.draw(c, "QR Code", x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
     icon(circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 28;
+    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
 
     // L1 / R1 Tab Switch Hint (separated with clear spacing)
     const char* tabBadge = "L1 / R1";
