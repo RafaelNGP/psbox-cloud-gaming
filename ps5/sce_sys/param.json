@@ -1,7 +1,5 @@
 {
-  "ageLevel": {
-    "default": 0
-  },
+  "ageLevel": { "default": 0 },
   "applicationCategoryType": 0,
   "applicationDrmType": "free",
   "attribute": 0,
@@ -12,21 +10,11 @@
   "contentId": "UP9000-PPSA99810_00-XCLOUDPS5CLI0000",
   "contentVersion": "01.603.000",
   "downloadDataSize": 256,
-  "gameIntent": {
-    "permittedIntents": [
-      {
-        "intentType": "launchActivity"
-      }
-    ]
-  },
+  "gameIntent": { "permittedIntents": [{ "intentType": "launchActivity" }] },
   "localizedParameters": {
     "defaultLanguage": "en-US",
-    "en-US": {
-      "titleName": "PSBox Cloud Gaming"
-    },
-    "pt-BR": {
-      "titleName": "PSBox Cloud Gaming"
-    }
+    "en-US": { "titleName": "Aurora Stream" },
+    "pt-BR": { "titleName": "Aurora Stream" }
   },
   "masterVersion": "00.10",
   "pubtools": {
