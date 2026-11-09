@@ -245,7 +245,7 @@ void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>&
 
 void AppUi::drawSpinner(Canvas& c, float cx, float cy, float r, uint64_t nowMs) {
     float t = static_cast<float>(nowMs % 1000) / 1000.0f * 6.2832f;
-    c.strokeArc(cx, cy, r, r * 0.18f, t, 4.4f, kWhite);
+    c.strokeArc(cx, cy, r, r * 0.18f, t, 4.4f, kWhite, /*fadeTail=*/true);
 }
 
 void AppUi::drawToast(Canvas& c, uint64_t nowMs) {

@@ -11,7 +11,7 @@ namespace xc::app::report {
 namespace {
 
 constexpr const char* kForm =
-    "https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/issues/new?template=bug_report.yml";
+    "https://github.com/RafaelNGP/psbox-cloud-gaming/issues/new?template=bug_report.yml";
 constexpr const char* kSessionStart = "=== PSBox Cloud Gaming starting ===";
 
 // A query value: unreserved characters and a few safe ones as they are,

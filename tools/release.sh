@@ -227,6 +227,6 @@ echo "     tools/release-verify.sh $tag --verify-sigs"
 echo
 echo "== catalog record (apps/PPSA99810.json):"
 echo "  \"version\": \"$version\","
-echo "  \"artifact_url\": \"https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/download/$tag/PPSA99810.zip\","
+echo "  \"artifact_url\": \"https://github.com/RafaelNGP/psbox-cloud-gaming/releases/download/$tag/PPSA99810.zip\","
 echo "  \"sha256\": \"$sha\","
-echo "  \"icon_url\": \"https://raw.githubusercontent.com/RafaelNGP/xbox-cloud-gaming-ps5/$tag/ps5/sce_sys/icon0.png\""
+echo "  \"icon_url\": \"https://raw.githubusercontent.com/RafaelNGP/psbox-cloud-gaming/$tag/ps5/sce_sys/icon0.png\""

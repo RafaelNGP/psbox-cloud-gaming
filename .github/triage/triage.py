@@ -28,7 +28,7 @@ import urllib.request
 MARKER = "<!-- psbox-triage -->"
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_TEXT = 200_000  # characters of an issue looked at
-LATEST_RELEASE_URL = "https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest"
+LATEST_RELEASE_URL = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"
 
 LABEL_COLOURS = {
     "needs-info": "fbca04",

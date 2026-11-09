@@ -152,11 +152,11 @@ Problems
 The app writes a log to /data/psbox/xcloud.log. It holds
 nothing of your account: no password, token, sign-in code, gamertag or
 PS5 user name. Attach it when you report a problem:
-https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/issues
+https://github.com/RafaelNGP/psbox-cloud-gaming/issues
 
 
 License
 -------
 GPL-3.0-or-later: see LICENSE. The licenses of the bundled components are
 in licenses/ (see licenses/THIRD_PARTY_NOTICES.md). Source code:
-https://github.com/RafaelNGP/xbox-cloud-gaming-ps5 (tag @VERSION@)
+https://github.com/RafaelNGP/psbox-cloud-gaming (tag @VERSION@)

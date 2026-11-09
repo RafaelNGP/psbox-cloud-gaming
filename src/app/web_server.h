@@ -44,6 +44,7 @@ void switchVirtualGamepadSlot(int newSlot);
 uint64_t virtualGamepadActiveAt(int playerIndex);
 void resetVirtualGamepads();
 const char* webServerIndexHtml();
+const char* webServerGenerativeUiHtml();
 
 namespace ws {
 

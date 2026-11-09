@@ -209,7 +209,7 @@ class Triage(unittest.TestCase):
         self.assertIn("Versão não suportada", comment)
 
     def test_unsupported_147_points_to_official_ps4_latest_release(self):
-        url = "https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest"
+        url = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"
         cases = [
             (form("It crashed", "1.4.7", "13.00", LOG), "Problem on 1.4.7"),
             (form("Não consigo entrar no jogo", "1.4.7", "13.00", LOG), "Erro ao logar na conta"),

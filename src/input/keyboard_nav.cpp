@@ -101,6 +101,10 @@ void mergePads(ControllerState& pad, const ControllerState& e) {
     further(pad.leftStickY, e.leftStickY);
     further(pad.rightStickX, e.rightStickX);
     further(pad.rightStickY, e.rightStickY);
+    further(pad.rawLeftX, e.rawLeftX);
+    further(pad.rawLeftY, e.rawLeftY);
+    further(pad.rawRightX, e.rawRightX);
+    further(pad.rawRightY, e.rawRightY);
     pad.triggerL2 = std::max(pad.triggerL2, e.triggerL2);
     pad.triggerR2 = std::max(pad.triggerR2, e.triggerR2);
 }

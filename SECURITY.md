@@ -4,7 +4,7 @@
 
 Please **don't open a public issue** for security problems. Report them
 privately through GitHub instead:
-<https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/security/advisories/new>.
+<https://github.com/RafaelNGP/psbox-cloud-gaming/security/advisories/new>.
 
 Include what you found, the release (`v0.1.0`, …) or commit, and how to
 reproduce it. I'll reply as soon as I can and credit you in the fix unless you'd

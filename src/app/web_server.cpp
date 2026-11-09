@@ -433,6 +433,9 @@ WebServer::HttpResponse WebServer::handleRequest(const std::string& method, cons
         if (path == "/" || path == "/index.html" || path == "/boost" || path == "/boost/" || path == "/gamepad" || path == "/gamepad/") {
             return {200, "text/html; charset=utf-8", "", webServerIndexHtml()};
         }
+        if (path == "/generative_ui" || path == "/generative_ui/" || path == "/generative_ui.html") {
+            return {200, "text/html; charset=utf-8", "", webServerGenerativeUiHtml()};
+        }
         if (path == "/api/settings" || path == "/api/status" || path == "/api/state") {
             json::Value root = json::Value::object();
             root.set("ok", true);

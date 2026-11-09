@@ -6,11 +6,11 @@
 <p align="center"><em>Xbox Cloud Gaming, running natively on PlayStation 5.</em></p>
 
 <p align="center">
-  <a href="https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/RafaelNGP/xbox-cloud-gaming-ps5?color=brightgreen"></a>
+  <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/RafaelNGP/psbox-cloud-gaming?color=brightgreen"></a>
   <a href="#installation"><img alt="platforms: PS5, PS4, Linux" src="https://img.shields.io/badge/platforms-PS5%20%7C%20PS4%20%7C%20Linux-003791"></a>
   <img alt="stream: 1080p60" src="https://img.shields.io/badge/stream-1080p60%20H.264-5c2d91">
   <a href="LICENSE"><img alt="license: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue"></a>
-  <a href="https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/issues/new?template=bug_report.yml"><img alt="issues: report a problem" src="https://img.shields.io/badge/issues-report%20a%20problem-ff0000"></a>
+  <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/issues/new?template=bug_report.yml"><img alt="issues: report a problem" src="https://img.shields.io/badge/issues-report%20a%20problem-ff0000"></a>
 </p>
 
 A native Xbox Cloud Gaming client for jailbroken consoles: browse the cloud
@@ -49,7 +49,7 @@ Install it in one of three ways:
 - **Prospero Store:** <https://prosperostore.net/app/PPSA99810/>
 - **By hand:**
   1. Download `PPSA99810.zip` from the
-     [latest release](https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest).
+     [latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest).
   2. Extract it and copy the `PPSA99810` folder, as a whole, to
      `/data/homebrew/` on the PS5 (for example over FTP).
   3. Wait for the loader to add the **PSBox Cloud Gaming** icon to the Home
@@ -73,7 +73,7 @@ the app's folder.
 Needs a PS4 with GoldHEN.
 
 1. Download the PS4 `.pkg` from the
-   [latest release](https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest).
+   [latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest).
 2. Copy it to the root of a USB drive formatted as exFAT or FAT32, and plug the
    drive into the PS4.
 3. Install it from *Settings > GoldHEN > Package Installer*.
@@ -83,7 +83,7 @@ The PS4 build does not update itself yet: install the newer `.pkg` the same way.
 ### Linux and Steam Deck
 
 Download the `.AppImage` from the
-[latest release](https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest),
+[latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest),
 make it executable (`chmod +x`) and run it. It works in the Steam Deck's Desktop
 and Game modes. Your data lives in `~/.local/share/psbox`. It does not update
 itself: Settings > Updates opens the release page.
@@ -93,8 +93,8 @@ itself: Settings > Updates opens the release page.
 Clone with the submodules (Mbed TLS, libdatachannel, FFmpeg):
 
 ```bash
-git clone --recursive https://github.com/RafaelNGP/xbox-cloud-gaming-ps5.git
-cd xbox-cloud-gaming-ps5
+git clone --recursive https://github.com/RafaelNGP/psbox-cloud-gaming.git
+cd psbox-cloud-gaming
 ```
 
 You need CMake 3.20+, Ninja, Clang/LLVM, Python 3 and curl. NASM and FFmpeg are

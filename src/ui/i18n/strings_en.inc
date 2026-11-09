@@ -500,4 +500,6 @@ constexpr Column kEnglish = {
     "Ends remote play from your Xbox console and returns to the home screen.", // MenuDescEndStream
     "Assigns which physical controller input operates this virtual player slot.", // MenuDescPlayer
     "Adjusts the volume level for sound played through the controller's speaker.", // MenuDescPadSpeakerVolume
+    "Steering wheel (Left Stick)",                     // GyroSteering
+    "Steering wheel (R2)",                             // GyroSteeringDrive
 };

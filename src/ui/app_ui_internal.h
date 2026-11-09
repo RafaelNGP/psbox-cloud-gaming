@@ -80,7 +80,7 @@ constexpr bool kGameGroupStart[kGameRowCount] = {false, true, false, false, fals
 // The keyboard keys' screen: two columns of inputs, then "Reset to default".
 constexpr int kKeysPerColumn = input::kKeyActions / 2;
 // Updates on a desktop: the newest release's page (the app doesn't install it there).
-constexpr const char* kReleasesPage = "https://github.com/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest";
+constexpr const char* kReleasesPage = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest";
 
 // The rows of `order` that `shown` keeps. A group starts on screen where the
 // row above belongs to another group (a hidden group leaves no gap).

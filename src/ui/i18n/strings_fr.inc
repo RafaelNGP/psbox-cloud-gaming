@@ -500,4 +500,6 @@ constexpr Column kFrench = {
     "Met fin à la diffusion depuis votre console Xbox et retourne à l'accueil.", // MenuDescEndStream
     "Assigne la manette physique correspondant à ce joueur virtuel.", // MenuDescPlayer
     "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
+    "Volant (Stick Gauche)",                           // GyroSteering
+    "Volant (Accélérer R2)",                           // GyroSteeringDrive
 };

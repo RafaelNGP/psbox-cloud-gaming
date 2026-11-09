@@ -109,7 +109,7 @@ bool Settings::load(const std::string& path) {
     keyMap = keyMapFromJson((*j)["keyMap"], input::defaultKeyMap());
     padMap = readPadMapOr((*j)["padMap"], input::defaultPadMap(), "the settings");
     keyboardPlayer = static_cast<int>(std::clamp<int64_t>((*j)["keyboardPlayer"].asInt(keyboardPlayer), 0, 3));
-    gyroMode = static_cast<int>(std::clamp<int64_t>((*j)["gyroMode"].asInt(gyroMode), 0, 2));
+    gyroMode = static_cast<int>(std::clamp<int64_t>((*j)["gyroMode"].asInt(gyroMode), 0, 4));
     gyroLevel = static_cast<int>(std::clamp<int64_t>((*j)["gyroLevel"].asInt(gyroLevel), 1, 10));
     gyroYawScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroYawScale"].asInt(gyroYawScale), 20, 200));
     gyroPitchScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
@@ -176,7 +176,7 @@ bool Settings::load(const std::string& path) {
         p.highRefresh = obj["highRefresh"].asBool(highRefresh);
         p.keyMap = keyMapFromJson(obj["keyMap"], keyMap);
         p.padMap = readPadMapOr(obj["padMap"], padMap, id.c_str());
-        p.gyroMode = static_cast<int>(std::clamp<int64_t>(obj["gyroMode"].asInt(gyroMode), 0, 2));
+        p.gyroMode = static_cast<int>(std::clamp<int64_t>(obj["gyroMode"].asInt(gyroMode), 0, 4));
         p.gyroLevel = static_cast<int>(std::clamp<int64_t>(obj["gyroLevel"].asInt(gyroLevel), 1, 10));
         p.gyroYawScale = static_cast<int>(std::clamp<int64_t>(obj["gyroYawScale"].asInt(gyroYawScale), 20, 200));
         p.gyroPitchScale = static_cast<int>(std::clamp<int64_t>(obj["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
@@ -192,7 +192,7 @@ bool Settings::load(const std::string& path) {
         p.touchpadMouse = obj["touchpadMouse"].asBool(touchpadMouse);
         p.touchpadShortcuts = readTouchpadShortcutsOr(obj["touchpadShortcuts"], touchpadShortcuts);
         p.locale = obj["locale"].str();
-        p.syncTrophies = obj["syncTrophies"].asBool(true);
+        p.syncTrophies = obj["syncTrophies"].asBool(false);
         p.xboxTitleId = obj["xboxTitleId"].str();
         p.gameName = obj["gameName"].str();
         p.soloInputRedirect = obj["soloInputRedirect"].asBool(obj["solo_input_redirect"].asBool(soloInputRedirect));

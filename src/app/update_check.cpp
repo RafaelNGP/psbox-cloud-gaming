@@ -12,7 +12,7 @@ namespace xc::app {
 
 namespace {
 
-constexpr const char* kLatestRelease = "https://api.github.com/repos/RafaelNGP/xbox-cloud-gaming-ps5/releases/latest";
+constexpr const char* kLatestRelease = "https://api.github.com/repos/RafaelNGP/psbox-cloud-gaming/releases/latest";
 
 // "v1.2.3" / "1.2" -> {1, 2, 3} / {1, 2, 0}; empty when it isn't a version.
 std::vector<int> parts(const std::string& v) {

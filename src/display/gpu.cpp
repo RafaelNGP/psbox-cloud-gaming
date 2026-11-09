@@ -1186,7 +1186,7 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
         float threshold, radius, grain;
         uint32_t frame;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            deband >= 2 ? 0.005f : 0.003f, ++g_frame};
+            0.0f, ++g_frame};
     vkCmdPushConstants(g.cmd, g.yuv.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
@@ -1219,7 +1219,7 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
         float threshold, radius, grain;
         uint32_t frame;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            deband >= 2 ? 0.005f : 0.003f, ++g_frame};
+            0.0f, ++g_frame};
     vkCmdPushConstants(g.cmd, g.nv12.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();

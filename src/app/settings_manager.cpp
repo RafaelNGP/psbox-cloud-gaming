@@ -349,7 +349,7 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
             }
         }
         if (root.has("gyroMode")) {
-            int v = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(settings_.gyroMode), 0, 2));
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(settings_.gyroMode), 0, 4));
             if (v != settings_.gyroMode) {
                 settings_.gyroMode = v;
                 changed = true;
@@ -568,7 +568,7 @@ bool SettingsManager::updateGameProfileFromJson(const std::string& gameKey, cons
             if (v != prof.highRefresh) { prof.highRefresh = v; changed = true; ev.affectsDisplay = true; }
         }
         if (root.has("gyroMode")) {
-            int v = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(prof.gyroMode), 0, 2));
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(prof.gyroMode), 0, 4));
             if (v != prof.gyroMode) { prof.gyroMode = v; changed = true; ev.affectsHardware = true; }
         }
         if (root.has("gyroLevel")) {

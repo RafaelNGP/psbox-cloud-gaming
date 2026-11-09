@@ -191,7 +191,6 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
             }, 1u << 20);
         }
     };
-    uint64_t lastTrophyPollAt = started;
     bool snapshot1 = false, snapshot2 = false, snapshot3 = false, snapshot4 = false;
     uint64_t nextPeriodicShot = 150000;
     int periodicShotIdx = 5;
@@ -381,34 +380,6 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 recordProbe();
                 if (!g_afterProbeAlias.empty() && !g_tierPicked) player.requestResolution(g_afterProbeAlias);
             }
-            if (tickNow - lastTrophyPollAt >= 20000 && !g_stageXboxTitleId.empty()) {
-                lastTrophyPollAt = tickNow;
-                bool syncTrophies = false;
-                {
-                    std::lock_guard<std::mutex> lock(g_settingsMutex);
-                    syncTrophies = g_settings.syncTrophies;
-                    if (syncTrophies) {
-                        bool hasCustom = false;
-                        GameProfile prof = g_settings.profileForGame(g_stageProduct, g_stageTitle, &hasCustom);
-                        if (hasCustom && !prof.syncTrophies) {
-                            syncTrophies = false;
-                        }
-                    }
-                }
-                if (syncTrophies) {
-                    std::string xblAuth, xuid;
-                    {
-                        std::lock_guard<std::mutex> lock(g_argMutex);
-                        xblAuth = g_xblAuth;
-                        xuid = g_xuid;
-                    }
-                    if (!xblAuth.empty()) {
-                        trophy::dispatchStreamPoll(xblAuth, xuid, g_stageXboxTitleId,
-                                                   g_stageGameName.empty() ? g_stageTitle : g_stageGameName,
-                                                   g_stageTileUrl);
-                    }
-                }
-            }
             {
                 ui::StreamInfo info;
                 info.region = ui::prettyRegion(gssv.region().name);
@@ -535,6 +506,37 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 details, static_cast<unsigned long long>(session.badSeconds),
                 static_cast<unsigned long long>(st.rtpDroppedFrames), static_cast<unsigned long long>(st.rtpRecovered));
     }
+
+    // Check trophies/achievements on stream exit (outside of gameplay to guarantee zero stutters)
+    if (!g_stageXboxTitleId.empty()) {
+        bool syncTrophies = false;
+        {
+            std::lock_guard<std::mutex> lock(g_settingsMutex);
+            syncTrophies = g_settings.syncTrophies;
+            if (syncTrophies) {
+                bool hasCustom = false;
+                GameProfile prof = g_settings.profileForGame(g_stageProduct, g_stageTitle, &hasCustom);
+                if (hasCustom && !prof.syncTrophies) {
+                    syncTrophies = false;
+                }
+            }
+        }
+        if (syncTrophies) {
+            std::string xblAuth, xuid;
+            {
+                std::lock_guard<std::mutex> lock(g_argMutex);
+                xblAuth = g_xblAuth;
+                xuid = g_xuid;
+            }
+            if (!xblAuth.empty()) {
+                XC_LOGI("trophy: checking trophies on stream exit for %s", g_stageXboxTitleId.c_str());
+                trophy::dispatchStreamPoll(xblAuth, xuid, g_stageXboxTitleId,
+                                           g_stageGameName.empty() ? g_stageTitle : g_stageGameName,
+                                           g_stageTileUrl);
+            }
+        }
+    }
+
     // An abnormal stream end (connection lost, WebRTC failure, decoder failure):
     // report it as an error so the user sees the error screen and can report or retry.
     bool normalEnd = g_cancel || autoplayDone || reason == "stopped" ||

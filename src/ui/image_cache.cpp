@@ -83,8 +83,11 @@ std::string sizedUrl(std::string url, int w, int h) {
         url += "w=" + std::to_string(w) + "&h=" + std::to_string(h) + "&mode=scale&q=75&format=jpg";
     } else if (url.find("images-eds-ssl.xboxlive.com") != std::string::npos) {
         // Some EDS URLs already carry format=png (gamerpics): a second format= is HTTP 400.
+        // EDS returns HTTP 400 for sizes below 64x64; clamp request dimensions to at least 64.
+        int edsw = std::max(w, 64);
+        int edsh = std::max(h, 64);
         url += url.find('?') == std::string::npos ? "?" : "&";
-        url += "w=" + std::to_string(w) + "&h=" + std::to_string(h);
+        url += "w=" + std::to_string(edsw) + "&h=" + std::to_string(edsh);
         if (url.find("format=") == std::string::npos) url += "&format=jpg";
     }
     return url;

@@ -62,7 +62,7 @@ void drawFaceButton(Canvas& c, const Font& letters, GlyphStyle style, PadButton 
         c.line(cx - 6 * k, cy - 6 * k, cx + 6 * k, cy + 6 * k, t, col);
         c.line(cx + 6 * k, cy - 6 * k, cx - 6 * k, cy + 6 * k, t, col);
     } else if (b == PadButton::Circle) {
-        c.strokeArc(cx, cy, 6.5f * k, t, 0, 6.2832f, col);
+        c.strokeCircle(cx, cy, 6.5f * k, t, col);
     } else if (b == PadButton::Square) {
         int h = static_cast<int>(6 * k);
         c.strokeRect({static_cast<int>(cx) - h, static_cast<int>(cy) - h, 2 * h, 2 * h}, col, std::max(2, static_cast<int>(2 * k)));

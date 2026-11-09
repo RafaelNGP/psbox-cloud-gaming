@@ -1970,6 +1970,7 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             ui::StreamMenu menu(g_ui->fonts());
             menu.open(0, false, 1, 1, 0, false, true, false, 2, 15, false, 0.65f, false);
             menu.setMaxBitrateMbps(50);
+            menu.setStatsMask(menu.statsMask() | ui::StatsQp);
             menu.setGyro(2, 7);  // gyro aiming while aiming, intensity 7, its row selected
             for (int i = 0; i < 4; ++i) {
                 ui::NavInput down;
@@ -1982,6 +1983,7 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
             info.fps = 60.0;
             info.mbps = 14.5;
             info.lossPct = 0.0;
+            info.qp = 28.0;
             info.decodeMs = 2.1;
             info.onScreenMs = 12.4;
             info.width = 1920;

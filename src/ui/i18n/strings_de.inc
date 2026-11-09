@@ -500,4 +500,6 @@ constexpr Column kGerman = {
     "Beendet das Remote Play von der Xbox-Konsole und kehrt zum Startbildschirm zurück.", // MenuDescEndStream
     "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
+    "Lenkrad (Linker Stick)",                          // GyroSteering
+    "Lenkrad (Gas R2)",                                // GyroSteeringDrive
 };

@@ -500,4 +500,6 @@ constexpr Column kItalian = {
     "Termina la riproduzione remota dalla console Xbox e torna alla home.", // MenuDescEndStream
     "Assegna quale controller fisico corrisponde a questo giocatore virtuale.", // MenuDescPlayer
     "Regola il livello del volume dell'altoparlante integrato nel controller.", // MenuDescPadSpeakerVolume
+    "Volante (Levetta Sin.)",                          // GyroSteering
+    "Volante (Accellera R2)",                          // GyroSteeringDrive
 };

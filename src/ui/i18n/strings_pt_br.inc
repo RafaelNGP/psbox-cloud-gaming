@@ -500,4 +500,6 @@ constexpr Column kPortugueseBR = {
     "Encerra a transmissão do console Xbox e retorna para a tela inicial.", // MenuDescEndStream
     "Atribui qual entrada de controle físico corresponderá a este jogador virtual.", // MenuDescPlayer
     "Ajusta o nível de volume do som emitido pelo alto-falante integrado do controle.", // MenuDescPadSpeakerVolume
+    "Volante (Analógico Esq.)",                        // GyroSteering
+    "Volante (Acelerar R2)",                           // GyroSteeringDrive
 };

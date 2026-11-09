@@ -6,9 +6,9 @@ namespace xc::app {
 
 int debandForMbps(double mbps, int now) {
     if (mbps < 0.5) return -1;
-    if (now == 2) return mbps >= 6 ? (mbps >= 11 ? 0 : 1) : 2;
-    if (now == 1) return mbps < 4 ? 2 : mbps >= 11 ? 0 : 1;
-    return mbps < 4 ? 2 : mbps < 9 ? 1 : 0;
+    if (now == 2) return mbps >= 6 ? 1 : 2;
+    if (now == 1) return mbps < 4 ? 2 : 1;
+    return mbps < 4 ? 2 : 1;
 }
 
 bool AutoDeband::update(double mbps) {

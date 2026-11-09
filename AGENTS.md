@@ -51,9 +51,25 @@ Para qualquer alteração em arquivos de interface (`src/app_ui.cpp`, `src/app/a
      PS5_HOST=192.168.15.17 python3 ../PS5_Vulkan/tools/ps5_console.py launch PPSA99810
      ```
 
-### 2.1 Armadilhas de Autoplay e Persistência de Configurações
+### 2.3 Proibição de Testes Não-Relacionados e Invasão de Menus Arbitrários (Zero Unrelated Autotests)
+- **Foco Cirúrgico no Alvo da Tarefa**: O teste autônomo via `autoplay.txt` deve acionar estritamente a tela, modal ou subsistema modificado na tarefa atual.
+- **Proibição Estrita de Navegação em "Teclas do teclado" (`keystest`)**:
+  - É terminantemente proibido acionar `keystest`, abrir o modal de "Teclas do teclado" ou executar passos de autoplay que naveguem pela lista de configurações até a opção de teclas, a menos que a tarefa solicitada pelo usuário seja explicitamente sobre o mapeamento de teclado.
+  - Agentes NUNCA devem rodar testes genéricos de configurações por comodidade. Se a tarefa é sobre giroscópio, troféus, áudio, rede, streaming ou botões de controle, configure o alvo exato correspondente (ex: `streammenutest`, `padmaptest`, `trophysynctest`, etc.).
+  - Esta prática evita perturbações visuais indesejadas na TV/monitor do usuário, perda de tempo e alterações acidentais de keymaps locais.
+
+### 2.4 Armadilhas de Autoplay e Persistência de Configurações
 - **Proteção Automática de Configurações (`guardSettingsForAutoplay`)**: Qualquer teste rodando com `autoplay.txt` faz backup das configurações (`settings.autoplay-backup.json`). Ao reiniciar sem `autoplay.txt` (modo interativo), as configurações originais do usuário são restauradas e o backup é apagado. Não assuma que alterações gravadas durante um autotest persistirão após a remoção do `autoplay.txt`.
 - **Seleção de Tiles em Testes de Detalhes**: Nunca assuma que o primeiro card da tela é um jogo jogável com botão 'Jogar'. A biblioteca pode posicionar linhas de jogos gratuitos para adquirir no topo (*Faça streaming de jogos gratuitos*). Em testes de modais de jogo/detalhes, especifique o título alvo (`locktitle=` ou targeting explícito de título adquirido) para evitar abrir telas de aquisição da loja acidentalmente.
+
+### 2.2 Ciclo Obrigatório de Homologação Humana (Human-in-the-Loop Validation)
+- **Princípio Operacional: Os Agentes Testam, o Usuário Homologa**:
+  - A execução e os testes autônomos por screenshots no console são etapas de validação técnica interna dos agentes, mas **a tarefa NUNCA é considerada concluída ou encerrada unilateralmente pelo agente**.
+  - **Aprovação Mandatória do Usuário**: Nenhum subagente ou tarefa de desenvolvimento deve ser finalizado até que o **usuário forneça o "OK" explícito** de homologação após a verificação em tela real (TV / monitor).
+  - **Manutenção de Contexto Ativo (`Warm Context`)**:
+    - Enquanto o usuário não der o "OK", os subagentes responsáveis permanecem vivos com seu contexto ativo.
+    - Ao receber feedback humano real (ex: "ficou muito alto", "afastar botões", "ajustar contraste"), o agente pai encaminha as correções diretamente ao mesmo subagente via mensagens (`send_message`), permitindo iterações ágeis e incrementais sem reinício do zero.
+    - O agente principal permanece livre para orquestrar novos requisitos, criar novos agentes e gerenciar a esteira de desenvolvimento.
 
 ---
 

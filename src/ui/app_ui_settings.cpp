@@ -334,16 +334,13 @@ void AppUi::handlePadTester(const NavInput& in) {
     }
     if (in.up) padRow_ = (padRow_ + kButtonsRow) % (kButtonsRow + 1), dirty_ = true;
     if (in.down) padRow_ = (padRow_ + 1) % (kButtonsRow + 1), dirty_ = true;
-    if (in.left || in.right) padCol_ = 1 - padCol_, dirty_ = true;
+    if (padRow_ < kButtonsRow && (in.left || in.right)) padCol_ = 1 - padCol_, dirty_ = true;
     if (in.accept) {
         dirty_ = true;
         if (padRow_ < kButtonsRow) {
             padCaptureSince_ = in.nowMs ? in.nowMs : 1;
-        } else if (padCol_ == 0) {
-            padWork_ = input::defaultPadMap();  // Reset to default (kept on the way out)
         } else {
-            tester_ = Tester::None;  // Discard changes: what was saved stays
-            return;
+            padWork_ = input::defaultPadMap();  // Unified Reset to default
         }
     }
     if (in.square && padRow_ < kButtonsRow) input::assignPadSource(padWork_, fn, input::kPadNone), dirty_ = true;
@@ -395,6 +392,7 @@ void AppUi::handleTester(const NavInput& in) {
     if (tester_ == Tester::Gyro) {
         if (gyroDialog_) {
             gyroDialog_->handleInput(in);
+            dirty_ = true;
             if (!gyroDialog_->isOpen()) {
                 settings_.gyroLevel = gyroDialog_->level();
                 settings_.gyroYawScale = gyroDialog_->yawScale();
@@ -419,6 +417,7 @@ void AppUi::handleTester(const NavInput& in) {
             }
         } else {
             tester_ = Tester::None;
+            dirty_ = true;
         }
         return;
     }
@@ -583,7 +582,7 @@ void AppUi::openGameSettings() {
         activeGameProfile_.touchpadMouse = settings_.touchpadMouse;
         activeGameProfile_.touchpadShortcuts = settings_.touchpadShortcuts;
         activeGameProfile_.locale.clear();
-        activeGameProfile_.syncTrophies = true;
+        activeGameProfile_.syncTrophies = false;
     }
     if (!detail_.xboxTitleId.empty()) activeGameProfile_.xboxTitleId = detail_.xboxTitleId;
     if (!detail_.name.empty()) activeGameProfile_.gameName = detail_.name;
@@ -654,6 +653,8 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
             tr(Str::Off),
             tr(Str::GyroAlways),
             tr(Str::GyroAiming),
+            tr(Str::GyroSteering),
+            tr(Str::GyroSteeringDrive),
             tr(Str::GyroCalibrateAction),
             trf(Str::GyroYawSens, std::to_string(s_gyroYawScale)),
             trf(Str::GyroPitchSens, std::to_string(s_gyroPitchScale))
@@ -700,7 +701,7 @@ int AppUi::settingSelected(int row) const {
     if (row == 7) return 0;
     if (row == 9) return settings_.highRefresh ? 1 : 0;
     if (row == 13) return settings_.fullscreen ? 1 : 0;
-    if (row == 15) return std::clamp(settings_.gyroMode, 0, 2);
+    if (row == 15) return std::clamp(settings_.gyroMode, 0, 4);
     if (row == 16) return settings_.queueReadyAlert ? 1 : 0;
     if (row == 20) return std::clamp(settings_.videoDecoder, 0, 1);
     if (row == 21) return std::clamp(settings_.audioHaptics, 0, 3);
@@ -773,15 +774,15 @@ void AppUi::applySetting(int row, int index) {
         if (settings_.fullscreen != (index == 1)) displayModeChanged_ = true;
         settings_.fullscreen = index == 1;
     } else if (row == 15) {
-        if (index <= 2) {
+        if (index <= 4) {
             settings_.gyroMode = index;
             gyroMode_ = index;
-        } else if (index == 3) {
+        } else if (index == 5) {
             s_gyroCalModalOpen = true;
             s_gyroCalibrator.start(240);
             s_gyroCalDoneTime = 0;
             tester_ = Tester::GyroCal;
-        } else if (index == 4) {
+        } else if (index == 6) {
             static constexpr int kScales[] = {20, 50, 80, 100, 120, 150, 180, 200};
             int cur = s_gyroYawScale;
             int next = 100;
@@ -794,7 +795,7 @@ void AppUi::applySetting(int row, int index) {
             s_gyroYawScale = next;
             settings_.gyroYawScale = s_gyroYawScale;
             input::setGyroCalibration(s_gyroBias, s_gyroYawScale / 100.0f, s_gyroPitchScale / 100.0f);
-        } else if (index == 5) {
+        } else if (index == 7) {
             static constexpr int kScales[] = {20, 40, 60, 80, 100, 120, 150, 200};
             int cur = s_gyroPitchScale;
             int next = 80;
@@ -842,8 +843,8 @@ void AppUi::changeSetting(int delta) {
     int n = static_cast<int>(settingOptions(settingsRow_).size());
     if (n <= 0) return;
     if (settingsRow_ == 15) {
-        int cur = std::clamp(settings_.gyroMode, 0, 2);
-        applySetting(15, (cur + delta + 3) % 3);
+        int cur = std::clamp(settings_.gyroMode, 0, 4);
+        applySetting(15, (cur + delta + 5) % 5);
         return;
     }
     if (settingsRow_ == 10) {
@@ -943,8 +944,8 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
-        case 12: // Gyro aiming (0 off, 1 always, 2 while aiming)
-            activeGameProfile_.gyroMode = (activeGameProfile_.gyroMode + 3 + dir) % 3;
+        case 12: // Gyro (0 off, 1 always aim, 2 while aiming L2, 3 steering, 4 steering R2)
+            activeGameProfile_.gyroMode = (activeGameProfile_.gyroMode + 5 + dir) % 5;
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
@@ -1050,7 +1051,7 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             dirty_ = true;
             break;
         case 12:
-            activeGameProfile_.gyroMode = (activeGameProfile_.gyroMode + 1) % 3;
+            activeGameProfile_.gyroMode = (activeGameProfile_.gyroMode + 1) % 5;
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
@@ -1095,7 +1096,7 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
         case 10: // Reset to default
             activeGameHasCustom_ = false;
             activeGameProfile_.locale.clear();
-            activeGameProfile_.syncTrophies = true;
+            activeGameProfile_.syncTrophies = false;
             activeGameProfile_.keyMap = settings_.keyMap;
             activeGameProfile_.padMap = settings_.padMap;
             activeGameProfile_.touchpadShortcuts = settings_.touchpadShortcuts;
@@ -1409,6 +1410,7 @@ void AppUi::drawSettings(Canvas& c) {
         if (gyroDialog_) {
             gyroDialog_->update(lastRender_);
             gyroDialog_->draw(c, fonts_, 0, 0, kW, kH);
+            animating_ = true;
         }
         return;
     }
@@ -1487,13 +1489,18 @@ void AppUi::drawSettings(Canvas& c) {
     drawToast(c, lastRender_);
 }
 
-Rect AppUi::drawModal(Canvas& c, int w, int h, const std::string& title) {
+Rect AppUi::drawModal(Canvas& c, int w, int h, const std::string& title, int yOffset) {
     c.fillRect({0, 0, kW, kH}, rgba(0, 0, 0, 160));
-    Rect panel{(kW - w) / 2, (kH - h) / 2 - 30, w, h};
+    Rect panel{(kW - w) / 2, (kH - h) / 2 + yOffset, w, h};
     c.fillRect({panel.x + 8, panel.y + 12, panel.w, panel.h}, rgba(0, 0, 0, 120), 26);  // shadow
     c.fillRect(panel, kPanel, 24);
     c.strokeRect(panel, rgba(255, 255, 255, 50), 2, 24);
-    fonts_.bold.draw(c, title, panel.x + 56, panel.y + 44, 40, kWhite);
+    if (!title.empty()) {
+        const int titlePx = (w <= 1000) ? 28 : 40;
+        const int titleY = (w <= 1000) ? panel.y + 24 : panel.y + 44;
+        const int titleX = (w <= 1000) ? panel.x + 36 : panel.x + 56;
+        fonts_.bold.draw(c, title, titleX, titleY, titlePx, kWhite);
+    }
     c.fillRect({0, kH - 80, kW, 80}, kBg);  // Settings' hints, under the panel's
     drawHints(c, {{kIconCross, tr(Str::Select)}, {kIconCircle, tr(Str::Back)}});
     return panel;
@@ -1596,17 +1603,17 @@ void AppUi::drawPadTester(Canvas& c) {
 
     // Top tab selector: [ Botões ]  [ Touchpad ]
     if (caps_.touchpad) {
-        int tabW = 280, tabH = 38, tabGap = 20;
+        int tabW = 260, tabH = 38, tabGap = 16;
         int totalTabsW = 2 * tabW + tabGap;
-        int tabStartX = panel.x + (panel.w - totalTabsW) / 2;
-        int tabY = panel.y + 60;
+        int tabStartX = panel.x + panel.w - 102 - totalTabsW;
+        int tabY = panel.y + 44;
 
         auto shoulder = [&](const char* name, int cx) {
-            Rect r{cx - 22, tabY + 5, 44, 28};
+            Rect r{cx - 20, tabY + 5, 40, 28};
             c.fillRect(r, rgba(255, 255, 255, 40), 8);
             fonts_.bold.draw(c, name, cx - fonts_.bold.measure(name, 16) / 2, fonts_.bold.centeredY(r.y, r.h, 16), 16, kGray);
         };
-        shoulder(g_keyboardHints ? "Q" : buttonName(g_glyphStyle, PadButton::L1), tabStartX - 32);
+        shoulder(g_keyboardHints ? "Q" : buttonName(g_glyphStyle, PadButton::L1), tabStartX - 26);
 
         for (int t = 0; t < 2; ++t) {
             Rect trRect{tabStartX + t * (tabW + tabGap), tabY, tabW, tabH};
@@ -1614,65 +1621,77 @@ void AppUi::drawPadTester(Canvas& c) {
             c.fillRect(trRect, active ? rgba(255, 255, 255, 40) : rgba(255, 255, 255, 14), 12);
             if (active) c.strokeRect(trRect, kWhite, 2, 12);
             const char* tabLabel = t == 0 ? tr(Str::ControllerButtons) : tr(Str::TouchpadShortcuts);
-            int tw = fonts_.semibold.measure(tabLabel, 22);
+            int tw = fonts_.semibold.measure(tabLabel, 20);
             fonts_.semibold.draw(c, tabLabel, trRect.x + (trRect.w - tw) / 2,
-                                 fonts_.semibold.centeredY(trRect.y, trRect.h, 22), 22, active ? kWhite : kGray);
+                                 fonts_.semibold.centeredY(trRect.y, trRect.h, 20), 20, active ? kWhite : kGray);
         }
 
-        shoulder(g_keyboardHints ? "E" : buttonName(g_glyphStyle, PadButton::R1), tabStartX + totalTabsW + 32);
+        shoulder(g_keyboardHints ? "E" : buttonName(g_glyphStyle, PadButton::R1), tabStartX + totalTabsW + 26);
     }
 
+    const int by = panel.y + 714;
+
     if (padTesterTab_ == 1) {
-        constexpr int kTouchRowH = 56, kTouchGap = 8;
+        constexpr int kTouchRowH = 64, kTouchGap = 18;
         const input::TouchpadAction vals[6] = {
             touchpadWork_.swipeUp,    touchpadWork_.swipeDown,
             touchpadWork_.swipeLeft,  touchpadWork_.swipeRight,
             touchpadWork_.clickLeft,  touchpadWork_.clickRight,
         };
-        int y = panel.y + 116;
+        int y = panel.y + 160;
         for (int i = 0; i < 6; ++i) {
-            Rect r{panel.x + 80, y, panel.w - 160, kTouchRowH};
+            Rect r{panel.x + 56, y, panel.w - 112, kTouchRowH};
             bool on = (touchpadRow_ == i);
-            c.fillRect(r, on ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 14);
-            if (on && !touchpadDropdownOpen_) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 2, 18);
-            int ty = fonts_.semibold.centeredY(r.y, r.h, 26);
-            fonts_.semibold.draw(c, touchpadTriggerLabel(i), r.x + 32, ty, 26, kWhite);
+            c.fillRect(r, on ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 12);
+            if (on && !touchpadDropdownOpen_) c.strokeRect({r.x - 3, r.y - 3, r.w + 6, r.h + 6}, kWhite, 2, 15);
+            int ty = fonts_.semibold.centeredY(r.y, r.h, 24);
+            fonts_.semibold.draw(c, touchpadTriggerLabel(i), r.x + 32, ty, 24, kWhite);
 
-            float cx = static_cast<float>(r.x + r.w - 40), cy = static_cast<float>(r.y + r.h / 2);
-            c.line(cx - 8, cy - 3, cx, cy + 4, 2.5f, on ? kWhite : kGray);
-            c.line(cx, cy + 4, cx + 8, cy - 3, 2.5f, on ? kWhite : kGray);
+            float cx = static_cast<float>(r.x + r.w - 44), cy = static_cast<float>(r.y + r.h / 2);
+            c.line(cx - 7, cy - 3, cx, cy + 4, 2.5f, on ? kWhite : kGray);
+            c.line(cx, cy + 4, cx + 7, cy - 3, 2.5f, on ? kWhite : kGray);
 
             std::string val = touchpadActionLabel(static_cast<int>(vals[i]));
-            int vw = fonts_.regular.measure(val, 26);
-            int vx = r.x + r.w - 68;
-            fonts_.regular.draw(c, val, vx - vw, fonts_.regular.centeredY(r.y, r.h, 26), 26, on ? kWhite : kGray);
+            int vw = fonts_.regular.measure(val, 24);
+            int vx = r.x + r.w - 76;
+            fonts_.regular.draw(c, val, vx - vw, fonts_.regular.centeredY(r.y, r.h, 24), 24, on ? kWhite : kGray);
 
             y += kTouchRowH + kTouchGap;
         }
 
-        Rect reset{panel.x + 80, y + 8, panel.w - 160, kTouchRowH};
+        // Unified full-width reset button (exact same Y and dimensions as pad buttons tab)
+        Rect reset{panel.x + 56, by, panel.w - 112, 50};
         bool resetOn = (touchpadRow_ == 6);
-        c.fillRect(reset, resetOn ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 14);
-        if (resetOn && !touchpadDropdownOpen_) c.strokeRect({reset.x - 4, reset.y - 4, reset.w + 8, reset.h + 8}, kWhite, 2, 18);
+        if (resetOn && !touchpadDropdownOpen_) {
+            c.fillRect(reset, rgba(255, 255, 255, 30), 14);
+            c.strokeRect({reset.x - 3, reset.y - 3, reset.w + 6, reset.h + 6}, kWhite, 2, 17);
+        } else {
+            c.fillRect(reset, rgba(255, 255, 255, 10), 14);
+        }
         const char* resetLabel = tr(Str::ResetToDefault);
-        fonts_.semibold.draw(c, resetLabel, reset.x + (reset.w - fonts_.semibold.measure(resetLabel, 24)) / 2,
-                             fonts_.semibold.centeredY(reset.y, reset.h, 24), 24, resetOn ? kWhite : rgba(240, 100, 100));
+        int rtw = fonts_.semibold.measure(resetLabel, 22);
+        fonts_.semibold.draw(c, resetLabel, reset.x + (reset.w - rtw) / 2,
+                             fonts_.semibold.centeredY(reset.y, reset.h, 22), 22, resetOn ? kWhite : rgba(240, 100, 100));
 
-        int hy = reset.y + kTouchRowH + 22;
-        auto help = fonts_.regular.wrap(tr(Str::SettingDescTouchpadShortcuts), 22, panel.w - 160, 2);
-        for (size_t i = 0; i < help.size(); ++i)
-            fonts_.regular.draw(c, help[i], panel.x + 80, hy + static_cast<int>(i) * 28, 22, kDim);
+        // Instructions anchored and centered at bottom
+        auto help = fonts_.regular.wrap(tr(Str::SettingDescTouchpadShortcuts), 22, panel.w - 112, 2);
+        const int textH = static_cast<int>(help.size()) * 26;
+        const int helpY = reset.y + reset.h + (panel.y + panel.h - (reset.y + reset.h) - textH) / 2;
+        for (size_t i = 0; i < help.size(); ++i) {
+            int hw = fonts_.regular.measure(help[i], 22);
+            fonts_.regular.draw(c, help[i], panel.x + (panel.w - hw) / 2, helpY + static_cast<int>(i) * 26, 22, kDim);
+        }
 
         if (touchpadDropdownOpen_) {
-            constexpr int kListW = 500, kItemH = 46, kMaxVisible = 8;
+            constexpr int kListW = 520, kItemH = 46, kMaxVisible = 8;
             constexpr int n = input::kTouchpadActions;
             int visible = std::min(n, kMaxVisible);
-            int anchorY = panel.y + 116 + touchpadRow_ * (kTouchRowH + kTouchGap);
-            Rect dropPanel{panel.x + panel.w - 80 - kListW, anchorY + kTouchRowH + 6, kListW, visible * kItemH + 16};
-            if (dropPanel.y + dropPanel.h > kH - 100) dropPanel.y = std::max(120, anchorY - dropPanel.h - 6);
-            c.fillRect({dropPanel.x + 6, dropPanel.y + 10, dropPanel.w, dropPanel.h}, rgba(0, 0, 0, 160), 18);
-            c.fillRect(dropPanel, rgba(38, 38, 38), 18);
-            c.strokeRect(dropPanel, rgba(255, 255, 255, 60), 2, 18);
+            int anchorY = panel.y + 160 + touchpadRow_ * (kTouchRowH + kTouchGap);
+            Rect dropPanel{panel.x + panel.w - 56 - kListW, anchorY + kTouchRowH + 6, kListW, visible * kItemH + 16};
+            if (dropPanel.y + dropPanel.h > kH - 100) dropPanel.y = std::max(100, anchorY - dropPanel.h - 6);
+            c.fillRect({dropPanel.x + 6, dropPanel.y + 10, dropPanel.w, dropPanel.h}, rgba(0, 0, 0, 160), 16);
+            c.fillRect(dropPanel, rgba(38, 38, 38), 16);
+            c.strokeRect(dropPanel, rgba(255, 255, 255, 60), 2, 16);
             int curAction = static_cast<int>(touchpadWork_.get(touchpadRow_));
             for (int k = 0; k < visible; ++k) {
                 int itemIdx = touchpadDropdownTop_ + k;
@@ -1680,25 +1699,25 @@ void AppUi::drawPadTester(Canvas& c) {
                 Rect item{dropPanel.x + 8, dropPanel.y + 8 + k * kItemH, dropPanel.w - 16, kItemH};
                 bool isFocused = (itemIdx == touchpadDropdownIndex_);
                 bool isSelected = (itemIdx == curAction);
-                if (isFocused) c.fillRect(item, kWhite, 12);
+                if (isFocused) c.fillRect(item, kWhite, 10);
                 Color textCol = isFocused ? kBg : (isSelected ? kWhite : kGray);
                 std::string itemText = touchpadActionLabel(itemIdx);
-                fonts_.semibold.draw(c, itemText, item.x + 24, fonts_.semibold.centeredY(item.y, item.h, 24), 24, textCol);
+                fonts_.semibold.draw(c, itemText, item.x + 20, fonts_.semibold.centeredY(item.y, item.h, 22), 22, textCol);
                 if (isSelected) {
-                    float markX = static_cast<float>(item.x + item.w - 36), markY = static_cast<float>(item.y + item.h / 2);
-                    c.line(markX - 10, markY, markX - 3, markY + 7, 3, isFocused ? kBg : kGreen);
-                    c.line(markX - 3, markY + 7, markX + 10, markY - 7, 3, isFocused ? kBg : kGreen);
+                    float markX = static_cast<float>(item.x + item.w - 32), markY = static_cast<float>(item.y + item.h / 2);
+                    c.line(markX - 8, markY, markX - 3, markY + 6, 2.5f, isFocused ? kBg : kGreen);
+                    c.line(markX - 3, markY + 6, markX + 8, markY - 6, 2.5f, isFocused ? kBg : kGreen);
                 }
             }
             if (touchpadDropdownTop_ > 0) {
-                float scx = static_cast<float>(dropPanel.x + dropPanel.w / 2), scy = static_cast<float>(dropPanel.y - 14);
-                c.line(scx - 10, scy + 4, scx, scy - 4, 3, kGray);
-                c.line(scx, scy - 4, scx + 10, scy + 4, 3, kGray);
+                float scx = static_cast<float>(dropPanel.x + dropPanel.w / 2), scy = static_cast<float>(dropPanel.y - 12);
+                c.line(scx - 8, scy + 3, scx, scy - 3, 2.5f, kGray);
+                c.line(scx, scy - 3, scx + 8, scy + 3, 2.5f, kGray);
             }
             if (touchpadDropdownTop_ + visible < n) {
-                float scx = static_cast<float>(dropPanel.x + dropPanel.w / 2), scy = static_cast<float>(dropPanel.y + dropPanel.h + 14);
-                c.line(scx - 10, scy - 4, scx, scy + 4, 3, kGray);
-                c.line(scx, scy + 4, scx + 10, scy - 4, 3, kGray);
+                float scx = static_cast<float>(dropPanel.x + dropPanel.w / 2), scy = static_cast<float>(dropPanel.y + dropPanel.h + 12);
+                c.line(scx - 8, scy - 3, scx, scy + 3, 2.5f, kGray);
+                c.line(scx, scy + 3, scx + 8, scy - 3, 2.5f, kGray);
             }
         }
 
@@ -1716,7 +1735,7 @@ void AppUi::drawPadTester(Canvas& c) {
     // button on this pad that plays it (in the pad's own glyphs). Left
     // column the face buttons, shoulders and triggers; right the rest.
     constexpr int kPerColumn = input::kPadFns / 2;
-    constexpr int kRowH = 52, kGap = 8, kChipW = 300, kColGap = 40;
+    constexpr int kRowH = 54, kGap = 14, kChipW = 320, kColGap = 40;
     constexpr const char* kArrows[4] = {" \xE2\x86\x91", " \xE2\x86\x93", " \xE2\x86\x90", " \xE2\x86\x92"};
     static constexpr PadButton kButtons[12] = {PadButton::Cross, PadButton::Circle, PadButton::Square, PadButton::Triangle,
                                                PadButton::L1,    PadButton::R1,     PadButton::L2,     PadButton::R2,
@@ -1727,71 +1746,80 @@ void AppUi::drawPadTester(Canvas& c) {
     const std::string dpad = tr(Str::DPad);
     // A button (a PadFn index) drawn at (x, cy), left-aligned, in `s`'s glyphs.
     auto drawButton = [&](int i, GlyphStyle s, int x, int cy, Color color) {
-        const int ty = fonts_.semibold.centeredY(cy - kRowH / 2, kRowH, 24);
+        const int ty = fonts_.semibold.centeredY(cy - kRowH / 2, kRowH, 22);
         if (i >= 12) {
-            fonts_.semibold.draw(c, dpad + kArrows[i - 12], x, ty, 24, color);
+            fonts_.semibold.draw(c, dpad + kArrows[i - 12], x, ty, 22, color);
         } else if (i < 4) {
             ui::drawFaceButton(c, fonts_.bold, s, kButtons[i], x + 16.0f, static_cast<float>(cy), 16);
             if (s == GlyphStyle::PlayStation)
-                fonts_.semibold.draw(c, buttonName(s, kButtons[i]), x + 44, ty, 24, color);
+                fonts_.semibold.draw(c, buttonName(s, kButtons[i]), x + 44, ty, 22, color);
         } else {
-            fonts_.semibold.draw(c, buttonName(s, kButtons[i]), x, ty, 24, color);
+            fonts_.semibold.draw(c, buttonName(s, kButtons[i]), x, ty, 22, color);
         }
     };
     const int colW = (panel.w - 112 - kColGap) / 2;
     for (int f = 0; f < input::kPadFns; ++f) {
         const int col = f / kPerColumn, row = f % kPerColumn;
-        Rect r{panel.x + 56 + col * (colW + kColGap), panel.y + 106 + row * (kRowH + kGap), colW, kRowH};
+        Rect r{panel.x + 56 + col * (colW + kColGap), panel.y + 160 + row * (kRowH + kGap), colW, kRowH};
         const bool on = row == padRow_ && col == padCol_;
         const int cy = r.y + r.h / 2;
-        c.fillRect(r, on ? rgba(255, 255, 255, 30) : rgba(255, 255, 255, 12), 14);
-        if (on && !capturing) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 2, 18);
-        drawButton(f, GlyphStyle::Xbox, r.x + 22, cy, kWhite);
-        Rect chip{r.x + r.w - 10 - kChipW, r.y + 7, kChipW, r.h - 14};
-        fonts_.regular.draw(c, "\xE2\x86\x90", chip.x - 44, fonts_.regular.centeredY(r.y, r.h, 24), 24, kDim);
+        c.fillRect(r, on ? rgba(255, 255, 255, 30) : rgba(255, 255, 255, 12), 12);
+        if (on && !capturing) c.strokeRect({r.x - 3, r.y - 3, r.w + 6, r.h + 6}, kWhite, 2, 15);
+        drawButton(f, GlyphStyle::Xbox, r.x + 24, cy, kWhite);
+        Rect chip{r.x + r.w - 10 - kChipW, r.y + 6, kChipW, r.h - 12};
         const uint8_t src = padWork_[static_cast<size_t>(f)];
         const bool none = src >= input::kPadFns, changed = src != f;
         c.fillRect(chip, none ? rgba(240, 100, 100, 40) : changed ? rgba(90, 170, 255, 60) : rgba(255, 255, 255, 26), 10);
         if (on && capturing) {
-            c.strokeRect({chip.x - 4, chip.y - 4, chip.w + 8, chip.h + 8}, rgba(90, 220, 110), 3, 13);
-            fonts_.semibold.draw(c, "...", chip.x + 20, fonts_.semibold.centeredY(chip.y, chip.h, 24), 24, kWhite);
+            c.strokeRect({chip.x - 3, chip.y - 3, chip.w + 6, chip.h + 6}, rgba(90, 220, 110), 3, 13);
+            fonts_.semibold.draw(c, "...", chip.x + 24, fonts_.semibold.centeredY(chip.y, chip.h, 22), 22, kWhite);
         } else if (none) {
-            fonts_.semibold.draw(c, "\xE2\x80\x94", chip.x + 20, fonts_.semibold.centeredY(chip.y, chip.h, 24), 24,
+            fonts_.semibold.draw(c, "\xE2\x80\x94", chip.x + 24, fonts_.semibold.centeredY(chip.y, chip.h, 22), 22,
                                  rgba(240, 100, 100));
         } else {
-            drawButton(input::physicalSource(src, mapSwap), style, chip.x + 16, cy, kWhite);
+            drawButton(input::physicalSource(src, mapSwap), style, chip.x + 24, cy, kWhite);
         }
     }
-    // Reset to default and Discard changes, side by side under the columns.
-    const int by = panel.y + 106 + kPerColumn * (kRowH + kGap) + 8;
-    for (int col = 0; col < 2; ++col) {
-        Rect b{panel.x + 56 + col * (colW + kColGap), by, colW, kRowH};
-        const bool on = padRow_ == kPerColumn && padCol_ == col;
-        c.fillRect(b, on ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 14);
-        if (on) c.strokeRect({b.x - 4, b.y - 4, b.w + 8, b.h + 8}, kWhite, 2, 18);
-        const char* label = tr(col == 0 ? Str::ResetToDefault : Str::DiscardChanges);
-        fonts_.semibold.draw(c, label, b.x + (b.w - fonts_.semibold.measure(label, 24)) / 2,
-                             fonts_.semibold.centeredY(b.y, b.h, 24), 24, on ? kWhite : rgba(240, 100, 100));
+    // Unified Reset to default across the full width of elements
+    Rect b{panel.x + 56, by, panel.w - 112, 50};
+    const bool on = padRow_ == kPerColumn;
+    if (on) {
+        c.fillRect(b, rgba(255, 255, 255, 30), 14);
+        c.strokeRect({b.x - 3, b.y - 3, b.w + 6, b.h + 6}, kWhite, 2, 17);
+    } else {
+        c.fillRect(b, rgba(255, 255, 255, 10), 14);
     }
-    // Waiting for a press: say for what. Else what's missing (Circle won't
-    // leave then), or the help.
-    int hy = by + kRowH + 34;
+    const char* label = tr(Str::ResetToDefault);
+    int lw = fonts_.semibold.measure(label, 22);
+    fonts_.semibold.draw(c, label, b.x + (b.w - lw) / 2,
+                         fonts_.semibold.centeredY(b.y, b.h, 22), 22, on ? kWhite : rgba(240, 100, 100));
+
+    // Help anchored and centered at the bottom of the modal.
     const uint32_t missing = input::padMapMissing(padWork_);
     if (capturing) {
         const auto fn = static_cast<input::PadFn>(padCol_ * kPerColumn + std::min(padRow_, kPerColumn - 1));
         std::string ask = trf(Str::PadPressButton, input::padFnName(fn));
-        fonts_.bold.draw(c, ask, panel.x + (panel.w - fonts_.bold.measure(ask, 28)) / 2, hy, 28, kWhite);
+        const int askY = b.y + b.h + (panel.y + panel.h - (b.y + b.h) - 26) / 2;
+        fonts_.bold.draw(c, ask, panel.x + (panel.w - fonts_.bold.measure(ask, 26)) / 2, askY, 26, kWhite);
     } else if (missing || !input::padMapValid(padWork_)) {
         std::string names;
         for (int f = 0; f < input::kPadFns; ++f)
             if (missing & (1u << f)) names += (names.empty() ? "" : ", ") + std::string(input::padFnName(static_cast<input::PadFn>(f)));
-        auto lines = fonts_.semibold.wrap(trf(Str::PadMissing, names), 24, panel.w - 112, 2);
-        for (size_t i = 0; i < lines.size(); ++i)
-            fonts_.semibold.draw(c, lines[i], panel.x + 56, hy + static_cast<int>(i) * 32, 24, rgba(240, 100, 100));
+        auto lines = fonts_.semibold.wrap(trf(Str::PadMissing, names), 22, panel.w - 112, 2);
+        const int missingH = static_cast<int>(lines.size()) * 26;
+        const int missingY = b.y + b.h + (panel.y + panel.h - (b.y + b.h) - missingH) / 2;
+        for (size_t i = 0; i < lines.size(); ++i) {
+            int lineW = fonts_.semibold.measure(lines[i], 22);
+            fonts_.semibold.draw(c, lines[i], panel.x + (panel.w - lineW) / 2, missingY + static_cast<int>(i) * 26, 22, rgba(240, 100, 100));
+        }
     } else {
         auto help = fonts_.regular.wrap(tr(Str::PadHelp), 22, panel.w - 112, 2);
-        for (size_t i = 0; i < help.size(); ++i)
-            fonts_.regular.draw(c, help[i], panel.x + 56, hy + static_cast<int>(i) * 30, 22, kDim);
+        const int textH = static_cast<int>(help.size()) * 26;
+        const int helpY = b.y + b.h + (panel.y + panel.h - (b.y + b.h) - textH) / 2;
+        for (size_t i = 0; i < help.size(); ++i) {
+            int lineW = fonts_.regular.measure(help[i], 22);
+            fonts_.regular.draw(c, help[i], panel.x + (panel.w - lineW) / 2, helpY + static_cast<int>(i) * 26, 22, kDim);
+        }
     }
     c.fillRect({0, kH - 80, kW, 80}, kBg);  // its own hints over drawModal's
     if (capturing)
@@ -2036,7 +2064,7 @@ void AppUi::drawKeysTester(Canvas& c) {
         for (int i = 0; i < 6; ++i)
             xboxNames[static_cast<int>(input::KeyAction::LB) + i] = buttonName(GlyphStyle::Xbox, kShoulders[i]);
     }
-    constexpr int kRowH = 52, kGap = 8, kChipW = 170, kColGap = 40;
+    constexpr int kRowH = 52, kGap = 8, kChipW = 185, kChipGap = 16, kColGap = 40;
     const int colW = (panel.w - 112 - kColGap) / 2;
     const bool capturing = captureSince_ != 0;
     for (int a = 0; a < input::kKeyActions; ++a) {
@@ -2047,13 +2075,14 @@ void AppUi::drawKeysTester(Canvas& c) {
         int ty = fonts_.semibold.centeredY(r.y, r.h, 24);
         if (a >= static_cast<int>(input::KeyAction::A) && a <= static_cast<int>(input::KeyAction::Y)) {
             int k = a - static_cast<int>(input::KeyAction::A);
-            drawFaceButton(c, fonts_.bold, faceIcon[k], r.x + 38.0f, r.y + r.h / 2.0f, 16);
-            if (!xbox) fonts_.semibold.draw(c, "(" + names[a] + ")", r.x + 66, ty, 24, kGray);
+            drawFaceButton(c, fonts_.bold, faceIcon[k], r.x + 36.0f, r.y + r.h / 2.0f, 16);
+            if (!xbox) fonts_.semibold.draw(c, "(" + names[a] + ")", r.x + 64, ty, 24, kGray);
         } else {
-            fonts_.semibold.draw(c, xbox && !xboxNames[a].empty() ? xboxNames[a] : names[a], r.x + 22, ty, 24, kWhite);
+            fonts_.semibold.draw(c, xbox && !xboxNames[a].empty() ? xboxNames[a] : names[a], r.x + 20, ty, 24, kWhite);
         }
         for (int slot = 0; slot < 2; ++slot) {
-            Rect chip{r.x + r.w - 10 - (2 - slot) * kChipW - (1 - slot) * 10, r.y + 7, kChipW, r.h - 14};
+            int chipX = (slot == 0) ? (r.x + 274) : (r.x + 274 + kChipW + kChipGap);
+            Rect chip{chipX, r.y + 7, kChipW, r.h - 14};
             const bool on = rowOn && keysCol_ % 2 == slot;
             uint8_t code = settings_.keyMap[static_cast<size_t>(a)][static_cast<size_t>(slot)];
             std::string text = on && capturing ? "..." : code ? input::keyName(code) : "\xE2\x80\x94";  // an em dash: none
@@ -2064,13 +2093,18 @@ void AppUi::drawKeysTester(Canvas& c) {
                                  on ? kBg : code ? kWhite : kDim);
         }
     }
-    // Reset to default, across both columns.
-    Rect reset{panel.x + 56, panel.y + 106 + kKeysPerColumn * (kRowH + kGap) + 8, panel.w - 112, kRowH};
+    // Reset to default: full-width button matching the pad tester modal layout
+    Rect reset{panel.x + 56, panel.y + 106 + kKeysPerColumn * (kRowH + kGap) + 14, panel.w - 112, kRowH};
     const bool resetOn = keysRow_ == kKeysPerColumn;
-    c.fillRect(reset, resetOn ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 14);
-    if (resetOn) c.strokeRect({reset.x - 4, reset.y - 4, reset.w + 8, reset.h + 8}, kWhite, 2, 18);
+    if (resetOn) {
+        c.fillRect(reset, rgba(255, 255, 255, 30), 14);
+        c.strokeRect({reset.x - 4, reset.y - 4, reset.w + 8, reset.h + 8}, kWhite, 2, 18);
+    } else {
+        c.fillRect(reset, rgba(255, 255, 255, 10), 14);
+    }
     const char* resetLabel = tr(Str::ResetToDefault);
-    fonts_.semibold.draw(c, resetLabel, reset.x + (reset.w - fonts_.semibold.measure(resetLabel, 24)) / 2,
+    int rtw = fonts_.semibold.measure(resetLabel, 24);
+    fonts_.semibold.draw(c, resetLabel, reset.x + (reset.w - rtw) / 2,
                          fonts_.semibold.centeredY(reset.y, reset.h, 24), 24, resetOn ? kWhite : rgba(240, 100, 100));
     // Waiting for a key: say so (and why a key was refused); else the help.
     int hy = panel.y + panel.h - 74;
@@ -2084,8 +2118,12 @@ void AppUi::drawKeysTester(Canvas& c) {
         }
     } else {
         auto help = fonts_.regular.wrap(tr(Str::KeysHelp), 22, panel.w - 112, 2);
-        for (size_t i = 0; i < help.size(); ++i)
-            fonts_.regular.draw(c, help[i], panel.x + 56, hy + static_cast<int>(i) * 30, 22, kDim);
+        const int textH = static_cast<int>(help.size()) * 26;
+        const int helpY = reset.y + reset.h + (panel.y + panel.h - (reset.y + reset.h) - textH) / 2;
+        for (size_t i = 0; i < help.size(); ++i) {
+            int lw = fonts_.regular.measure(help[i], 22);
+            fonts_.regular.draw(c, help[i], panel.x + (panel.w - lw) / 2, helpY + static_cast<int>(i) * 26, 22, kDim);
+        }
     }
     c.fillRect({0, kH - 80, kW, 80}, kBg);  // its own hints over drawModal's
     if (capturing)
@@ -2215,6 +2253,14 @@ void AppUi::drawGameSettings(Canvas& c) {
                 settings_, activeGameProfile_, gameSettingsOpen_, activeGameHasCustom_, lastRender_, dirty_, animating_);
             return;
         }
+    }
+    if (tester_ == Tester::Gyro) {
+        if (gyroDialog_) {
+            gyroDialog_->update(lastRender_);
+            gyroDialog_->draw(c, fonts_, 0, 0, kW, kH);
+            animating_ = true;
+        }
+        return;
     }
     if (tester_ == Tester::Sticks) {
         drawStickTester(c);
@@ -2357,6 +2403,8 @@ void AppUi::drawGameSettings(Canvas& c) {
             label = tr(Str::Gyro);
             value = tr(activeGameProfile_.gyroMode == 1 ? Str::GyroAlways
                      : activeGameProfile_.gyroMode == 2 ? Str::GyroAiming
+                     : activeGameProfile_.gyroMode == 3 ? Str::GyroSteering
+                     : activeGameProfile_.gyroMode == 4 ? Str::GyroSteeringDrive
                      : Str::Off);
             if (activeGameProfile_.gyroMode != 0) {
                 value += " (" + std::to_string(activeGameProfile_.gyroYawScale) + "% / " + std::to_string(activeGameProfile_.gyroPitchScale) + "%)";

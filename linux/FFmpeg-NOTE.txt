@@ -17,7 +17,7 @@ Configure flags (tools/build-ffmpeg.sh, "host"):
     --disable-debug --cc=clang
 
 Source: https://ffmpeg.org (tag n7.1.2), also the deps/ffmpeg submodule of
-https://github.com/RafaelNGP/xbox-cloud-gaming-ps5 at this release's tag.
+https://github.com/RafaelNGP/psbox-cloud-gaming at this release's tag.
 To relink psbox with another FFmpeg build, build the project from that
 source (README.md) with your FFmpeg in place of deps/ffmpeg: every object
 psbox is made of is built from the same repository.

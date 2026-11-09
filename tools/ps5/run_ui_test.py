@@ -13,6 +13,10 @@ AUTOPLAY_CMD = sys.argv[2] if len(sys.argv) > 2 else "AUTOTEST 25 streammenutest
 
 os.makedirs(OUT_DIR, exist_ok=True)
 
+print("Ensuring previous app instance is terminated...")
+os.system(f"PS5_HOST={PS5_HOST} python3 '/home/notebook-storm/Documentos/PS5 Ports/PS5_Vulkan/tools/ps5_console.py' kill PPSA99810 >/dev/null 2>&1")
+time.sleep(1)
+
 print(f"Connecting to PS5 FTP at {PS5_HOST}:{FTP_PORT}...")
 ftp = FTP()
 ftp.connect(PS5_HOST, FTP_PORT, timeout=15)
@@ -29,13 +33,31 @@ ppm_names = [
     "settings_gyro_row.ppm",
     "settings_gyro_dialog.ppm",
     "settings.ppm",
-    "ui.ppm"
+    "ui.ppm",
+    "keys.ppm",
+    "keys_settings.ppm",
+    "keys_capture.ppm",
+    "keys_after.ppm",
+    "keys_settings_after.ppm",
+    "padmap.ppm",
+    "padmap_capture.ppm",
+    "padmap_incomplete.ppm",
+    "settings_touchpad_modal.ppm",
+    "settings_touchpad_dropdown.ppm",
+    "settings_touchpad_reset.ppm",
+    "stream_menu_touchpad.ppm",
 ]
 
 for d in ["/data/psbox", "/data/homebrew/PPSA99810"]:
     try:
         ftp.cwd(d)
-        for name in ppm_names + ["autoplay.txt", "xcloud.log"]:
+        existing = []
+        try:
+            existing = ftp.nlst()
+        except Exception:
+            pass
+        to_del = set(ppm_names) | {f for f in existing if f.endswith(".ppm")} | {"autoplay.txt", "xcloud.log"}
+        for name in to_del:
             try:
                 ftp.sendcmd(f"DELE {name}")
             except (error_perm, error_reply):
@@ -95,10 +117,16 @@ except Exception as e:
     print(f"Failed to download xcloud.log: {e}")
 
 # Download PPMs
-for d in ["/data/psbox"]:
+for d in ["/data/psbox", "/data/homebrew/PPSA99810"]:
     try:
         f.cwd(d)
-        for name in ppm_names:
+        dir_files = []
+        try:
+            dir_files = f.nlst()
+        except Exception:
+            pass
+        download_targets = set(ppm_names) | {name for name in dir_files if name.endswith(".ppm")}
+        for name in download_targets:
             try:
                 buf = io.BytesIO()
                 f.retrbinary(f"RETR {name}", buf.write)

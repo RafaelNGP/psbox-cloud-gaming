@@ -19,7 +19,7 @@ public:
         int w = 540;
         int h = 640;
         std::string url;        // Explicit URL; if empty, uses platform::localIPv4():8080 + path
-        std::string path = "/gamepad"; // Subpath for default URL
+        std::string path = "";  // Subpath for default URL (empty for root SmartGlass landing page)
         Color bgColor = rgba(20, 24, 34, 245);
         Color borderColor = rgba(16, 124, 65, 200);
         bool showBorder = true;
@@ -39,10 +39,10 @@ public:
 
     // Static convenience helper
     static void drawCard(Canvas& c, const Fonts& fonts, int x, int y, int w, int h,
-                         const std::string& customUrl = "", const std::string& path = "/gamepad");
+                         const std::string& customUrl = "", const std::string& path = "");
 
     // Static URL resolver
-    static std::string resolveUrl(const std::string& customUrl, const std::string& path = "/gamepad");
+    static std::string resolveUrl(const std::string& customUrl, const std::string& path = "");
 
 private:
     Options opts_;

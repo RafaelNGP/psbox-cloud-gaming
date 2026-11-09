@@ -43,7 +43,7 @@ struct GameProfile {
     input::KeyMap keyMap = input::defaultKeyMap();
     // The controller's buttons toward the game (input/pad_map.h)
     input::PadMap padMap = input::defaultPadMap();
-    // Gyro aiming: 0 off, 1 always, 2 while L2 is held; intensity 1..10
+    // Gyro: 0 off, 1 always aim, 2 aiming L2, 3 steering wheel, 4 steering R2; intensity 1..10
     int gyroMode = 0;
     int gyroLevel = 5;
     int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
@@ -55,8 +55,8 @@ struct GameProfile {
     input::TouchpadShortcuts touchpadShortcuts = input::defaultTouchpadShortcuts();
     // Per-game audio/subtitle language: "" = system default, else e.g. "en-US", "pt-BR"
     std::string locale;
-    // Per-game trophy synchronization: true by default; when false, skips trophy sync for this game
-    bool syncTrophies = true;
+    // Per-game trophy synchronization: false by default (user must opt-in)
+    bool syncTrophies = false;
     // Optional title metadata persisted for background trophy sync filtering
     std::string xboxTitleId;
     std::string gameName;
@@ -122,7 +122,7 @@ struct Settings {
     // the menus always read the buttons as they are). Always complete.
     input::PadMap padMap = input::defaultPadMap();
     int keyboardPlayer = 0;    // the player a USB keyboard and mouse play as (0..3; keys 1-4): 0 native with player 1, else that player's controller
-    int gyroMode = 0;          // gyro aiming (input/gyro.h): 0 off, 1 always, 2 while L2 is held
+    int gyroMode = 0;          // gyro (input/gyro.h): 0 off, 1 always aim, 2 aiming L2, 3 steering, 4 steering R2
     int gyroLevel = 5;         // its intensity, 1..10
     int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
     int gyroPitchScale = 80;   // vertical sensitivity percent (20..200%, default 80%)

@@ -33,7 +33,9 @@ struct SceKernelSwVersion {
     uint32_t version;
 };
 int sceKernelGetSystemSwVersion(SceKernelSwVersion* version);
+int sceKernelLoadStartModule(const char* path, size_t argc, const void* argv, uint32_t flags, void* opt, int* res);
 int sceSystemServiceLoadExec(const char* path, char* const argv[]);
+int sceSysmoduleLoadModule(uint32_t id);
 int sceNetInit(void);
 int sceNetPoolCreate(const char* name, int size, int flags);
 int sceNetResolverCreate(const char* name, int memid, int flags);
@@ -196,6 +198,20 @@ bool init() {
     if (pool < 0) XC_LOGE("sceNetPoolCreate: 0x%08x (host names will not resolve)", static_cast<unsigned>(pool));
     g_netPool = pool;
 
+    // Pre-load official Prospero system modules before unjail changes sandbox/credentials
+    static const uint32_t kEarlySysmodules[] = {
+        0x80000015, // libSceVdecCore.native
+        0x80000036, // libSceVdecSavc2.native
+        0x8000003c, // libSceVdecShevc.native
+        0x800000af, // libSceVdecSvp9.native
+        207,        // libSceVideodec2 (Hardware video decoder)
+        0x0106,     // libSceKeyboard (USB Keyboard)
+    };
+    for (uint32_t sm : kEarlySysmodules) {
+        int smRc = sceSysmoduleLoadModule(sm);
+        XC_LOGI("ps5 early sysmodule 0x%08x -> 0x%08x", sm, static_cast<unsigned>(smRc));
+    }
+
     // 2. Trigger early unjail via internal PSBox_Trophies.elf payload
     triggerPayloadVia8084("/data/psbox/PSBox_Trophies.elf");
     ::usleep(150000); // 150ms for payload to unjail PID
@@ -210,6 +226,23 @@ bool init() {
             g_dataDirWritable = true;
             migrateLegacy();
             stageInternalTrophyPayload();
+
+            // Load native Prospero video decoder libraries post-unjail
+            static const char* const kNativeLibs[] = {
+                "/system/common/lib/libSceAgcDriver.sprx",
+                "/system/common/lib/libSceAgc.sprx",
+                "/system/common/lib/libSceVdecSvp9.native.sprx",
+                "/system/common/lib/libSceVdecSavc2.native.sprx",
+                "/system/common/lib/libSceVdecShevc.native.sprx",
+                "/system/common/lib/libSceVdecCore.native.sprx",
+                "/system/common/lib/libSceVideodec2.sprx",
+            };
+            for (const char* lib : kNativeLibs) {
+                int res = 0;
+                int mod = sceKernelLoadStartModule(lib, 0, nullptr, 0, nullptr, &res);
+                XC_LOGI("ps5 native lib %s -> mod 0x%08x (res 0x%08x)", lib, static_cast<unsigned>(mod), static_cast<unsigned>(res));
+            }
+
             ok = true;
             break;
         }

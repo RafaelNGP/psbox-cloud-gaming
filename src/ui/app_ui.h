@@ -138,7 +138,7 @@ struct SettingsChoice {
     bool previewFeatures = true; // xCloud preview client identification & ad-supported F2P streaming
     input::KeyMap keyMap = input::defaultKeyMap();  // the keyboard as a player's controller
     input::PadMap padMap = input::defaultPadMap();  // the controller's buttons toward the game (always complete)
-    int gyroMode = 0;   // gyro aiming (input/gyro.h): 0 off, 1 always, 2 while L2 is held
+    int gyroMode = 0;   // gyro (input/gyro.h): 0 off, 1 always aim, 2 aiming L2, 3 steering, 4 steering R2
     int gyroLevel = 5;  // intensity, 1..10
     int gyroYawScale = 100;
     int gyroPitchScale = 80;
@@ -631,7 +631,7 @@ private:
     void openAchievements();
     void drawAchievementsModal(Canvas& c, uint64_t nowMs);
     // A modal panel over Settings with its title; returns its rectangle.
-    Rect drawModal(Canvas& c, int w, int h, const std::string& title);
+    Rect drawModal(Canvas& c, int w, int h, const std::string& title, int yOffset = -30);
     void drawUpdating(Canvas& c, uint64_t nowMs);
     void changeSetting(int delta);
     // Settings drop-downs: the choices of a row, the chosen one, choosing.

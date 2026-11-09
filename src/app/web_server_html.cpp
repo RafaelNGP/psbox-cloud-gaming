@@ -743,6 +743,7 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   <div class="nav-tab" id="navTab-remap" onclick="switchTab('remap')">🎮 Mapeamento</div>
   <div class="nav-tab" id="navTab-gamepad" onclick="switchTab('gamepad')">🕹️ Controle</div>
   <div class="nav-tab" id="navTab-logs" onclick="switchTab('logs')">📋 Logs</div>
+  <a href="/generative_ui" target="_blank" class="nav-tab" style="text-decoration:none;color:inherit">🎨 UI Studio</a>
 </div>
 
 <div class="content">
@@ -1873,7 +1874,10 @@ function renderTelemetry(data) {
     const qpN = Number(data.qp);
     document.getElementById('telQp').textContent = (!Number.isFinite(qpN) || qpN < 0) ? '--' : Math.round(qpN);
   }
-  if (data.decodeMs !== undefined) document.getElementById('telDec').textContent = (typeof data.decodeMs === 'number' ? data.decodeMs.toFixed(1) : data.decodeMs) + ' ms';
+  if (data.decodeMs !== undefined) {
+    const hwStr = data.isHwDecode !== undefined ? (data.isHwDecode ? ' (HW)' : ' (SW)') : '';
+    document.getElementById('telDec').textContent = (typeof data.decodeMs === 'number' ? data.decodeMs.toFixed(1) : data.decodeMs) + ' ms' + hwStr;
+  }
 }
 
 let ws = null;
@@ -2933,7 +2937,9 @@ if (window.ResizeObserver) {
 // Hash & route navigation support: #gamepad, #gamepad-fs, #logs, #settings, /boost, /gamepad, etc.
 function checkHashNav() {
   const p = (location.pathname || '').toLowerCase();
-  if (p.includes('/boost') || p.includes('/gamepad')) {
+  if (p.includes('/boost')) {
+    switchTab('stream');
+  } else if (p.includes('/gamepad')) {
     switchTab('gamepad');
   }
   const h = (location.hash || '').replace('#', '');

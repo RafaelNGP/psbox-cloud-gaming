@@ -231,7 +231,11 @@ void Canvas::strokeCircle(float cx, float cy, float radius, float thickness, Col
         }
 }
 
-void Canvas::strokeArc(float cx, float cy, float radius, float thickness, float start, float sweep, Color c) {
+void Canvas::strokeArc(float cx, float cy, float radius, float thickness, float start, float sweep, Color c, bool fadeTail) {
+    if (sweep >= 2 * kPi - 0.01f && !fadeTail) {
+        strokeCircle(cx, cy, radius, thickness, c);
+        return;
+    }
     float outer = radius + thickness / 2, inner = radius - thickness / 2;
     Rect r{static_cast<int>(cx - outer - 1), static_cast<int>(cy - outer - 1), static_cast<int>(outer * 2 + 3),
            static_cast<int>(outer * 2 + 3)};
@@ -250,9 +254,12 @@ void Canvas::strokeArc(float cx, float cy, float radius, float thickness, float 
             float rel = ang - start;
             if (rel < 0) rel += 2 * kPi;
             if (rel > sweep) continue;
-            // Fade the tail for a spinner look.
-            uint32_t fade = static_cast<uint32_t>(255 * (0.25f + 0.75f * rel / sweep));
-            blend(px_[static_cast<size_t>(y) * w_ + x], c, a * cov / 255 * fade / 255);
+            uint32_t blendAlpha = (a * cov + 127) / 255;
+            if (fadeTail && sweep > 0.001f) {
+                uint32_t fade = static_cast<uint32_t>(255 * (0.25f + 0.75f * rel / sweep));
+                blendAlpha = (blendAlpha * fade) / 255;
+            }
+            blend(px_[static_cast<size_t>(y) * w_ + x], c, blendAlpha);
         }
 }
 

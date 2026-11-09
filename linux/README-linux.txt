@@ -75,4 +75,4 @@ licenses/FFmpeg-NOTE.txt), stb, FSR 1 and Anime4K shaders (MIT), and bundles
 SDL3 (zlib) and the Inter fonts (OFL): their texts are in PSBox/licenses/
 inside the AppImage (--appimage-extract unpacks it), the list in
 licenses/THIRD_PARTY_NOTICES.md. Source code: the repository at this
-release's tag, https://github.com/RafaelNGP/xbox-cloud-gaming-ps5
+release's tag, https://github.com/RafaelNGP/psbox-cloud-gaming

@@ -51,7 +51,7 @@ public:
     void fillCircle(float cx, float cy, float radius, Color c);
     void strokeCircle(float cx, float cy, float radius, float thickness, Color c);
     // Ring segment; angles in radians, 0 = 3 o'clock, clockwise.
-    void strokeArc(float cx, float cy, float radius, float thickness, float start, float sweep, Color c);
+    void strokeArc(float cx, float cy, float radius, float thickness, float start, float sweep, Color c, bool fadeTail = false);
     void line(float x0, float y0, float x1, float y1, float thickness, Color c);
     // 1:1 copy (no scaling) with opacity and optional rounded corners;
     // radius < 0 clips to a circle (avatars).

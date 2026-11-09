@@ -500,4 +500,6 @@ constexpr Column kSpanish = {
     "Finaliza la retransmisión desde tu consola Xbox y vuelve al inicio.", // MenuDescEndStream
     "Asigna qué mando físico controlará esta ranura de jugador virtual.", // MenuDescPlayer
     "Ajusta el nivel de volumen del altavoz integrado en el mando.", // MenuDescPadSpeakerVolume
+    "Volante (Stick Izq.)",                            // GyroSteering
+    "Volante (Acelerar R2)",                           // GyroSteeringDrive
 };

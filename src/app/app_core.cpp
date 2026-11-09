@@ -436,10 +436,9 @@ bool coreStartup() {
                     g_ui->setLoading(false, totalTitles, totalTitles);
                     if (!err.empty()) {
                         std::string failMsg = ui::trf(ui::Str::TrophySyncFailedToast, err);
-                        g_ui->showToast(failMsg);
+                        platform::notify(failMsg);
                     } else {
                         std::string toast = ui::trf(ui::Str::TrophiesSyncedToast, std::to_string(totalTrophies), std::to_string(totalTitles));
-                        g_ui->showToast(toast);
                         platform::notify(toast);
                     }
                 } else {
@@ -610,6 +609,9 @@ bool coreStartup() {
                     if (val != g_settings.videoDecoder) {
                         g_settings.videoDecoder = val;
                         changed = true;
+                        if (g_player && g_player->running()) {
+                            g_player->switchDecoder(val == 0);
+                        }
                     }
                 }
                 if (root.has("padMap")) {
@@ -670,7 +672,7 @@ bool coreStartup() {
                     }
                 }
                 if (root.has("gyroMode")) {
-                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(g_settings.gyroMode), 0, 2));
+                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroMode"].asInt(g_settings.gyroMode), 0, 4));
                     if (val != g_settings.gyroMode) {
                         g_settings.gyroMode = val;
                         changed = true;
@@ -708,6 +710,7 @@ bool coreStartup() {
                 if (g_player && g_player->running()) {
                     g_player->setFpsLimit(g_settings.fpsLimit);
                     g_player->setMaxBitrate(g_settings.maxBitrateMbps);
+                    g_player->switchDecoder(g_settings.videoDecoder == 0);
                 }
                 std::string savedToast = ui::tr(ui::Str::SettingsSavedToast);
                 platform::notify(savedToast);
@@ -1194,6 +1197,7 @@ bool Core::frame() {
     input::ControllerState vpad0;
     bool vconn0 = false;
     if (virtualGamepadState(0, vpad0, vconn0) && vconn0) {
+        input::applyPadSettings(vpad0);
         input::mergePads(pad, vpad0);
     }
     // USB pads (pad_usb.h): every one drives the menus; in a game, those

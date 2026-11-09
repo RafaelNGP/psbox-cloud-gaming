@@ -222,7 +222,7 @@ void StreamScreen::executeTouchpadAction_(input::TouchpadAction act, const char*
         }
         break;
     case input::TouchpadAction::CycleGyro:
-        gyroMode_ = (gyroMode_ + 1) % 3;
+        gyroMode_ = (gyroMode_ + 1) % 5;
         input::setGyro(gyroMode_, gyroLevel_);
         menu_.setGyro(gyroMode_, gyroLevel_);
         {
@@ -237,6 +237,8 @@ void StreamScreen::executeTouchpadAction_(input::TouchpadAction act, const char*
         {
             const char* gyroName = gyroMode_ == 1 ? ui::tr(ui::Str::GyroAlways)
                                  : gyroMode_ == 2 ? ui::tr(ui::Str::GyroAiming)
+                                 : gyroMode_ == 3 ? ui::tr(ui::Str::GyroSteering)
+                                 : gyroMode_ == 4 ? ui::tr(ui::Str::GyroSteeringDrive)
                                                   : ui::tr(ui::Str::Off);
             platform::notify(std::string(ui::tr(ui::Str::Gyro)) + ": " + gyroName, "cycle gyro");
         }
@@ -532,6 +534,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     snapshot = g_settings;
                 }
                 app::SettingsManager::instance().syncFrom(snapshot);
+                if (g_player) g_player->switchDecoder(dec == 0);
                 break;
             }
             case ui::MenuAction::FpsLimiter: {
@@ -605,7 +608,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                         p.keyMap = had != g_settings.perGame.end() ? had->second.keyMap : g_settings.keyMap;
                         p.padMap = had != g_settings.perGame.end() ? had->second.padMap : g_settings.padMap;
                         p.locale = had != g_settings.perGame.end() ? had->second.locale : std::string();
-                        p.syncTrophies = had != g_settings.perGame.end() ? had->second.syncTrophies : true;
+                        p.syncTrophies = had != g_settings.perGame.end() ? had->second.syncTrophies : false;
                         p.xboxTitleId = had != g_settings.perGame.end() ? had->second.xboxTitleId : std::string();
                         p.gameName = had != g_settings.perGame.end() ? had->second.gameName : std::string();
                         p.touchpadShortcuts = touchpadShortcuts_;
@@ -974,6 +977,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             input::ControllerState vpad0;
             bool vconn0 = false;
             if (virtualGamepadState(0, vpad0, vconn0) && vconn0) {
+                input::applyPadSettings(vpad0);
                 input::mergePads(sent, vpad0);
                 if (vpad0.btnNexus) {
                     sent.btnNexus = true;
@@ -990,7 +994,10 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
 
                     input::ControllerState auxVpad;
                     bool auxVconn = false;
-                    if (virtualGamepadState(slot, auxVpad, auxVconn) && auxVconn) input::mergePads(sent, auxVpad);
+                    if (virtualGamepadState(slot, auxVpad, auxVconn) && auxVconn) {
+                        input::applyPadSettings(auxVpad);
+                        input::mergePads(sent, auxVpad);
+                    }
 
                     if (auxPad.btnNexus || auxUsb.btnNexus || auxVpad.btnNexus) {
                         sent.btnNexus = true;
@@ -1055,6 +1062,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             input::ControllerState vpad;
             bool vconn = false;
             if (virtualGamepadState(i, vpad, vconn) && vconn) {
+                input::applyPadSettings(vpad);
                 if (on) {
                     input::mergePads(other, vpad);
                 } else {

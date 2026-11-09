@@ -509,6 +509,8 @@ enum class Str {
     MenuDescEndStream,
     MenuDescPlayer,
     MenuDescPadSpeakerVolume,
+    GyroSteering,
+    GyroSteeringDrive,
     Count
 };
 

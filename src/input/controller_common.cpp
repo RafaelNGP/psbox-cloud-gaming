@@ -271,8 +271,14 @@ void setDeadzone(float left, float right) {
 
 void applyPadSettings(ControllerState& s) {
     if (g_circleConfirms) std::swap(s.btnA, s.btnB);
-    s.leftStickX = s.rawLeftX, s.leftStickY = s.rawLeftY;
-    s.rightStickX = s.rawRightX, s.rightStickY = s.rawRightY;
+    if (s.rawLeftX == 0.0f && s.leftStickX != 0.0f) s.rawLeftX = s.leftStickX;
+    if (s.rawLeftY == 0.0f && s.leftStickY != 0.0f) s.rawLeftY = s.leftStickY;
+    if (s.rawRightX == 0.0f && s.rightStickX != 0.0f) s.rawRightX = s.rightStickX;
+    if (s.rawRightY == 0.0f && s.rightStickY != 0.0f) s.rawRightY = s.rightStickY;
+    s.leftStickX = s.rawLeftX;
+    s.leftStickY = s.rawLeftY;
+    s.rightStickX = s.rawRightX;
+    s.rightStickY = s.rawRightY;
     radialDeadzone(s.leftStickX, s.leftStickY, g_deadzone[0].load(std::memory_order_relaxed));
     radialDeadzone(s.rightStickX, s.rightStickY, g_deadzone[1].load(std::memory_order_relaxed));
 }
@@ -319,11 +325,15 @@ bool pollPad(int index, ControllerState& out) {
     out.triggerL2 = pad.l2;
     out.triggerR2 = pad.r2;
 
-    // Gyro aiming: in a game (menu closed), always or while L2 aims.
+    // Gyro aiming & steering: in a game (menu closed), always or conditionally.
     int gyroMode = g_gyroMode.load(std::memory_order_relaxed);
     bool gyroAimingTrigger = (gyroMode == kGyroAiming && out.triggerL2 > 0.3f);
-    bool gyroAlwaysOn = (gyroMode == kGyroAlways);
-    bool gyroOn = g_gyroActive && (gyroAlwaysOn || gyroAimingTrigger);
+    bool gyroAlwaysAiming = (gyroMode == kGyroAlways);
+    bool gyroSteeringTrigger = (gyroMode == kGyroSteeringDrive && out.triggerR2 > 0.15f);
+    bool gyroAlwaysSteering = (gyroMode == kGyroSteering);
+
+    bool isSteeringMode = (gyroMode == kGyroSteering || gyroMode == kGyroSteeringDrive);
+    bool gyroOn = g_gyroActive && (gyroAlwaysAiming || gyroAimingTrigger || gyroAlwaysSteering || gyroSteeringTrigger);
     if (gyroOn) {
         float dt = pad.gyroDt;
         if (dt <= 0.0f || !std::isfinite(dt)) {
@@ -333,25 +343,40 @@ bool pollPad(int index, ControllerState& out) {
                      : 0.016667f;
             slot.lastGyroUs = nowUs;
         }
-        // Closed-loop posture tracking: anchor reference orientation when entering aiming
-        // or when manually slewing with the right thumbstick (post-deadzone).
-        if (std::hypot(out.rightStickX, out.rightStickY) > 0.10f || !slot.gyro.aimingActive) {
-            anchorGyroPosture(slot.gyro, pad.hasOrientation ? pad.orientation : nullptr,
-                              pad.hasAccel ? pad.accel : nullptr);
+
+        if (isSteeringMode) {
+            float steer = gyroToSteering(pad.gyro, pad.hasAccel ? pad.accel : nullptr,
+                                         g_gyroLevel.load(std::memory_order_relaxed),
+                                         slot.gyro,
+                                         pad.hasOrientation ? pad.orientation : nullptr, dt);
+            float x = out.leftStickX + steer;
+            out.leftStickX = std::clamp(x, -1.0f, 1.0f);
+            if (std::abs(steer) > 0.5f && g_gyroLogged < 4) {
+                XC_LOGI("gyro steering: roll %.2f rad/s, grav %.2f,%.2f,%.2f -> steer %.2f (dt %.4f)",
+                        pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], steer, dt);
+                ++g_gyroLogged;
+            }
+        } else {
+            // Closed-loop posture tracking: anchor reference orientation when entering aiming
+            // or when manually slewing with the right thumbstick (post-deadzone).
+            if (std::hypot(out.rightStickX, out.rightStickY) > 0.10f || !slot.gyro.aimingActive) {
+                anchorGyroPosture(slot.gyro, pad.hasOrientation ? pad.orientation : nullptr,
+                                  pad.hasAccel ? pad.accel : nullptr);
+            }
+            float gx, gy;
+            gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed),
+                        slot.gyro, gx, gy, pad.hasOrientation ? pad.orientation : nullptr, dt);
+            float x = out.rightStickX + gx, y = out.rightStickY + gy, m = std::hypot(x, y);
+            if (m > 1.0f) x /= m, y /= m;
+            out.rightStickX = x;
+            out.rightStickY = y;
+            // The first few turns each way, to check the axes.
+            bool sideways = std::abs(gx) > 0.5f && std::abs(gx) > std::abs(gy);
+            int& logged = sideways ? g_gyroLoggedX : g_gyroLogged;
+            if (logged < 4 && std::max(std::abs(gx), std::abs(gy)) > 0.5f)
+                XC_LOGI("gyro: pitch %.2f yaw %.2f roll %.2f rad/s, gravity %.2f,%.2f,%.2f -> stick %.2f,%.2f (dt %.4f)", pad.gyro[0],
+                        pad.gyro[1], pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], gx, gy, dt), ++logged;
         }
-        float gx, gy;
-        gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed),
-                    slot.gyro, gx, gy, pad.hasOrientation ? pad.orientation : nullptr, dt);
-        float x = out.rightStickX + gx, y = out.rightStickY + gy, m = std::hypot(x, y);
-        if (m > 1.0f) x /= m, y /= m;
-        out.rightStickX = x;
-        out.rightStickY = y;
-        // The first few turns each way, to check the axes.
-        bool sideways = std::abs(gx) > 0.5f && std::abs(gx) > std::abs(gy);
-        int& logged = sideways ? g_gyroLoggedX : g_gyroLogged;
-        if (logged < 4 && std::max(std::abs(gx), std::abs(gy)) > 0.5f)
-            XC_LOGI("gyro: pitch %.2f yaw %.2f roll %.2f rad/s, gravity %.2f,%.2f,%.2f -> stick %.2f,%.2f (dt %.4f)", pad.gyro[0],
-                    pad.gyro[1], pad.gyro[2], pad.accel[0], pad.accel[1], pad.accel[2], gx, gy, dt), ++logged;
     } else {
         slot.lastGyroUs = 0;
         resetGyroPosture(slot.gyro);
@@ -370,7 +395,7 @@ bool pollPad(int index, ControllerState& out) {
 
 uint64_t padActiveAt(int index) { return index >= 0 && index < kMaxPads ? g_pads[index].activeAt.load() : 0; }
 void setGyro(int mode, int level) {
-    g_gyroMode = std::clamp(mode, 0, 2);
+    g_gyroMode = std::clamp(mode, 0, 4);
     g_gyroLevel = std::clamp(level, 1, kGyroLevels);
 }
 
