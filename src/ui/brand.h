@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
-// PSBox Cloud Gaming's mark: a white sphere crossed by two curved swooshes
-// that pinch at the centre, on Xbox green. Original artwork (not the Xbox
-// logo); drawn with the Canvas so the in-app logo and the PS5 home-screen
-// icon (ps5/sce_sys/icon0.png, see `xcloud-cli render-icon`) always match.
+// PSBox Cloud Gaming is an independent open-source project. This fork changes
+// the product branding; original project and third-party rights remain intact.
 #pragma once
 
 #include "ui/canvas.h"
@@ -11,19 +9,13 @@
 
 namespace xc::ui {
 
-constexpr Color kBrandGreen = rgba(16, 124, 16);
+// Aurora Stream: original teal-to-violet palette and a distinct orbital mark.
+constexpr Color kBrandGreen = rgba(54, 220, 196);
+constexpr Color kBrandDeep = rgba(7, 13, 30);
+constexpr Color kBrandViolet = rgba(157, 91, 255);
 
-// The sphere of radius `r` centred at (cx, cy), in `color`; the swooshes are
-// see-through (whatever is behind shows).
-void drawBrandMark(Canvas& c, float cx, float cy, float r, Color color = rgba(255, 255, 255));
-
-// The square app icon (green field, mark, "PSBox" wordmark).
+void drawBrandMark(Canvas& c, float cx, float cy, float r, Color color = rgba(225, 255, 250));
 void drawAppIcon(Canvas& c, const Fonts& fonts);
-
-// PS5 home-screen artwork, any 16:9 size (3840x2160 for sce_sys):
-// `launch` false: pic0, the selected-app background (mark on the right, the
-// left kept dark for the Shell's title and Play button);
-// `launch` true: pic1, the launch transition (mark and name centred).
 void drawHomeArt(Canvas& c, const Fonts& fonts, bool launch);
 
 }  // namespace xc::ui

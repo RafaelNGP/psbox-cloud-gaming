@@ -10,475 +10,90 @@
 namespace xc::ui {
 
 enum class Str {
-    AppName,
-    CloudGaming,
-    SigningIn,
-    RequestingCode,
-    LoadingGames,
-    SignInTitle,
-    SignInStep1,
-    SignInStep2,
-    SignInScan,
-    SignInWaiting,
-    JumpBackIn,
-    Play,
-    Back,
-    Select,
-    SignOut,
-    Cancel,
-    TryAgain,
-    GettingReady,
-    InQueue,       // "%s" = estimated wait
-    Connecting,
-    StartingStream,
-    MenuGestureHint,  // the game menu's footer: the touchpad gestures
-    StreamEnded,
-    ErrorTitle,
-    SignedInAs,    // "%s" = gamertag
-    NoGames,
-    PublisherBy,   // "%s" = publisher
-    Settings,
-    Language,
-    Resolution,
-    Region,
-    RegionAuto,    // "%s" = the account's default region
-    Res1080,
-    Res720,
-    ResBest,
-    SettingsNote,
-    Change,
-    Adjust,
-    HoldSignOut,
-    SigningOutIn,     // "%s" = seconds left
-    SignInFailed,     // "%s" = technical detail
-    SignInInteractionRequired,
-    LibraryFailed,    // "%s" = technical detail
-    StreamFailed,     // "%s" = technical detail
-    IdleWarning,      // "%s" = seconds until the server disconnects
-    YourGames,        // row of the account's own (non-Game Pass) games
-    NotPlayable,      // the account can't stream this game
-    TabGamePass,
-    TabSearch,
-    SearchHint,
-    NoResults,
-    ResultsCount,     // "%s" = number
-    KeySpace,
-    KeyDelete,
-    KeyClear,
-    GamesCount,       // "%s" = number
-    KeyType,          // hint: press to type the focused key
-    TryingRegion,     // "%s" = region name
-    AvailableToBuy,   // section of games that stream once bought
-    BuyBadge,         // short, on the card
-    BuyToPlay,
-    BuyHint,
-    ScanToBuy,
-    SearchIn,         // "%s" = tab name
-    Free,             // price 0 (free-to-play games still "bought" in the store)
-    Hide,
-    Unhide,
-    HiddenSection,    // section of hidden games in "Your games"
-    HiddenHint,
-    HiddenToast,
-    UnhiddenToast,
-    SortLabel,        // "%s" = sort name
-    SortRecent,
-    SortAZ,
-    SortConsole,
-    SortHint,         // hint for R3
-    FilterFree,
-    FilterCheapest,
-    FilterAllConsoles,
-    OneGame,          // GamesCount for exactly one
-    Sections,         // hint for L2 / R2: jump between sections
-    UpdatingList,     // the lists refresh in the background
-    MenuTitle,        // the in-game menu
-    MenuStats,        // show the statistics over the game
-    On,
-    Off,
-    MenuResolution,
-    MenuLeave,
-    StatLatency,
-    StatBitrate,
-    StatFrameRate,
-    StatLoss,
-    StatRegion,
-    StatDecode,
-    ResolutionNote,   // the server may not grant the tier asked for
-    MenuSharpness,    // sharpening filter over the video
-    SharpOff,
-    SharpLow,
-    SharpMedium,
-    SharpHigh,
-    Deadzone,         // settings: stick dead zone
-    TriggerRumble,    // settings: vibration in the triggers
-    ConfirmButton,    // settings: which button is Xbox A
-    Activated,        // feminine on/off where the language needs it
-    Deactivated,
-    UpdateAvailable,  // the update pop-up's title; "%s" = the new version
-    Controllers,      // in-game menu: the pads in use
-    PadConnected,     // "%s" = "2 (user name)"
-    PadDisconnected,  // "%s" = "2 (user name)"
-    MenuDeband,       // smoothing of compression blocks (deband)
-    StatOnScreen,     // network arrival to on the TV
-    Reconnecting,     // the connection dropped mid-game
-    Reconnected,
-    LightBar,         // settings: the DualSense light bar's colour
-    MenuUpscaler,     // game menu: how the picture is upscaled to 4K
-    UpscalerAi,       // the Anime4K network
-    FreeToPlay,       // details: a free-to-play game not on the account yet
-    FreeHint,
-    ScanToGet,
-    NoEntitlementFree,  // "%s" = the game
-    NoEntitlement,      // "%s" = the game
-    TabConsoles,        // the third tab: the user's own Xbox consoles
-    ConsoleOn,
-    ConsoleSleeping,
-    ConsoleOff,
-    ConsolesLoading,
-    NoConsoles,         // heading when none is found
-    ConsolesHint,       // under the tab's title
-    WakingConsole,      // the loading screen while the Xbox wakes up
-    WakeFailed,         // "%s" = the console's name
-    ConsoleStep1,       // how a console shows up, three steps
-    ConsoleStep2,
-    ConsoleStep3,
-    ScanForHelp,        // under the QR code of Microsoft's Remote Play help
-    SearchAgain,        // refresh the console list
-    MenuXboxButton,     // game menu: press the Xbox button (opens the Xbox guide)
-    MenuEndStream,      // game menu on the user's own Xbox: instead of "Leave the game"
-    EndedOnXbox,        // toast: the Xbox ended the stream
-    EndedByOtherDevice, // toast: another device took the stream over
-    EndedXboxOff,       // toast: the Xbox was turned off during the stream
-    StreamingStuck,     // "%s" = the console: its Remote Play service didn't start
-    GestureHint,        // at the start of a stream (the first three): the touchpad gestures
-    UpscalerFsrClean,   // game menu: FSR after Anime4K Restore (cleans compression artefacts)
-    UpscalerAiClean,    // Anime4K upscale after Anime4K Restore
-    DebandAuto,         // "%s" = the level in use now; block smoothing follows the bitrate
-    UpdatePrompt,       // the update pop-up's text
-    UpdateNow,          // button
-    NotNow,             // button
-    Updates,            // Settings row
-    UpToDate,           // "%s" = this version
-    UpdateReady,        // "%s" = the new version: Settings, Cross updates
-    UpdateChecking,     // Settings, while it asks
-    UpdatingTo,         // "%s" = the new version
-    UpdateDownloading,  // "%s" = percent
-    UpdateVerifying,
-    UpdateInstalling,
-    UpdateRestarting,
-    UpdateReopen,       // notification when it couldn't restart
-    UpdateFailed,       // toast; nothing was changed
-    LightBarGame,       // Settings > Light bar: the game's colour
-    LightBarCustom,     // Settings > Light bar: one the user picks
-    LightBarColour,     // the colour picker's title
-    ColourPickerHelp,   // under the colour picker
-    TriggerLight,       // trigger vibration strengths (after Deactivated)
-    TriggerMedium,      // also the middle frequency
-    TriggerStrong,
-    TriggerMax,
-    TriggerIntensity,   // the trigger tester's rows
-    TriggerFrequency,
-    FrequencyLow,
-    FrequencyHigh,
-    TriggerTestHelp,    // under the trigger tester
-    TriggerLevel,       // "%s" = 0..8, the strength sent to the trigger
-    StickLeft,          // the stick tester
-    StickRight,
-    StickPosition,      // legend: the grey dot
-    StickGameGets,      // legend: the green dot
-    StickTestHelp,      // under the stick tester
-    TriggerResistance,  // the trigger tester: the triggers' weight
-    TriggerStyle,       // the trigger tester: how the game's vibration is felt
-    StyleVibration,
-    StylePulses,        // the resistance pushing and letting go
-    FilterMode,         // search filter (a list): how a game can be played
-    FilterGenre,        // search filter (a list)
-    FilterLanguage,     // search filter (a list): translated into the app's language
-    ModeAll,
-    ModeSingle,
-    ModeOnlineMulti,
-    ModeOnlineCoop,
-    ModeLocal,          // local multiplayer or co-op, split screen
-    GenreAll,
-    LanguageAll,
-    LanguageNoun,       // this language's name, as the filters say it
-    LangSubtitles,      // "%s" = LanguageNoun: subtitles or menus in it
-    LangAudio,          // "%s" = LanguageNoun: spoken in it
-    GameSettings,       // game details hint and game settings modal title
-    Profile,            // game menu and settings: profile row
-    ProfileDefault,     // global/default profile
-    ProfileCustom,      // per-game custom profile
-    ResetToDefault,     // button to reset per-game profile to general settings
-    FilterPublisher,    // search filter (a list)
-    PublisherAll,
-    PublisherIndies,
-    FriendsPlayingNow,  // "Friends playing now"
-    MenuMicrophone,     // "Microphone"
-    MicMuted,           // "Muted"
-    MicActive,          // "Active"
-    MenuAudioOutput,    // "Audio output"
-    AudioRouteTv,       // "TV"
-    AudioRoutePad,      // "DualSense Speaker"
-    ReportProblem,      // button hint: opens the report's QR code
-    ReportScan,         // the report panel
-    ReportIncludes,
-    CrashedLastTime,    // the report panel's heading after a crash
-    LoginCountry,       // Settings row: "Sign in as another country"
-    LoginCountryOff,    // its choice "off": the console's own country
-    TryOtherCountry,    // button hint on the refused sign-in
-    LoginCountryWarning,  // the country list's warning
-    RegionRefused,      // the sign-in refused by xCloud
-    RegionRefusedAs,    // "%s" = the country it was tried as
-    CountryBR,
-    CountryJP,
-    CountryKR,
-    CountryPL,
-    CountryUS,
-    ClockWrong,         // a certificate refused for the console's date: "%s" = that date
-    ConnectionIntercepted,  // a certificate refused as untrusted or for another name
-    ClockWrongNotice,   // notification: signed in, but some content refused for the clock; "%s" = the date
-    SignInNotSaved,     // notification: the sign-in couldn't be written (asked again next start)
-    QueueSeconds,       // game page, beside Play: the service's estimated wait (%s: seconds)
-    QueueMinutes,       // ... in minutes (%s)
-    HighRefresh,        // Settings row: 119.88 Hz output
-    HighRefreshOn,      // ... its "on" choice (while a game streams; the menus stay at 60 Hz)
-    ConnectionUnstable, // in a game: frames lost, video stalled or the round trip far up
-    SessionSummary,     // notification at the end of a game (%s: minutes, resolution, Mbps, loss, ms)
-    BitrateCap,         // Settings row: the stream's bitrate cap (for Wi-Fi)
-    BitrateAuto,        // ... its default: the resolution's own
-    GameVolume,         // Settings row: the game's sound level
-    MenuKeyHint,        // in-game menu, keyboard in use: its keys (F12 the menu, Home the Xbox button)
-    FilterMouseKeyboard, // search filter: games the cloud plays with native mouse and keyboard
-    MouseKeyboardSupport, // game page, beside the console and genres
-    KeyboardPlayer,     // notification: keys 1-4 chose the player the keyboard plays as (%s: 1..4)
-    InQueueNoEstimate,  // launching, in the queue, the service gives no estimate
-    KeyboardKeys,       // Settings / game settings row and its screen: the keys of the keyboard as a controller
-    DPad,               // keyboard keys: the D-pad (then an arrow)
-    PressKey,           // keyboard keys: waiting for the new key
-    KeyReserved,        // keyboard keys: F12, Home and 1-4 can't be chosen (%s: the key)
-    ChangeKey,          // keyboard keys hint: Cross changes the key
-    ClearKey,           // keyboard keys hint: Square takes it off
-    KeysHelp,           // keyboard keys: the mouse and the keys the app keeps
-    Gyro,               // in-game menu: gyro aiming (turning the DualSense moves the aim)
-    GyroAlways,         // ... on all the time
-    GyroAiming,         // ... only while L2 is held
-    GyroIntensity,      // in-game menu: how far a turn moves the aim
-    ClockWrongPc,       // ClockWrong on a desktop: "this computer", no PS5 menu path; "%s" = its date
-    ClockWrongNoticePc, // ClockWrongNotice on a desktop; "%s" = the date
-    LoginCountryOffPc,  // LoginCountryOff on a desktop: the computer's own country
-    OpenInBrowser,      // hint (sign-in code, report QR code): Cross / Enter opens the page in the browser
-    UpdateReadyPc,      // Settings > Updates on a desktop: "%s" = the new version; Cross opens its page
-    GestureHintButtons, // GestureHint for pads without a touchpad: the buttons and keys that do the same
-    MenuButtonHint,     // MenuGestureHint for pads without a touchpad
-    DisplayMode,        // Settings row on a desktop: the app in a window or fullscreen (F11 / Alt+Enter switch it too)
-    DisplayWindow,      // ... in a window
-    DisplayFullscreen,  // ... fullscreen
-    QuitTitle,          // desktop: Circle / Esc on the home screen asks before closing the app
-    QuitConfirm,        // ... the hint that closes it
-    ControllerButtons,  // Settings / game settings row and its screen: which pad button plays which Xbox button in a game
-    PadPressButton,     // controller buttons: waiting for a press (%s: the Xbox button, e.g. "LB")
-    PadMissing,         // controller buttons: can't leave yet (%s: the Xbox buttons without one, "A, LB")
-    DiscardChanges,     // controller buttons: leave without keeping the changes
-    PadHelp,            // controller buttons: only the game sees the map; a button already used swaps
-    FilterPlan,         // search filter: Game Pass plan
-    PlanMine,           // ... what the account's plan plays
-    PlanAll,            // ... every Game Pass plan
-    IncludedWithPlan,   // game page: "%s" = "Ultimate" / "Premium" / "Essential"
-    TouchpadMouse,      // per-game setting: use touchpad as mouse in games with mouse support
-    Favorites,          // home screen row: Favourites
-    AddFavorite,        // details action hint: Add to favourites
-    RemoveFavorite,     // details action hint: Remove from favourites
-    AddedToFavorites,   // toast: Added to favourites
-    RemovedFromFavorites, // toast: Removed from favourites
-    GameLanguage,       // per-game setting row: Game language
-    MonthlyLimitExceeded, // session error: Monthly cloud gaming limit reached
-    PlaytimeRemaining,  // telemetry / top bar: playtime remaining
-    HoursRemaining,     // "%s h remaining" / "%s h restantes"
-    PlaytimeWarning,    // warning when < 2 hours remaining
-    TriggerProfile,     // trigger profile row
-    TriggerProfileStd,  // Standard
-    TriggerProfileShooter, // Shooter (Hair Trigger)
-    TriggerProfileRacing,  // Racing (ABS)
-    StorageNotWritable, // sign-in / notification: storage not writable (%s: path, %d: errno)
-    StorageFixHint,     // sign-in: hint to fix folder permissions (%s: path)
-    StatsCustomize,     // in-game menu: customize stats indicators
-    StatsIndicatorFps,
-    StatsIndicatorBitrate,
-    StatsIndicatorLatency,
-    StatsIndicatorLoss,
-    StatsIndicatorGraph,
-    StatsIndicatorDelay,
-    StatsIndicatorQp,
-    StatsIndicatorMic,
-    ScanQrToResolve,    // Error screen with redirect URL: scan QR to fix account
-    ClaimFree,          // details: "Get Free"
-    Claiming,           // toast: "Claiming license..."
-    ClaimSuccess,       // toast: "Game added to your account!"
-    ClaimFailed,        // error: "Failed to claim free game: %s"
-    ProductNotFree,     // error: "This game is not free in the store"
-    FreeAcquireHint,    // details: "Free game. Press Cross to add to your account and start playing"
-    DnsBlockedNanoDns,  // error: DNS lookup failed; advice to run NanoDNS with local Primary DNS
-    XboxProfileMissing, // error: Microsoft account has no Xbox profile yet; advice to sign in at xbox.com
-    QueueReadyAlert,    // toast / alert: "Queue ready! Starting game..."
-    QueueReadyNotification, // settings: "Queue ready chime"
-    PlaytimePlayed,     // details / menu: "Played: %s"
-    RefreshLibrary,     // hint: "Refresh"
-    RefreshingLibrary,  // toast: "Refreshing library..."
-    XboxAccountBanned,  // error: 2148916227 suspended or banned
-    XboxRegionNotSupported, // error: 2148916235 Xbox Live not offered in country/region
-    XboxAdultVerificationRequired, // error: 2148916236/2148916237 age verification or terms acceptance required
-    XboxChildAccountFamily, // error: 2148916238 child account needs Microsoft family
-    CheckSignIn,        // settings: "Check my sign-in"
-    RunCheck,           // settings option: "Run check"
-    NetworkTest,        // settings: "Network test"
-    RunTest,            // settings option: "Run test"
-    Achievements,       // "Achievements"
-    NoAchievements,     // "No achievements"
-    AchievementLocked,  // "Locked"
-    SecretAchievement,  // "Secret achievement"
-    Wishlist,           // "Wishlist"
-    AddWishlist,        // "Add to wishlist"
-    RemoveWishlist,     // "Remove from wishlist"
-    AddedToWishlist,    // "Added to wishlist"
-    RemovedFromWishlist,// "Removed from wishlist"
-    WishlistOnSale,     // "%s is on sale!"
-    WishlistInGamePass, // "%s joined Game Pass!"
-    SupportProject,     // settings row: "Support the project"
-    SupportTitle,       // modal title: "Support PSBox Development"
-    SupportMessage,     // modal text: captivating thank you / donation message
-    SupportKoFi,        // settings action button: "Ko-fi"
-    ScanToDonate,       // modal subtitle below QR: "Scan with your phone to donate"
-    TestSound,          // "Test sound" / "Testar som"
-    WishlistEmpty,      // "Wishlist is empty"
-    // Loading tips
-    TipTouchpadMenu,
-    TipKeyboardMouse,
-    TipFreeStore,
-    TipBugReportQr,
-    TipSupportKofi,
-    Tip120HzVideo,
-    TipAnalogDeadzone,
-    TipDualSenseMic,
-    TipTouchpadMouse,
-    TipGyroAiming,
-    TipFSRUpscaling,
-    TipCustomBitrate,
-    TipNativeTrophies,
-    TipPerGameTrophies,
-    TipSmartGlassWebUI,
-    TipClaimFreeStore,
-    TipButtonRemap,
-    TipInstantResume,
-    TipInGameMenu,
-    TipBackgroundSync,
-    // Settings descriptions
-    SettingDescLanguage,
-    SettingDescResolution,
-    SettingDescRegion,
-    SettingDescDeadzone,
-    SettingDescTriggerRumble,
-    SettingDescConfirmButton,
-    SettingDescLightBar,
-    SettingDescUpdates,
-    SettingDescLoginCountry,
-    SettingDescHighRefresh,
-    SettingDescBitrateCap,
-    SettingDescGameVolume,
-    SettingDescKeyboardKeys,
-    SettingDescDisplayMode,
-    SettingDescControllerButtons,
-    SettingDescGyro,
-    SettingDescQueueReady,
-    SettingDescCheckSignIn,
-    SettingDescNetworkTest,
-    SettingDescSupportProject,
-    WhatsNew,
-    WhatsNewTitle,
-    PadSpeakerVolume,
-    Mute,
-    WebControlTitle,
-    WebControlSubtitle,
-    WebControlDesc,
-    VideoDecoder,
-    VideoDecoderHw,
-    VideoDecoderSw,
-    SettingDescVideoDecoder,
-    AudioHaptics,
-    SettingDescAudioHaptics,
-    TouchpadShortcuts,
-    SettingDescTouchpadShortcuts,
-    TouchpadSwipeUp,
-    TouchpadSwipeDown,
-    TouchpadSwipeLeft,
-    TouchpadSwipeRight,
-    TouchpadClickLeft,
-    TouchpadClickRight,
-    TouchpadActNone,
-    TouchpadActGameMenu,
-    TouchpadActXboxButton,
-    TouchpadActToggleStats,
-    TouchpadActToggleMic,
-    TouchpadActCycleGyro,
-    TouchpadActCycleTrigger,
-    TouchpadHelp,
-    ResetSettings,
-    SettingDescResetSettings,
-    SettingsResetNotice,
-    HoldToReset,
-    LibraryUpToDate,
-    LibraryUpdatedCount,
-    OfflineMode,
-    PreviewFeatures,
-    SettingDescPreviewFeatures,
-    GamePassRequired,
-    InQueueIndeterminate,
-    InQueueEstimated,
-    F2pPreviewRequiredDesc,
-    F2pPreviewAccountNeededDesc,
-    MenuPlayer,       // game menu, a USB controller's: the player it plays as
-    CloudTimeUp,      // the server ended the stream: the account's (or game's) cloud time ran out
-    EndedIdle,        // toast: the server ended the stream after a while without input
-    CloudTimeLeft,      // top bar / game menu: "%s" = the cloud time left ("4 h 10 min")
-    CloudTimeOf,        // top bar, after CloudTimeLeft: "%s" = the month's hours
-    CloudTimeUnlimited, // top bar: the account has no cloud time limit
-    CloudTimeWarn,      // notification while streaming: "%s" = the cloud time left
-    SyncTrophies,
-    SettingDescSyncTrophies,
-    RunSyncTrophies,
-    TrophiesSyncedToast,
-    TrophiesDisclaimerTitle,
-    TrophiesDisclaimerBody,
-    TrophiesDisclaimerAware,
-    TrophiesDisclaimerCancel,
-    RemoveTrophies,
-    SettingDescRemoveTrophies,
-    RemoveTrophiesConfirmTitle,
-    RemoveTrophiesConfirmBody,
-    RemoveTrophiesConfirm,
-    TrophiesRemovedToast,
-    SyncingTrophies,
-    Count
+    AppName, CloudGaming, SigningIn, RequestingCode, LoadingGames, SignInTitle, SignInStep1, SignInStep2,
+    SignInScan, SignInWaiting, JumpBackIn, Play, Back, Select, SignOut, Cancel, TryAgain, GettingReady,
+    InQueue, Connecting, StartingStream, MenuGestureHint, StreamEnded, ErrorTitle, SignedInAs, NoGames,
+    PublisherBy, Settings, Language, Resolution, Region, RegionAuto, Res1080, Res720, ResBest, SettingsNote,
+    Change, Adjust, HoldSignOut, SigningOutIn, SignInFailed, SignInInteractionRequired, LibraryFailed,
+    StreamFailed, IdleWarning, YourGames, NotPlayable, TabGamePass, TabSearch, SearchHint, NoResults,
+    ResultsCount, KeySpace, KeyDelete, KeyClear, GamesCount, KeyType, TryingRegion, AvailableToBuy, BuyBadge,
+    BuyToPlay, BuyHint, ScanToBuy, SearchIn, Free, Hide, Unhide, HiddenSection, HiddenHint, HiddenToast,
+    UnhiddenToast, SortLabel, SortRecent, SortAZ, SortConsole, SortHint, FilterFree, FilterCheapest,
+    FilterAllConsoles, OneGame, Sections, UpdatingList, MenuTitle, MenuStats, On, Off, MenuResolution,
+    MenuLeave, StatLatency, StatBitrate, StatFrameRate, StatLoss, StatRegion, StatDecode, ResolutionNote,
+    MenuSharpness, SharpOff, SharpLow, SharpMedium, SharpHigh, Deadzone, TriggerRumble, ConfirmButton,
+    Activated, Deactivated, UpdateAvailable, Controllers, PadConnected, PadDisconnected, MenuDeband,
+    StatOnScreen, Reconnecting, Reconnected, LightBar, MenuUpscaler, UpscalerAi, FreeToPlay, FreeHint,
+    ScanToGet, NoEntitlementFree, NoEntitlement, TabConsoles, ConsoleOn, ConsoleSleeping, ConsoleOff,
+    ConsolesLoading, NoConsoles, ConsolesHint, WakingConsole, WakeFailed, ConsoleStep1, ConsoleStep2,
+    ConsoleStep3, ScanForHelp, SearchAgain, MenuXboxButton, MenuEndStream, EndedOnXbox, EndedByOtherDevice,
+    EndedXboxOff, StreamingStuck, GestureHint, UpscalerFsrClean, UpscalerAiClean, DebandAuto, UpdatePrompt,
+    UpdateNow, NotNow, Updates, UpToDate, UpdateReady, UpdateChecking, UpdatingTo, UpdateDownloading,
+    UpdateVerifying, UpdateInstalling, UpdateRestarting, UpdateReopen, UpdateFailed, LightBarGame,
+    LightBarCustom, LightBarColour, ColourPickerHelp, TriggerLight, TriggerMedium, TriggerStrong,
+    TriggerMax, TriggerIntensity, TriggerFrequency, FrequencyLow, FrequencyHigh, TriggerTestHelp,
+    TriggerLevel, StickLeft, StickRight, StickPosition, StickGameGets, StickTestHelp, TriggerResistance,
+    TriggerStyle, StyleVibration, StylePulses, FilterMode, FilterGenre, FilterLanguage, ModeAll, ModeSingle,
+    ModeOnlineMulti, ModeOnlineCoop, ModeLocal, GenreAll, LanguageAll, LanguageNoun, LangSubtitles,
+    LangAudio, GameSettings, Profile, ProfileDefault, ProfileCustom, ResetToDefault, FilterPublisher,
+    PublisherAll, PublisherIndies, FriendsPlayingNow, MenuMicrophone, MicMuted, MicActive, MenuAudioOutput,
+    AudioRouteTv, AudioRoutePad, ReportProblem, ReportScan, ReportIncludes, CrashedLastTime,
+    LoginCountry, LoginCountryOff, TryOtherCountry, LoginCountryWarning, RegionRefused, RegionRefusedAs,
+    CountryBR, CountryJP, CountryKR, CountryPL, CountryUS, ClockWrong, ConnectionIntercepted,
+    ClockWrongNotice, SignInNotSaved, QueueSeconds, QueueMinutes, HighRefresh, HighRefreshOn,
+    ConnectionUnstable, SessionSummary, BitrateCap, BitrateAuto, GameVolume, MenuKeyHint,
+    FilterMouseKeyboard, MouseKeyboardSupport, KeyboardPlayer, InQueueNoEstimate, KeyboardKeys, DPad,
+    PressKey, KeyReserved, ChangeKey, ClearKey, KeysHelp, Gyro, GyroAlways, GyroAiming, GyroIntensity,
+    ClockWrongPc, ClockWrongNoticePc, LoginCountryOffPc, OpenInBrowser, UpdateReadyPc, GestureHintButtons,
+    MenuButtonHint, DisplayMode, DisplayWindow, DisplayFullscreen, QuitTitle, QuitConfirm,
+    ControllerButtons, PadPressButton, PadMissing, DiscardChanges, PadHelp, FilterPlan, PlanMine,
+    PlanAll, IncludedWithPlan, TouchpadMouse, Favorites, AddFavorite, RemoveFavorite, AddedToFavorites,
+    RemovedFromFavorites, GameLanguage, MonthlyLimitExceeded, PlaytimeRemaining, HoursRemaining,
+    PlaytimeWarning, TriggerProfile, TriggerProfileStd, TriggerProfileShooter, TriggerProfileRacing,
+    StorageNotWritable, StorageFixHint, StatsCustomize, StatsIndicatorFps, StatsIndicatorBitrate,
+    StatsIndicatorLatency, StatsIndicatorLoss, StatsIndicatorGraph, StatsIndicatorDelay, StatsIndicatorQp,
+    StatsIndicatorMic, ScanQrToResolve, ClaimFree, Claiming, ClaimSuccess, ClaimFailed, ProductNotFree,
+    FreeAcquireHint, DnsBlockedNanoDns, XboxProfileMissing, QueueReadyAlert, QueueReadyNotification,
+    PlaytimePlayed, RefreshLibrary, RefreshingLibrary, XboxAccountBanned, XboxRegionNotSupported,
+    XboxAdultVerificationRequired, XboxChildAccountFamily, CheckSignIn, RunCheck, NetworkTest, RunTest,
+    Achievements, NoAchievements, AchievementLocked, SecretAchievement, Wishlist, AddWishlist,
+    RemoveWishlist, AddedToWishlist, RemovedFromWishlist, WishlistOnSale, WishlistInGamePass,
+    SupportProject, SupportTitle, SupportMessage, SupportKoFi, ScanToDonate, TestSound, WishlistEmpty,
+    TipTouchpadMenu, TipKeyboardMouse, TipFreeStore, TipBugReportQr, TipSupportKofi, Tip120HzVideo,
+    TipAnalogDeadzone, TipDualSenseMic, TipTouchpadMouse, TipGyroAiming, TipFSRUpscaling,
+    TipCustomBitrate, TipNativeTrophies, TipPerGameTrophies, TipSmartGlassWebUI, TipClaimFreeStore,
+    TipButtonRemap, TipInstantResume, TipInGameMenu, TipBackgroundSync, SettingDescLanguage,
+    SettingDescResolution, SettingDescRegion, SettingDescDeadzone, SettingDescTriggerRumble,
+    SettingDescConfirmButton, SettingDescLightBar, SettingDescUpdates, SettingDescLoginCountry,
+    SettingDescHighRefresh, SettingDescBitrateCap, SettingDescGameVolume, SettingDescKeyboardKeys,
+    SettingDescDisplayMode, SettingDescControllerButtons, SettingDescGyro, SettingDescQueueReady,
+    SettingDescCheckSignIn, SettingDescNetworkTest, SettingDescSupportProject, WhatsNew, WhatsNewTitle,
+    PadSpeakerVolume, Mute, WebControlTitle, WebControlSubtitle, WebControlDesc, VideoDecoder,
+    VideoDecoderHw, VideoDecoderSw, SettingDescVideoDecoder, AudioHaptics, SettingDescAudioHaptics,
+    TouchpadShortcuts, SettingDescTouchpadShortcuts, TouchpadSwipeUp, TouchpadSwipeDown,
+    TouchpadSwipeLeft, TouchpadSwipeRight, TouchpadClickLeft, TouchpadClickRight, TouchpadActNone,
+    TouchpadActGameMenu, TouchpadActXboxButton, TouchpadActToggleStats, TouchpadActToggleMic,
+    TouchpadActCycleGyro, TouchpadActCycleTrigger, TouchpadHelp, ResetSettings,
+    SettingDescResetSettings, SettingsResetNotice, HoldToReset, LibraryUpToDate, LibraryUpdatedCount,
+    OfflineMode, PreviewFeatures, SettingDescPreviewFeatures, GamePassRequired, InQueueIndeterminate,
+    InQueueEstimated, F2pPreviewRequiredDesc, F2pPreviewAccountNeededDesc, MenuPlayer, CloudTimeUp,
+    EndedIdle, CloudTimeLeft, CloudTimeOf, CloudTimeUnlimited, CloudTimeWarn, SyncTrophies,
+    SettingDescSyncTrophies, RunSyncTrophies, TrophiesSyncedToast, TrophiesDisclaimerTitle,
+    TrophiesDisclaimerBody, TrophiesDisclaimerAware, TrophiesDisclaimerCancel, RemoveTrophies,
+    SettingDescRemoveTrophies, RemoveTrophiesConfirmTitle, RemoveTrophiesConfirmBody,
+    RemoveTrophiesConfirm, TrophiesRemovedToast, SyncingTrophies, Count
 };
 
 enum class Language { English, PortugueseBR, Spanish, French, German, Italian, Count };
-
 void setLanguage(Language lang);
 Language language();
-// The language's own name ("Português (Brasil)").
 const char* languageName(Language lang);
-// Stable code saved in settings.json ("pt-BR"); fromCode() falls back to English.
 const char* languageCode(Language lang);
 Language languageFromCode(const std::string& code);
-// Catalog language tag for the current language, e.g. "pt-br".
 const char* catalogLanguage();
-// Locale asked of the cloud game, e.g. "pt-BR".
 const char* gameLocale();
-
 const char* tr(Str id);
-// tr() with one "%s" substituted.
 std::string trf(Str id, const std::string& arg);
-// tr() with two "%s" substituted in order.
 std::string trf(Str id, const std::string& arg1, const std::string& arg2);
 std::string touchpadActionLabel(int actionIndex);
 const char* touchpadTriggerLabel(int triggerIndex);
