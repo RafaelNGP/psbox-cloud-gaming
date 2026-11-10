@@ -158,3 +158,48 @@ PS5_HOST=192.168.15.17 python3 ../PS5_Vulkan/tools/ps5_console.py launch PPSA998
 ninja -C build-desktop xcloud-tests && ./build-desktop/xcloud-tests
 ```
 *(Deve passar com 100% de sucesso).*
+
+---
+
+## 6. Resultados das Medições (09/11/2026)
+
+> **Atenção:** o comando `AUTOTEST 30 FORTNITE` da seção 5 **não abre stream**: com o título `AUTOTEST` o app só roda testes de tela. Para stream, o título é o ID do jogo: `FORTNITE 1800 bench` (ou `FORTNITE 1800 swdecode,bench` para começar em software).
+
+### 6.1 Método (validado pelo usuário)
+- Medir **somente dentro de uma partida** ("Diamond Bank Heist" ou "Destroy The World", co-op), nunca no lobby (o FPS cai com o lobby parado). Prints a cada 30 s até a partida começar.
+- Opção de autoplay `bench`: nada é pressionado e não há capturas automáticas (que custam tempo na thread de vídeo). Arquivos de controle em `/data/psbox`, sempre enviados com nome temporário + rename (um arquivo meio escrito foi lido vazio):
+  - `mark.req` (texto = nome da janela): fecha a janela anterior e grava no log uma linha `BENCH window "<nome>"` com média, p50, p95, p99 e pico de cada frame (decode total; no hardware, o decode separado do flush; parser de QP; desenho; até a tela; do primeiro pacote até a tela) e os contadores (pulados, atrasados, falhas, perdas).
+  - `move.req` (`1`/`0`): giro lento e igual da câmera (analógico direito), para a imagem ter movimento constante nas janelas.
+  - `hwcfg.req` (`pipe=N queue=N prio=N aff=0xN opt=N`): recria o decodificador de hardware com esse ajuste (`HwDecoder::tuning()`).
+- Troca SW→HW pelo menu in-game (OPTIONS + touchpad, 6× para baixo, direita, B). Com `swdecode`, o menu passa a mostrar "Software".
+- Os logs do app **não** passam pelo klog: leia `/data/psbox/xcloud.log` via FTP (REST). O ftpsrv não tem NLST (use MLSD após `cwd`).
+
+### 6.2 Resultados (Diamond Bank Heist, câmera girando, 1080p60, ~12 Mbps)
+
+| Janela | Decode médio | p50 | p95 | p99 | Até a tela (média / p95) |
+|---|---|---|---|---|---|
+| Software (FFmpeg, 1 thread) | 6,10 ms | 6,25 | 7,08 | 7,50 | 10,4 / 16,0 ms |
+| Hardware (configuração original) | 6,12 ms | 6,08 | 6,82 | 7,24 | 11,0 / 19,3 ms |
+| HW + upscaler IA + limpeza | 6,14 ms | 6,12 | 6,95 | 7,34 | 9,9 / 15,1 ms |
+| HW + upscaler FSR | 6,14 ms | 6,07 | 7,11 | 7,54 | 9,7 / 14,6 ms |
+| HW pipe 1 / prioridade 700 (original, 2 medições) | 6,14 / 6,11 ms | 6,11 / 6,09 | 6,99 / 6,92 | 7,43 / 7,38 | 9,7 / 9,4 ms |
+| HW prioridade de CPU 256 | 6,11 ms | 6,08 | 6,92 | 7,38 | 9,5 ms |
+| HW pipe 2 | 6,11 ms | 6,08 | 6,99 | 7,46 | 9,7 ms |
+| HW `optimizeProgressive = 0` | 6,13 ms | 6,13 | 6,92 | 7,38 | 9,5 ms |
+
+Outros dados:
+- Com imagem quase parada (menus do Fortnite, ~0,1 Mbps): HW 3,4 ms, SW 1,7 ms. O hardware tem um **custo fixo de ~3,3 ms por chamada**, mais ~2,7 ms que crescem com o conteúdo. Com a câmera parada na partida, o HW mediu 5,7 ms.
+- O stream do xCloud (25 s gravados com a opção `dump`): H.264 **Main**, nível 4.2, 1080p, sem B-frames, **um slice por frame**, 2 IDR em 1413 frames, ~25 KB por frame.
+
+### 6.3 Conclusão por hipótese
+1. **Flush síncrono — descartada.** 0 flushes em 3691 frames: `sceVideodec2Decode` já devolve a imagem. Todo o tempo está dentro dessa chamada.
+2. **Atributos de memória — descartada.** A memória tipo 12 / `0x33` é cacheada e coerente nos dois sentidos (medido no PS5_Vulkan, `docs/HARDWARE_FINDINGS.md`, 2026-09-27), e a cópia do frame pela CPU custa ~0,4 ms (dentro do "desenho").
+3. **Ping-pong do buffer — sem ganho de tempo.** O decode é síncrono e acaba bem antes do próximo frame (16,7 ms). No PS5 não há corrida no buffer: a apresentação assíncrona só existe no PS4.
+4. **Parser de QP — descartada.** 5 µs por parse, em 1 a cada 8 frames.
+5. **Disputa da GPU (upscaler), pipe, fila, prioridade e `optimizeProgressive` — sem efeito** (todos entre 6,11 e 6,14 ms).
+
+**Resumo:** o tempo de decode por hardware (~6,1 ms numa partida) é da própria biblioteca e do hardware da Sony e não muda com a configuração. A meta de < 2,5 ms não é alcançável por ajuste. O software, com 1 thread, empata. Mais threads de "slice" não ajudam (um slice por frame), e threads de "frame" acrescentam atraso.
+
+### 6.4 Achados à parte
+- **Vazamento de memória ao recriar o decodificador de hardware:** cada recriação (por exemplo, alternar HW/SW no menu in-game) deixa ~58 MB mapeados (16,7 MB de memória flexível, de 448 MB no total). O próprio código assume "um decodificador por vida do app". Não foi corrigido: liberar exige garantir que nenhum frame ainda aponte para o buffer antigo.
+- **Configurações por usuário x proteção do autoplay:** `guardSettingsForAutoplay` roda no boot com `settingsPath()`, que depende do usuário do controle; o arquivo `settings_<uid>.json` pode ficar fora do backup. Nos testes, o backup/restauração foi feito pelo script.
