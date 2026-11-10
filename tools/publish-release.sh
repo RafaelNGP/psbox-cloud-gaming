@@ -132,7 +132,7 @@ interval=15
 
 while true; do
     assets_json=$(gh release view "$tag" --json assets 2>/dev/null || echo '{"assets":[]}')
-    has_appimage=$(echo "$assets_json" | jq -r --arg n "$linux_name" --arg nl "PSBoxCloudGaming.Linux.-$tag.AppImage" '.assets[] | select((.name == $n or .name == $nl) and .state == "uploaded") | .name' | head -1)
+    has_appimage=$(echo "$assets_json" | jq -r --arg n "$linux_name" '.assets[] | select(.name == $n and .state == "uploaded") | .name' | head -1)
     if [[ -n "$has_appimage" ]]; then
         echo -e "${GREEN}Linux AppImage is uploaded on GitHub: $has_appimage${NC}"
         break

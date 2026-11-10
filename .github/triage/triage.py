@@ -34,6 +34,7 @@ LABEL_COLOURS = {
     "needs-info": "fbca04",
     "outdated-version": "c5def5",
     "crash": "b60205",
+    "unofficial-port": "d93f0b",
     "unsupported-platform": "d93f0b",
 }
 AREA_COLOUR = "1d76db"
@@ -48,13 +49,12 @@ STRINGS = {
             "(the app offers it after sign-in, or Settings > Updates). Does it still happen there?"
         ),
         "unsupported_147": (
-            "- **Unsupported version (v1.4.7 / unofficial PS4 port)**: Version 1.4.7 is an unofficial "
-            "port for PS4 created by a third party. It was not created or maintained by the author of this "
-            "repository, so official support cannot be provided for that build.\n\n"
-            "This repository now develops official versions for **PlayStation 5** (PPSA99810) and "
-            "**PlayStation 4**. Please download the official build from the latest release: "
-            f"{LATEST_RELEASE_URL}\n\n"
-            "This issue is being closed as an unsupported version/platform.\n\n"
+            "- **Unofficial port (v1.4.7)**: Version 1.4.7 is an unofficial port for PS4 created by a third party. "
+            "It was not created or maintained by the author of this repository, so official support cannot be provided for that build.\n\n"
+            "This repository develops official native versions for **PlayStation 5** (PPSA99810), **PlayStation 4** (PKG), and **Linux** (AppImage). "
+            "Please download the correct official version from our latest release:\n"
+            f"👉 {LATEST_RELEASE_URL}\n\n"
+            "This issue is being closed as an unofficial port.\n\n"
             "*(Tip: If you are having issues claiming games or managing your account, visit https://www.xbox.com/play "
             "in a PC or mobile browser to manage your account and claim titles directly).*"
         ),
@@ -82,13 +82,12 @@ STRINGS = {
             "(o app oferece a atualização após o login ou em Configurações > Atualizações). O problema ainda ocorre nela?"
         ),
         "unsupported_147": (
-            "- **Versão não suportada (v1.4.7 / port não-oficial de PS4)**: A versão 1.4.7 é uma modificação/port "
-            "não-oficial para PS4 desenvolvida por terceiros. Não é possível oferecer suporte técnico, investigar "
-            "problemas ou realizar correções para essa versão, pois ela não foi feita pelo mantenedor deste projeto.\n\n"
-            "Este repositório agora desenvolve versões oficiais para **PlayStation 5** (PPSA99810) e "
-            "**PlayStation 4**. Baixe a versão oficial na release mais recente: "
-            f"{LATEST_RELEASE_URL}\n\n"
-            "Esta issue está sendo encerrada por se tratar de uma versão/plataforma não suportada.\n\n"
+            "- **Port não-oficial (v1.4.7)**: A versão 1.4.7 é um port/modificação não-oficial para PS4 desenvolvida por terceiros. "
+            "Não é possível oferecer suporte técnico, investigar problemas ou realizar correções para essa versão, pois ela não foi feita pelo mantenedor deste projeto.\n\n"
+            "Este repositório desenvolve versões oficiais nativas para **PlayStation 5** (PPSA99810), **PlayStation 4** (PKG) e **Linux** (AppImage). "
+            "Por favor, baixe a versão oficial correta na nossa release mais recente:\n"
+            f"👉 {LATEST_RELEASE_URL}\n\n"
+            "Esta issue está sendo encerrada por se tratar de um port não-oficial.\n\n"
             "*(Dica: Se estiver com problemas para resgatar jogos gratuitos ou gerenciar sua conta, acesse https://www.xbox.com/play "
             "pelo navegador de um computador ou celular para resgatar os títulos diretamente na sua conta Xbox).*"
         ),
@@ -116,13 +115,12 @@ STRINGS = {
             "(la app ofrece actualizar tras iniciar sesión o en Configuración > Actualizaciones). ¿Sigue ocurriendo ahí?"
         ),
         "unsupported_147": (
-            "- **Versión no admitida (v1.4.7 / port no oficial de PS4)**: La versión 1.4.7 es una modificación/port "
-            "no oficial para PS4 desarrollado por terceros. No es posible ofrecer asistencia técnica, investigar "
-            "problemas ni publicar correcciones para esa versión, ya que no fue creada por el mantenedor de este proyecto.\n\n"
-            "Este repositorio ahora desarrolla versiones oficiales para **PlayStation 5** (PPSA99810) y "
-            "**PlayStation 4**. Descarga la versión oficial desde la release más reciente: "
-            f"{LATEST_RELEASE_URL}\n\n"
-            "Este reporte se cierra por tratarse de una versión/plataforma no admitida.\n\n"
+            "- **Port no oficial (v1.4.7)**: La versión 1.4.7 es una modificación/port no oficial para PS4 desarrollado por terceros. "
+            "No es posible ofrecer asistencia técnica, investigar problemas ni publicar correcciones para esa versión, ya que no fue creada por el mantenedor de este proyecto.\n\n"
+            "Este repositorio desarrolla versiones oficiales nativas para **PlayStation 5** (PPSA99810), **PlayStation 4** (PKG) y **Linux** (AppImage). "
+            "Por favor, descarga la versión oficial correcta desde nuestra release más reciente:\n"
+            f"👉 {LATEST_RELEASE_URL}\n\n"
+            "Este reporte se cierra por tratarse de un port no oficial.\n\n"
             "*(Consejo: Si tienes dificultades para reclamar juegos gratuitos o gestionar tu cuenta, accede a https://www.xbox.com/play "
             "desde el navegador de un ordenador o móvil para reclamar los títulos directamente en tu cuenta de Xbox).*"
         ),
@@ -270,7 +268,7 @@ def triage(issue, rules, latest):
     reply_key = f"reply_{lang}" if lang != "en" else "reply"
 
     if is_unsupported_147(fields, release, title, body):
-        labels = ["unsupported-platform"]
+        labels = ["unofficial-port"]
         out = [MARKER, tr["header"], "", tr["unsupported_147"], "", tr["reddit_invite"]]
         return labels, "\n".join(out), "not_planned"
 

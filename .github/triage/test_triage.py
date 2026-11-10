@@ -166,10 +166,10 @@ class Triage(unittest.TestCase):
             title="Problem on 1.4.7",
             latest="1.5.4"
         )
-        self.assertEqual(labels, ["unsupported-platform"])
+        self.assertEqual(labels, ["unofficial-port"])
         self.assertTrue(close)
         self.assertIn("Automatic triage", comment)
-        self.assertIn("Unsupported version (v1.4.7 / unofficial PS4 port)", comment)
+        self.assertIn("Unofficial port (v1.4.7)", comment)
         self.assertIn("PlayStation 5", comment)
         self.assertNotIn("needs-info", labels)
         self.assertNotIn("outdated-version", labels)
@@ -180,10 +180,10 @@ class Triage(unittest.TestCase):
             title="Erro ao logar na conta",
             latest="1.5.4"
         )
-        self.assertEqual(labels, ["unsupported-platform"])
+        self.assertEqual(labels, ["unofficial-port"])
         self.assertTrue(close)
         self.assertIn("Triagem automática", comment)
-        self.assertIn("Versão não suportada (v1.4.7 / port não-oficial de PS4)", comment)
+        self.assertIn("Port não-oficial (v1.4.7)", comment)
         self.assertIn("não-oficial para PS4 desenvolvida por terceiros", comment)
         self.assertIn("não foi feita pelo mantenedor", comment)
 
@@ -193,10 +193,10 @@ class Triage(unittest.TestCase):
             title="Error al iniciar sesión",
             latest="1.5.4"
         )
-        self.assertEqual(labels, ["unsupported-platform"])
+        self.assertEqual(labels, ["unofficial-port"])
         self.assertTrue(close)
         self.assertIn("Triaje automático", comment)
-        self.assertIn("Versión no admitida (v1.4.7 / port no oficial de PS4)", comment)
+        self.assertIn("Port no oficial (v1.4.7)", comment)
 
     def test_unsupported_147_free_text(self):
         labels, comment, close = self.run_triage_full(
@@ -204,9 +204,9 @@ class Triage(unittest.TestCase):
             title="Ajuda com 1.4.7",
             latest="1.5.4"
         )
-        self.assertEqual(labels, ["unsupported-platform"])
+        self.assertEqual(labels, ["unofficial-port"])
         self.assertTrue(close)
-        self.assertIn("Versão não suportada", comment)
+        self.assertIn("Port não-oficial", comment)
 
     def test_unsupported_147_points_to_official_ps4_latest_release(self):
         url = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"
