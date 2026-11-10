@@ -405,7 +405,8 @@ int desktopSelftest(const std::string& dir) {
     drawVideo(bars);
     bool overlayOk = screenshot(dir, "4-overlay.png", shot);
     // Beside the menu the bars are untouched; under it they are covered.
-    for (int b = 3; b < 8 && overlayOk; ++b) overlayOk = barMatches(shot, b, 540);
+    // The menu panel and side companion card extend across bars 0..4 (x=80 to x=1280).
+    for (int b = 5; b < 8 && overlayOk; ++b) overlayOk = barMatches(shot, b, 540);
     overlayOk = overlayOk && !barMatches(shot, 1, 540);
     check(overlayOk, "game menu over the video (4-overlay.png)");
     display::setOverlay(nullptr, 0, 0, 0, 0, 0);
