@@ -10,6 +10,7 @@
 #include "input/controller.h"
 #include "media/audio_out.h"
 #include "media/audio_queue.h"
+#include "media/hw_decoder.h"
 #include "platform/platform.h"
 #include "ui/cloud_time.h"
 #include "ui/strings.h"
@@ -21,6 +22,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -108,6 +110,14 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         bool preferHw = true;
         if (g_autoplay.swDecode) {
             preferHw = false;
+            // The in-game menu shows the decoder forced here (not the saved
+            // one), so a test switches it from the menu (autoplay "bench").
+            if (!hasCustom) {
+                g_settings.videoDecoder = 1;
+            } else if (auto it = g_settings.perGame.find(gameProfileKey(g_stageProduct, g_stageTitle));
+                       it != g_settings.perGame.end()) {
+                it->second.videoDecoder = 1;
+            }
         } else if (g_autoplay.preferHwDecode) {
             preferHw = (hasCustom ? (prof.videoDecoder == 0) : (g_settings.videoDecoder == 0));
         } else {
@@ -195,6 +205,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     uint64_t nextPeriodicShot = 150000;
     int periodicShotIdx = 5;
     bool autoplayDone = false;
+    bool benchMove = false;  // autoplay "bench": the camera turning (move.req)
     int bestRtt = -1;  // lowest round trip seen: the region's latency
     int tallest = 0;   // the tallest picture seen (the probe's measure)
     // The connection's state for the warning and the end-of-session summary:
@@ -287,7 +298,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 autoplayDone = true;
                 break;
             }
-            if (!snapshot1 && elapsed >= 10000) {
+            if (!snapshot1 && !g_autoplay.bench && elapsed >= 10000) {
                 snapshot1 = true;
                 player.requestSnapshot(platform::dataDir() + "/frame.ppm");
             }
@@ -309,20 +320,27 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 if (moving && elapsed % 10000 >= 4000 && elapsed % 10000 < 4200) press = true;
             }
             if (press != g_syntheticA.exchange(press)) XC_LOGI("autoplay: A %s", press ? "down" : "up");
+            if (g_autoplay.bench) {
+                // The same slow camera turn in every measured window (the
+                // right stick only: the player stays put), so the picture
+                // keeps moving as in a game; off while the menus are used.
+                const float t = static_cast<float>(elapsed % 8000) / 8000.0f;
+                g_syntheticRightX = benchMove ? 0.6f * std::sin(t * 6.2831853f) : 0.0f;
+            }
             static bool dropped = false;
             if (g_autoplay.dropTest && !dropped && elapsed >= 20000) {
                 dropped = true;
                 player.simulateDrop();
             }
-            if (!snapshot2 && elapsed >= 28000) {
+            if (!snapshot2 && !g_autoplay.bench && elapsed >= 28000) {
                 snapshot2 = true;
                 player.requestSnapshot(platform::dataDir() + "/frame2.ppm");
             }
-            if (!snapshot3 && elapsed >= 70000) {
+            if (!snapshot3 && !g_autoplay.bench && elapsed >= 70000) {
                 snapshot3 = true;
                 player.requestSnapshot(platform::dataDir() + "/frame3.ppm");
             }
-            if (!snapshot4 && elapsed >= 110000) {
+            if (!snapshot4 && !g_autoplay.bench && elapsed >= 110000) {
                 snapshot4 = true;
                 player.requestSnapshot(platform::dataDir() + "/frame4.ppm");
             }
@@ -340,8 +358,57 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                     std::remove(req.c_str());
                     player.requestSnapshot(platform::dataDir() + "/now.ppm");
                 }
+                // A measurement window marked from outside (the file mark.req,
+                // its text the new window's name): the last one is logged. An
+                // empty file is one still being written (FTP creates it first):
+                // left for the next look.
+                const std::string mark = platform::dataDir() + "/mark.req";
+                std::string name;
+                if (platform::readFile(mark, name)) {
+                    while (!name.empty() && std::isspace(static_cast<unsigned char>(name.back()))) name.pop_back();
+                    if (!name.empty()) {
+                        std::remove(mark.c_str());
+                        player.markBenchWindow(name);
+                    }
+                }
+                // move.req: "1" turns the camera, "0" stops it.
+                const std::string move = platform::dataDir() + "/move.req";
+                std::string on;
+                if (g_autoplay.bench && platform::readFile(move, on) && !on.empty() && (on[0] == '0' || on[0] == '1')) {
+                    std::remove(move.c_str());
+                    benchMove = on[0] == '1';
+                    XC_LOGI("BENCH camera turning %s", benchMove ? "on" : "off");
+                }
+                // hwcfg.req: "pipe=N queue=N prio=N aff=0xN opt=N" (any of them;
+                // the others back to the shipped setup), then the hardware
+                // decoder made again with it.
+                const std::string hwcfg = platform::dataDir() + "/hwcfg.req";
+                std::string cfg;
+                if (g_autoplay.bench && platform::readFile(hwcfg, cfg) && !cfg.empty()) {
+                    std::remove(hwcfg.c_str());
+                    media::HwDecoder::Tuning t{};
+                    size_t pos = 0;
+                    while (pos < cfg.size()) {
+                        size_t end = cfg.find_first_of(" \t\r\n", pos);
+                        if (end == std::string::npos) end = cfg.size();
+                        const std::string kv = cfg.substr(pos, end - pos);
+                        pos = end + 1;
+                        const size_t eq = kv.find('=');
+                        if (eq == std::string::npos) continue;
+                        const std::string k = kv.substr(0, eq);
+                        const long long v = std::strtoll(kv.c_str() + eq + 1, nullptr, 0);
+                        if (k == "pipe") t.pipe = static_cast<int>(v);
+                        else if (k == "queue") t.queue = static_cast<int>(v);
+                        else if (k == "prio") t.cpuPriority = static_cast<int>(v);
+                        else if (k == "aff") t.cpuAffinity = static_cast<uint64_t>(v);
+                        else if (k == "opt") t.optimizeProgressive = static_cast<int>(v);
+                    }
+                    media::HwDecoder::tuning() = t;
+                    XC_LOGI("BENCH hwdec config \"%s\"", cfg.c_str());
+                    player.recreateHwDecoder();
+                }
             }
-            if (elapsed >= nextPeriodicShot) {
+            if (!g_autoplay.bench && elapsed >= nextPeriodicShot) {
                 nextPeriodicShot = elapsed + 30000;
                 player.requestSnapshot(platform::dataDir() + "/frame" + std::to_string(periodicShotIdx++) + ".ppm");
             }

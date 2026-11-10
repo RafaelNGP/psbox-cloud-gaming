@@ -35,6 +35,10 @@ struct Autoplay {
     bool dump = false;
     int runs = 1;
     bool idle = false;
+    // "bench": decoder measurements in a stream; nothing pressed, no automatic
+    // captures (they cost the video thread time), windows marked from outside
+    // with the file mark.req (StreamPlayer::markBenchWindow).
+    bool bench = false;
     bool consolesTab = false;    // "consolestab": open My consoles, save consoles.ppm
     bool consolesEmpty = false;  // with "consolestab": as if none were found
     bool checkSignInTest = false;// "checksignintest": open sign-in check, verify 6 stages, save signin_check.ppm

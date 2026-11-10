@@ -30,7 +30,30 @@ public:
     // One access unit in; true with `out` when a picture came out.
     bool decode(const uint8_t* data, size_t len, uint64_t pts, Picture& out);
 
+    // The last decode() call's time: the decode call itself, and the flush
+    // that follows it when the picture was not out yet (measurements only).
+    struct Timing {
+        uint64_t decodeUs = 0, flushUs = 0;
+        bool flushed = false;
+    };
+    const Timing& lastTiming() const { return timing_; }
+
+    // The PS5 decoder's setup, for measurements (autoplay "bench", hwcfg.req):
+    // read by the next init(). The defaults are the shipped setup.
+    struct Tuning {
+        int pipe = -1;  // -1: the first free of pipes 1, 2, 3, 4, 0
+        int queue = 0;
+        int cpuPriority = 700;
+        uint64_t cpuAffinity = 0;
+        int optimizeProgressive = 1;
+    };
+    static Tuning& tuning() {
+        static Tuning t;
+        return t;
+    }
+
 private:
+    Timing timing_{};
     void* decoder_ = nullptr;
     // The PS5 backend's; the null one never sets them.
     [[maybe_unused]] void* computeQueue_ = nullptr;

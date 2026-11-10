@@ -156,6 +156,63 @@ struct StreamPlayer::Impl {
         while (v > cur && !a.compare_exchange_weak(cur, v)) {
         }
     }
+
+    // Measurement windows (markBenchWindow): every frame's times from one
+    // mark to the next, for the percentiles a per-second average can't give.
+    // Off (nothing recorded, no lock taken) until the first mark.
+    struct Hist {
+        static constexpr uint64_t kStepUs = 10, kBuckets = 10000;  // 10 us steps up to 100 ms
+        std::vector<uint32_t> n = std::vector<uint32_t>(kBuckets + 1, 0);
+        uint64_t count = 0, sumUs = 0, maxUs = 0;
+        void add(uint64_t us) {
+            ++n[std::min(us / kStepUs, kBuckets)];
+            ++count;
+            sumUs += us;
+            maxUs = std::max(maxUs, us);
+        }
+        double avgMs() const { return count ? sumUs / 1000.0 / static_cast<double>(count) : 0.0; }
+        double maxMs() const { return maxUs / 1000.0; }
+        double pctMs(double p) const {
+            if (!count) return 0.0;
+            const uint64_t want = static_cast<uint64_t>(p * static_cast<double>(count - 1)) + 1;
+            uint64_t seen = 0;
+            for (uint64_t i = 0; i <= kBuckets; ++i) {
+                seen += n[i];
+                if (seen >= want) return std::min((i + 0.5) * kStepUs, static_cast<double>(maxUs)) / 1000.0;
+            }
+            return maxMs();
+        }
+    };
+    struct BenchWindow {
+        std::string name;
+        uint64_t startMs = 0;
+        Hist decode, hwDecode, hwFlush, qpParse, draw, onScreen, glass;
+        uint64_t swCalls = 0, hwCalls = 0, flushed = 0;
+        uint64_t decoded0 = 0, dropped0 = 0, late0 = 0, failures0 = 0;
+        uint64_t rtpLost0 = 0, rtpRecovered0 = 0, rtpDropped0 = 0;
+    };
+    std::atomic<bool> benchOn{false};
+    std::mutex benchMutex;
+    BenchWindow bench;
+    void benchDecode(uint64_t us, const media::VideoDecoder& d) {
+        if (!benchOn) return;
+        std::lock_guard<std::mutex> lock(benchMutex);
+        bench.decode.add(us);
+        if (!d.isHardware()) {
+            ++bench.swCalls;
+            return;
+        }
+        ++bench.hwCalls;
+        const auto& t = d.hwTiming();
+        bench.hwDecode.add(t.decodeUs);
+        if (t.flushed) ++bench.flushed, bench.hwFlush.add(t.flushUs);
+        if (d.lastQpParseUs() >= 0) bench.qpParse.add(static_cast<uint64_t>(d.lastQpParseUs()));
+    }
+    void benchAdd(Hist BenchWindow::*h, uint64_t us) {
+        if (!benchOn) return;
+        std::lock_guard<std::mutex> lock(benchMutex);
+        (bench.*h).add(us);
+    }
     bool loggedFirstDecode = false;
     FILE* dumpFile = nullptr;
     uint64_t dumpUntilMs = 0;
@@ -188,6 +245,7 @@ struct StreamPlayer::Impl {
     std::atomic<int> fpsLimit{0};                // setFpsLimit()
     std::atomic<bool> legacy{false};             // setLegacyTuning()
     std::atomic<int> decoderSwitch{-1};          // switchDecoder(): 0 software, 1 hardware
+    std::atomic<bool> hwRecreate{false};         // recreateHwDecoder() (measurements)
     std::atomic<bool> micEnabled{true};
     std::atomic<bool> micMuted{false};
     std::atomic<float> micGain{1.0f};
@@ -542,6 +600,7 @@ struct StreamPlayer::Impl {
                         displayUs += lat;
                         ++displayCount;
                         atomicMax(displayMaxUs, lat);
+                        benchAdd(&BenchWindow::onScreen, lat);
                     }
                 }
             }
@@ -559,6 +618,7 @@ struct StreamPlayer::Impl {
             drawUs += tDrawDone - t2;
             ++drawCalls;
             atomicMax(drawMaxUs, tDrawDone - t2);
+            benchAdd(&BenchWindow::draw, tDrawDone - t2);
             if (!loggedFirstPresent) {
                 loggedFirstPresent = true;
                 XC_LOGI("first frame presented");
@@ -630,12 +690,14 @@ struct StreamPlayer::Impl {
                 displayUs += lat;
                 ++displayCount;
                 atomicMax(displayMaxUs, lat);
+                benchAdd(&BenchWindow::onScreen, lat);
             }
             if (q.firstPacketUs && shownAt > q.firstPacketUs) {
                 uint64_t lat = shownAt - q.firstPacketUs;
                 glassUs += lat;
                 ++glassCount;
                 atomicMax(glassMaxUs, lat);
+                benchAdd(&BenchWindow::glass, lat);
             }
         };
         while (running) {
@@ -711,6 +773,18 @@ struct StreamPlayer::Impl {
             if (inFlight.size() > 16) inFlight.pop_front();
             // A/B tests: another decoder while streaming, from the next key
             // frame (autoplay "abcycle").
+            // Measurements (autoplay "bench", hwcfg.req): the hardware decoder
+            // made again with HwDecoder::tuning(), the old one gone first so
+            // the new one can take the same compute pipe.
+            if (hwRecreate.exchange(false)) {
+                decoder.reset();
+                auto next = std::make_unique<media::VideoDecoder>();
+                next->init(decodeThreads, true);
+                decoder = std::move(next);
+                keyframeWanted = true;
+                requestKeyframeIfWanted();
+                XC_LOGI("stream: decoder made again: %s", decoder->isHardware() ? "hardware" : "software (hardware failed)");
+            }
             if (int want = decoderSwitch.exchange(-1); want >= 0) {
                 auto next = std::make_unique<media::VideoDecoder>();
                 if (next->init(decodeThreads, want == 1)) {
@@ -738,6 +812,7 @@ struct StreamPlayer::Impl {
             decodeUs += t1 - t0;
             ++decodeCalls;
             atomicMax(decodeMaxUs, t1 - t0);
+            benchDecode(t1 - t0, *decoder);
             if (first) {
                 loggedFirstDecode = true;
                 XC_LOGI("first video decode done: ok=%d", ok);
@@ -866,6 +941,7 @@ struct StreamPlayer::Impl {
             drawUs += t3 - t2;
             ++drawCalls;
             atomicMax(drawMaxUs, t3 - t2);
+            benchAdd(&BenchWindow::draw, t3 - t2);
             if (decodedFrames == 1) XC_LOGI("first frame presented");
             if (imageTestWanted.exchange(false)) imageTest(pic, drawPic);
         }
@@ -1476,6 +1552,60 @@ StreamPlayer::Stats StreamPlayer::stats() const {
 }
 
 void StreamPlayer::switchDecoder(bool hardware) { impl_->decoderSwitch = hardware ? 1 : 0; }
+
+void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
+
+void StreamPlayer::markBenchWindow(const std::string& name) {
+    Impl& m = *impl_;
+    uint64_t lost = 0, recovered = 0, rtpDropped = 0;
+    if (auto s = m.current()) {
+        const auto& v = s->videoStats();
+        lost = v.lost, recovered = v.recovered, rtpDropped = v.framesDropped;
+    }
+    std::lock_guard<std::mutex> lock(m.benchMutex);
+    const uint64_t now = platform::nowMs();
+    if (m.benchOn) {
+        const Impl::BenchWindow& b = m.bench;
+        const char* dec = b.hwCalls && b.swCalls ? "mixed" : b.hwCalls ? "HW" : b.swCalls ? "SW" : "none";
+        XC_LOGI("BENCH window \"%s\": %.1f s, decoder %s (%llu sw, %llu hw calls); "
+                "decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
+                "hw decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
+                "flush %llu of %llu, avg %.2f p50 %.2f p95 %.2f max %.2f ms; "
+                "qp parse %llu, avg %.3f p95 %.3f max %.3f ms; "
+                "draw avg %.2f p95 %.2f max %.2f ms; "
+                "on screen avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
+                "first packet to screen avg %.2f p50 %.2f p95 %.2f max %.2f ms; "
+                "%llu decoded, %llu skipped, %llu late, %llu failed; rtp %llu lost, %llu recovered, %llu frames dropped",
+                b.name.c_str(), (now - b.startMs) / 1000.0, dec, static_cast<unsigned long long>(b.swCalls),
+                static_cast<unsigned long long>(b.hwCalls),
+                b.decode.avgMs(), b.decode.pctMs(0.5), b.decode.pctMs(0.95), b.decode.pctMs(0.99), b.decode.maxMs(),
+                b.hwDecode.avgMs(), b.hwDecode.pctMs(0.5), b.hwDecode.pctMs(0.95), b.hwDecode.pctMs(0.99),
+                b.hwDecode.maxMs(),
+                static_cast<unsigned long long>(b.flushed), static_cast<unsigned long long>(b.hwCalls),
+                b.hwFlush.avgMs(), b.hwFlush.pctMs(0.5), b.hwFlush.pctMs(0.95), b.hwFlush.maxMs(),
+                static_cast<unsigned long long>(b.qpParse.count), b.qpParse.avgMs(), b.qpParse.pctMs(0.95),
+                b.qpParse.maxMs(),
+                b.draw.avgMs(), b.draw.pctMs(0.95), b.draw.maxMs(),
+                b.onScreen.avgMs(), b.onScreen.pctMs(0.5), b.onScreen.pctMs(0.95), b.onScreen.pctMs(0.99),
+                b.onScreen.maxMs(),
+                b.glass.avgMs(), b.glass.pctMs(0.5), b.glass.pctMs(0.95), b.glass.maxMs(),
+                static_cast<unsigned long long>(m.decodedFrames - b.decoded0),
+                static_cast<unsigned long long>(m.droppedFrames - b.dropped0),
+                static_cast<unsigned long long>(m.lateFrames - b.late0),
+                static_cast<unsigned long long>(m.decodeFailures - b.failures0),
+                static_cast<unsigned long long>(lost - b.rtpLost0),
+                static_cast<unsigned long long>(recovered - b.rtpRecovered0),
+                static_cast<unsigned long long>(rtpDropped - b.rtpDropped0));
+    }
+    m.bench = Impl::BenchWindow{};
+    m.bench.name = name;
+    m.bench.startMs = now;
+    m.bench.decoded0 = m.decodedFrames, m.bench.dropped0 = m.droppedFrames;
+    m.bench.late0 = m.lateFrames, m.bench.failures0 = m.decodeFailures;
+    m.bench.rtpLost0 = lost, m.bench.rtpRecovered0 = recovered, m.bench.rtpDropped0 = rtpDropped;
+    m.benchOn = true;
+    XC_LOGI("BENCH mark: window \"%s\" starts", name.c_str());
+}
 
 void StreamPlayer::setLegacyTuning(bool on) {
     impl_->legacy = on;

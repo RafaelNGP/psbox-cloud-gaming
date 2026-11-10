@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <iterator>
 
 extern "C" {
 int sceSysmoduleLoadModule(uint32_t id);
@@ -134,11 +135,20 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     if (!compute.cpuGpu) return false;
 
     void* queue = nullptr;
-    const uint16_t pipeOrder[] = {1, 2, 3, 4, 0};
-    for (uint16_t pipe : pipeOrder) {
+    const Tuning tune = tuning();
+    XC_LOGI("hwdec: setup pipe %d queue %d cpu priority %d affinity 0x%llx optimizeProgressive %d", tune.pipe,
+            tune.queue, tune.cpuPriority, static_cast<unsigned long long>(tune.cpuAffinity), tune.optimizeProgressive);
+    const uint16_t defaultOrder[] = {1, 2, 3, 4, 0};
+    const uint16_t chosen[] = {static_cast<uint16_t>(tune.pipe)};
+    const bool fixedPipe = tune.pipe >= 0;
+    const uint16_t* order = fixedPipe ? chosen : defaultOrder;
+    const size_t orderCount = fixedPipe ? 1 : std::size(defaultOrder);
+    for (size_t i = 0; i < orderCount; ++i) {
+        const uint16_t pipe = order[i];
         Vdec2ComputeConfig computeConfig{};
         computeConfig.size = sizeof computeConfig;
         computeConfig.pipeId = pipe;
+        computeConfig.queueId = static_cast<uint16_t>(tune.queue);
         rc = sceVideodec2AllocateComputeQueue(&computeConfig, &compute, &queue);
         XC_LOGI("hwdec: compute queue pipe %u -> 0x%08x (queue=%p)", pipe, static_cast<unsigned>(rc), queue);
         if (rc == 0 && queue) {
@@ -172,9 +182,9 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
         config.maxDpbFrames = p.dpbFrames;
         config.pipelineDepth = 1;
         config.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
-        config.cpuPriority = 700;  // Standard Sony thread priority (SCE_KERNEL_PRIO_FIFO_DEFAULT)
-        config.cpuAffinity = 0;    // Any core (unconstrained)
-        config.optimizeProgressive = 1;
+        config.cpuPriority = tune.cpuPriority;  // 700 shipped: SCE_KERNEL_PRIO_FIFO_DEFAULT
+        config.cpuAffinity = tune.cpuAffinity;  // 0 shipped: any core
+        config.optimizeProgressive = static_cast<uint32_t>(tune.optimizeProgressive);
         memory = Vdec2DecoderMemory{};
         memory.size = sizeof memory;
         rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
@@ -229,6 +239,7 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
         rc = sceVideodec2Flush(decoder_, &frame, &info);
         tFlush = platform::nowUs() - tf0;
     }
+    timing_ = {tDecode, tFlush, flushed};
     static int logged = 0;
     if (logged < 15) {
         ++logged;

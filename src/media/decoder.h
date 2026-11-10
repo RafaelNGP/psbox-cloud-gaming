@@ -116,6 +116,11 @@ public:
     double lastQp() const { return lastQp_; }
     // Whether hardware acceleration is currently active.
     bool isHardware() const { return isHw_; }
+    // The hardware path's last decode() (measurements only): the decoder's
+    // own decode and flush calls, and the QP parse before them (-1 when the
+    // frame was not parsed).
+    const HwDecoder::Timing& hwTiming() const { return hw_.lastTiming(); }
+    int64_t lastQpParseUs() const { return qpParseUs_; }
     int hwPixFmt() const { return hwPixFmt_; }
     void setHardware(bool hw) { isHw_ = hw; }
 
@@ -141,6 +146,7 @@ private:
     bool pending_ = false;
     int failuresLogged_ = 0;
     double lastQp_ = -1;
+    int64_t qpParseUs_ = -1;
     uint32_t qpSampleCounter_ = 0;
 };
 

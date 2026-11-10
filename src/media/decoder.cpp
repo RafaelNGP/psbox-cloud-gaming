@@ -19,6 +19,7 @@ extern "C" {
 #include <cstdio>
 #include <cstring>
 #include <atomic>
+#include <chrono>
 #include <mutex>
 #include <string>
 
@@ -678,8 +679,12 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
             ((data[2] == 1 && ((data[3] & 0x1F) == 5 || (data[3] & 0x1F) == 7)) ||
              (data[2] == 0 && data[3] == 1 && ((data[4] & 0x1F) == 5 || (data[4] & 0x1F) == 7))));
 
+        qpParseUs_ = -1;
         if (lastQp_ < 0 || isKey || (++qpSampleCounter_ % 8 == 0)) {
+            const auto qp0 = std::chrono::steady_clock::now();
             double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
+            qpParseUs_ = static_cast<int64_t>(
+                std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - qp0).count());
             if (parsedQp >= 0) {
                 lastQp_ = parsedQp;
             }

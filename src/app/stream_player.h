@@ -90,6 +90,13 @@ public:
     // Measurements only (autoplay "abcycle"): the hardware or the software
     // decoder from the next frame on, while streaming.
     void switchDecoder(bool hardware);
+    // Measurements only (autoplay "bench", the file mark.req): logs the
+    // window since the last mark (every frame's decode, draw and on-screen
+    // times as percentiles; the counters' increase) and starts a new one.
+    void markBenchWindow(const std::string& name);
+    // Measurements only (autoplay "bench", hwcfg.req): the hardware decoder
+    // made again from the next frame, with media::HwDecoder::tuning().
+    void recreateHwDecoder();
     void setMicEnabled(bool enabled);
     bool micEnabled() const;
     void setMicMuted(bool muted);

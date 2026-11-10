@@ -109,6 +109,7 @@ void loadAutoplay() {
         if (opt == "dump") g_autoplay.dump = true;
         if (opt == "repeat") g_autoplay.runs = 2;
         if (opt == "idle") g_autoplay.idle = true;
+        if (opt == "bench") g_autoplay.bench = g_autoplay.idle = true;
         if (opt == "hz60") g_autoplay.hz60 = true;
         if (opt == "fnplay") g_autoplay.fnPlay = true;
         if (opt == "legacy") g_autoplay.legacy = true;
