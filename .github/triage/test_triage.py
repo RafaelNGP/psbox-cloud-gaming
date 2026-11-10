@@ -208,6 +208,13 @@ class Triage(unittest.TestCase):
         self.assertTrue(close)
         self.assertIn("Port não-oficial", comment)
 
+    def test_triage_mentions_author_when_provided(self):
+        labels, comment, close = triage.triage(
+            {"title": "Bug on 1.4.7", "body": "1.4.7 crash", "user": {"login": "playerone"}},
+            RULES, "1.6.9"
+        )
+        self.assertIn("@playerone", comment)
+
     def test_unsupported_147_points_to_official_ps4_latest_release(self):
         url = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"
         cases = [

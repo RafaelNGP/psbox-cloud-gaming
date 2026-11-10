@@ -266,10 +266,12 @@ def triage(issue, rules, latest):
     lang = detect_lang(title, parts["what"], log)
     tr = STRINGS[lang]
     reply_key = f"reply_{lang}" if lang != "en" else "reply"
+    author = (issue.get("user") or {}).get("login") or issue.get("author")
+    mention_line = [f"@{author}"] if author else []
 
     if is_unsupported_147(fields, release, title, body):
         labels = ["unofficial-port"]
-        out = [MARKER, tr["header"], "", tr["unsupported_147"], "", tr["reddit_invite"]]
+        out = [MARKER] + mention_line + [tr["header"], "", tr["unsupported_147"], "", tr["reddit_invite"]]
         return labels, "\n".join(out), "not_planned"
 
     empty_issue = is_empty_issue(body, fields)
@@ -292,7 +294,7 @@ def triage(issue, rules, latest):
 
     if empty_issue:
         if notes:
-            out = [MARKER, tr["header"], ""]
+            out = [MARKER] + mention_line + [tr["header"], ""]
             for note in notes:
                 out.append(f"- {note}")
             out.append(tr["empty_title_known"])
@@ -318,7 +320,7 @@ def triage(issue, rules, latest):
 
     if not notes and not asks and not outdated:
         return labels, None, False
-    out = [MARKER, tr["header"], ""]
+    out = [MARKER] + mention_line + [tr["header"], ""]
     for note in notes:
         out.append(f"- {note}")
     if outdated and not asked_update:
