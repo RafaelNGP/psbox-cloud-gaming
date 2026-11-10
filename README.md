@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">PSBox Cloud Gaming</h1>
-<p align="center"><em>Xbox Cloud Gaming, running natively on PlayStation 5.</em></p>
+<p align="center"><em>Xbox Cloud Gaming, running natively on PlayStation 5, PlayStation 4, and Linux.</em></p>
 
 <p align="center">
   <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/RafaelNGP/psbox-cloud-gaming?color=brightgreen"></a>
@@ -13,10 +13,10 @@
   <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/issues/new?template=bug_report.yml"><img alt="issues: report a problem" src="https://img.shields.io/badge/issues-report%20a%20problem-ff0000"></a>
 </p>
 
-A native Xbox Cloud Gaming client for jailbroken consoles: browse the cloud
-catalog and stream games at 1080p60, with the DualSense as an Xbox controller.
-The **PS5** is the main target. The same app also has builds for **PS4**
-(GoldHEN) and **Linux** (including the Steam Deck).
+A native Xbox Cloud Gaming client running natively across **PlayStation 5**,
+**PlayStation 4** (GoldHEN), and **Linux** (including Steam Deck Desktop & Game Mode):
+browse the cloud catalog and stream games at 1080p60, with your DualSense or DualShock 4
+as an Xbox controller.
 
 - **Sign in on your phone** with a code shown on the TV; no password on the console.
 - **Game Pass and Your games** tabs, search, and free-to-play games.
