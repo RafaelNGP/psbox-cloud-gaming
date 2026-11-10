@@ -7,6 +7,18 @@
 - **Virtual Steering Wheel with Auto-Centering**: Turn your DualSense into a real racing wheel! Tilting the gamepad turns your vehicle naturally, auto-centering when you release the triggers. Includes 4 driving presets: Casual, Normal, Aggressive, and Drift.
 - **Quick In-Game Calibration**: Fine-tune your horizontal/vertical sensitivity and wheel modes directly from the in-game stream menu with instant visual feedback.
 
+## 📱 SmartGlass WebUI & In-Game Companion Card
+- **Instant QR Code Access in In-Game Menu**: The in-game stream menu now features a dedicated side companion card with a crisp QR code pointing directly to `http://<console-ip>:8080`. Just scan with your phone to access settings and controls without leaving your game!
+- **Show/Hide QR Code Toggle**: Press <kbd>△</kbd> (Triangle on DualSense) or use the keyboard shortcut to hide or show the QR companion card at any time, with an indicator on the bottom bar.
+- **Enhanced Mobile Web Experience**: Restored full smartphone portrait orientation, fixed virtual thumbstick drag clipping, suppressed repetitive connection popups, and added live integer FPS and video quality (QP) telemetry.
+- **Multi-Device Support**: Connect multiple smartphones, tablets, or PC browsers simultaneously on your local network to monitor telemetry or adjust settings.
+
+## 🎨 Visual Redesign & Menu Refinement
+- **Two-Tab In-Game Navigation**: Stream menu reorganized into two distinct tabs: **General** (<kbd>L1</kbd>) and **Controls** (<kbd>R1</kbd>), with standardized badge sizes and pixel-perfect text centering.
+- **Smooth 13-Row Scrolling Viewport**: Long settings lists now scroll smoothly within a 13-row viewport, preventing text overlap, safe-area clipping, or cluttered screens.
+- **Interactive Testers & Wheel Calibration**: Added built-in visual dialogs to test analog stick deadzones, adaptive triggers, and a streamlined single-wheel gyro calibration modal.
+- **Unified Clean Toasts**: Replaced intrusive Sony OS dialog popups with clean, non-intrusive animated system toasts.
+
 ## ⚡ Higher Performance & Lower Latency on PS5
 - **Zero-Copy Direct Rendering**: Cloud video is now fed straight to the screen via the PS5 GPU without taxing the CPU, reducing display latency for snappier response times.
 - **Memory Leak Elimination**: The video decoder safely recycles memory buffers when switching games or toggling stream settings, preventing unnecessary memory build-up.
@@ -19,10 +31,9 @@
 - **No More Waiting on Game Library**: Trophy checks now instantly skip games that are already 100% complete or unchanged. Scanning a catalog of hundreds of games dropped from nearly a minute to just ~1 second.
 - **Full User Control**: Easily toggle background trophy sync on or off whenever you want.
 
-## 🛠️ PS4 Fixes & Visual Polish
+## 🛠️ PS4 Fixes & Hardware Stability
 - **OneFamily Gamepad Fix (#369)**: Full input recognition and button parity restored for OneFamily controllers configured in options 2, 3, and 4 (tested in *Remnant II*).
 - **Keyboard & Mouse Protection on PS4 (#379)**: Fixed a regression where plugging in USB gamepads detached keyboards and mice from the kernel driver, restoring full compatibility with `libSceKeyboard` and `libSceMouse`.
-- **Polished In-Game Menu**: Centered shoulder button badges (L1/R1) across tabs and clean, non-intrusive animated toasts.
 
 ---
 
@@ -56,6 +67,18 @@
 - **Modo Volante Virtual com Retorno Automático**: Transforme seu DualSense em um volante de corrida! Ao inclinar o controle para os lados, o jogo responde como um volante real, centralizando sozinho assim que você soltar os gatilhos. Conta com 4 estilos de direção: Casual, Normal, Agressivo e Drift.
 - **Novo Menu Rápido de Calibração**: Ajuste a sensibilidade horizontal, vertical e o modo volante diretamente pelo menu in-game da transmissão com resposta visual imediata.
 
+## 📱 SmartGlass WebUI e Card Companheiro no Menu In-Game
+- **Acesso Rápido por QR Code**: O menu in-game da transmissão agora conta com um card lateral dedicado com QR code em alta definição apontando para `http://<ip-do-console>:8080`. Basta apontar a câmera do celular para gerenciar ajustes sem sair do jogo!
+- **Mostrar/Esconder o QR Code Facilmente**: Pressione <kbd>△</kbd> (Triângulo no DualSense) ou o atalho no teclado a qualquer momento para recolher ou reexibir o card com QR code, com indicação no rodapé.
+- **WebUI Mobile Aperfeiçoada**: Suporte restaurado para telas em modo retrato (vertical), fim de cortes no analógico virtual ao deslizar o dedo, remoção de popups incômodos de conexão e telemetria limpa em tempo real de FPS e qualidade de vídeo (QP).
+- **Suporte a Múltiplos Dispositivos**: Conecte vários celulares, tablets ou PCs simultaneamente na mesma rede local para acompanhar dados ou alternar configurações.
+
+## 🎨 Redesenho Visual e Polimento dos Menus
+- **Navegação em Abas no Menu In-Game**: Reorganização em duas abas principais: **Geral** (<kbd>L1</kbd>) e **Controles** (<kbd>R1</kbd>), com badges de botões padronizados e texto milimetricamente centralizado na horizontal e vertical.
+- **Rolagem Fluida de 13 Linhas**: Menus longos agora contam com viewport deslizante de até 13 itens, eliminando qualquer corte de texto, sobreposição ou encavalamento contra as bordas da tela.
+- **Testadores Interativos e Calibração Intuitiva**: Novos modais visuais para teste de analógicos (Stick Tester), gatilhos adaptáveis e uma interface em roda única muito mais fácil para calibrar o giroscópio.
+- **Notificações Integradas (Toasts)**: Fim das caixas de diálogo popups intrusivas do sistema Sony, substituídas por toasts suaves e animados no próprio aplicativo.
+
 ## ⚡ Mais Desempenho e Menos Latência no PS5
 - **Renderização Direta Zero-Copy**: O vídeo da nuvem agora é transferido diretamente para a tela pela placa de vídeo do PS5, sem sobrecarregar o processador e reduzindo a latência de imagem para respostas ainda mais rápidas.
 - **Correção de Vazamento de Memória**: O decodificador de vídeo agora reutiliza a memória com segurança, evitando consumo excessivo ao trocar de jogo ou alternar configurações durante a partida.
@@ -68,10 +91,9 @@
 - **Fim da Espera na Biblioteca**: A verificação de conquistas agora pula instantaneamente os jogos já concluídos ou sem alterações. Sincronizar centenas de jogos da sua conta Xbox passou de quase um minuto para apenas 1 segundo.
 - **Controle Total**: Opção de ativar ou pausar a sincronização de troféus quando preferir.
 
-## 🛠️ Correções no PS4 e Polimento Visual
+## 🛠️ Correções no PS4 e Estabilidade de Hardware
 - **Correção de Controles OneFamily (#369)**: Reconhecimento de botões e comandos restaurado nas opções 2, 3 e 4 do driver OneFamily no PS4 (resolvido em jogos como *Remnant II*).
 - **Proteção de Teclado e Mouse no PS4 (#379)**: Corrigida a regressão no PS4 onde periféricos USB eram desconectados do sistema operacional, restaurando a compatibilidade nativa com `libSceKeyboard` e `libSceMouse`.
-- **Menu In-Game Mais Bonito**: Botões L1 e R1 perfeitamente centralizados nas abas do menu de transmissão e notificações do app mais limpas e integradas.
 
 ---
 
