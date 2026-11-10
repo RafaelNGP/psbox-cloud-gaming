@@ -35,6 +35,7 @@ public:
     struct Timing {
         uint64_t decodeUs = 0, flushUs = 0;
         bool flushed = false;
+        int64_t decodeCpuUs = -1;  // this thread's CPU time in the decode call (-1: unknown)
     };
     const Timing& lastTiming() const { return timing_; }
 
@@ -46,14 +47,33 @@ public:
         int cpuPriority = 700;
         uint64_t cpuAffinity = 0;
         int optimizeProgressive = 1;
+        int resourceType = 1;
     };
     static Tuning& tuning() {
         static Tuning t;
         return t;
     }
 
+    // Where the pictures go (PS5): two buffers used in turn (the display's,
+    // which takes them to the GPU without a CPU copy) and what is called
+    // before one is written (the GPU done reading it). Unset or off: the
+    // decoder's own buffer, copied by the display.
+    struct Output {
+        uint8_t* buffers[2] = {nullptr, nullptr};
+        size_t size = 0;
+        void (*beforeWrite)(const uint8_t*) = nullptr;
+        bool enabled = true;  // measurements (hwcfg.req "zc=0") turn it off
+    };
+    static Output& output() {
+        static Output o;
+        return o;
+    }
+
 private:
     Timing timing_{};
+    [[maybe_unused]] bool ownsPool_ = false;   // the memory kept between decoders is this one's
+    [[maybe_unused]] uint32_t frameAlignment_ = 0;
+    [[maybe_unused]] int nextOutput_ = 0;
     void* decoder_ = nullptr;
     // The PS5 backend's; the null one never sets them.
     [[maybe_unused]] void* computeQueue_ = nullptr;

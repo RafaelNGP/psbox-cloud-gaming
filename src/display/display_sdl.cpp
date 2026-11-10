@@ -348,6 +348,12 @@ void drawRgba(const uint32_t* pixels) {
     g_back.rgba.assign(pixels, pixels + static_cast<size_t>(kWidth) * kHeight);
 }
 
+bool videoSlots(size_t, uint8_t* out[2]) {
+    out[0] = out[1] = nullptr;
+    return false;  // no hardware decoder writes into the display here
+}
+void waitVideoSlot(const uint8_t*) {}
+
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
               int width, int height, bool) {
     if (!y || !uv || width <= 0 || height <= 0 || strideY < width || strideUV < width) return false;

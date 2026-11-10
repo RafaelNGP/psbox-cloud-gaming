@@ -27,6 +27,9 @@
 #include <set>
 #include <thread>
 #include <vector>
+#if !defined(_WIN32)
+#include <sys/resource.h>
+#endif
 
 namespace xc::app {
 
@@ -186,7 +189,8 @@ struct StreamPlayer::Impl {
     struct BenchWindow {
         std::string name;
         uint64_t startMs = 0;
-        Hist decode, hwDecode, hwFlush, qpParse, draw, onScreen, glass;
+        Hist decode, hwDecode, hwDecodeCpu, hwFlush, qpParse, draw, onScreen, glass;
+        int64_t cpu0Us = -1;  // the process's CPU time at the start (processCpuUs())
         uint64_t swCalls = 0, hwCalls = 0, flushed = 0;
         uint64_t decoded0 = 0, dropped0 = 0, late0 = 0, failures0 = 0;
         uint64_t rtpLost0 = 0, rtpRecovered0 = 0, rtpDropped0 = 0;
@@ -205,6 +209,7 @@ struct StreamPlayer::Impl {
         ++bench.hwCalls;
         const auto& t = d.hwTiming();
         bench.hwDecode.add(t.decodeUs);
+        if (t.decodeCpuUs >= 0) bench.hwDecodeCpu.add(static_cast<uint64_t>(t.decodeCpuUs));
         if (t.flushed) ++bench.flushed, bench.hwFlush.add(t.flushUs);
         if (d.lastQpParseUs() >= 0) bench.qpParse.add(static_cast<uint64_t>(d.lastQpParseUs()));
     }
@@ -628,6 +633,22 @@ struct StreamPlayer::Impl {
 
     void videoLoop() {
         platform::setThreadAffinity(platform::ThreadRole::VideoDecode, "xcloud_vdec");
+        // The hardware decoder's pictures straight into two of the display's
+        // buffers (the PS5's): drawn from there without a CPU copy. Asked once
+        // here, on the thread that draws; the buffers live as long as the app.
+        static bool slotsAsked = false;
+        if (!slotsAsked) {
+            slotsAsked = true;
+            constexpr size_t kSlotBytes = size_t{4} << 20;  // a 1920x1088 NV12 picture, pitch 2048, and room
+            uint8_t* slots[2] = {nullptr, nullptr};
+            if (display::videoSlots(kSlotBytes, slots)) {
+                media::HwDecoder::Output& o = media::HwDecoder::output();
+                o.buffers[0] = slots[0];
+                o.buffers[1] = slots[1];
+                o.size = kSlotBytes;
+                o.beforeWrite = &display::waitVideoSlot;
+            }
+        }
         auto decoder = std::make_unique<media::VideoDecoder>();
         if (!decoder->init(decodeThreads, preferHwDecode)) {
             end("could not start the H.264 decoder");
@@ -785,7 +806,11 @@ struct StreamPlayer::Impl {
                 requestKeyframeIfWanted();
                 XC_LOGI("stream: decoder made again: %s", decoder->isHardware() ? "hardware" : "software (hardware failed)");
             }
-            if (int want = decoderSwitch.exchange(-1); want >= 0) {
+            if (int want = decoderSwitch.exchange(-1); want == 1 && decoder->isHardware()) {
+                // Already the hardware one: a second one made beside it would
+                // need memory of its own (the kept memory is this one's).
+                XC_LOGI("stream: decoder already hardware");
+            } else if (want >= 0) {
                 auto next = std::make_unique<media::VideoDecoder>();
                 if (next->init(decodeThreads, want == 1)) {
                     decoder = std::move(next);
@@ -1555,8 +1580,23 @@ void StreamPlayer::switchDecoder(bool hardware) { impl_->decoderSwitch = hardwar
 
 void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
 
+namespace {
+// The process's CPU time, every thread (system libraries' too): -1 where unknown.
+int64_t processCpuUs() {
+#if defined(_WIN32)
+    return -1;
+#else
+    rusage u{};
+    if (getrusage(RUSAGE_SELF, &u) != 0) return -1;
+    return (static_cast<int64_t>(u.ru_utime.tv_sec) + u.ru_stime.tv_sec) * 1000000 + u.ru_utime.tv_usec +
+           u.ru_stime.tv_usec;
+#endif
+}
+}  // namespace
+
 void StreamPlayer::markBenchWindow(const std::string& name) {
     Impl& m = *impl_;
+    const int64_t cpuNow = processCpuUs();
     uint64_t lost = 0, recovered = 0, rtpDropped = 0;
     if (auto s = m.current()) {
         const auto& v = s->videoStats();
@@ -1570,6 +1610,7 @@ void StreamPlayer::markBenchWindow(const std::string& name) {
         XC_LOGI("BENCH window \"%s\": %.1f s, decoder %s (%llu sw, %llu hw calls); "
                 "decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
                 "hw decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
+                "hw decode thread cpu avg %.2f p50 %.2f p95 %.2f ms; process cpu %.0f%% of a core; "
                 "flush %llu of %llu, avg %.2f p50 %.2f p95 %.2f max %.2f ms; "
                 "qp parse %llu, avg %.3f p95 %.3f max %.3f ms; "
                 "draw avg %.2f p95 %.2f max %.2f ms; "
@@ -1581,6 +1622,10 @@ void StreamPlayer::markBenchWindow(const std::string& name) {
                 b.decode.avgMs(), b.decode.pctMs(0.5), b.decode.pctMs(0.95), b.decode.pctMs(0.99), b.decode.maxMs(),
                 b.hwDecode.avgMs(), b.hwDecode.pctMs(0.5), b.hwDecode.pctMs(0.95), b.hwDecode.pctMs(0.99),
                 b.hwDecode.maxMs(),
+                b.hwDecodeCpu.avgMs(), b.hwDecodeCpu.pctMs(0.5), b.hwDecodeCpu.pctMs(0.95),
+                (b.cpu0Us >= 0 && cpuNow >= 0 && now > b.startMs)
+                    ? 100.0 * static_cast<double>(cpuNow - b.cpu0Us) / 1000.0 / static_cast<double>(now - b.startMs)
+                    : -1.0,
                 static_cast<unsigned long long>(b.flushed), static_cast<unsigned long long>(b.hwCalls),
                 b.hwFlush.avgMs(), b.hwFlush.pctMs(0.5), b.hwFlush.pctMs(0.95), b.hwFlush.maxMs(),
                 static_cast<unsigned long long>(b.qpParse.count), b.qpParse.avgMs(), b.qpParse.pctMs(0.95),
@@ -1600,6 +1645,7 @@ void StreamPlayer::markBenchWindow(const std::string& name) {
     m.bench = Impl::BenchWindow{};
     m.bench.name = name;
     m.bench.startMs = now;
+    m.bench.cpu0Us = cpuNow;
     m.bench.decoded0 = m.decodedFrames, m.bench.dropped0 = m.droppedFrames;
     m.bench.late0 = m.lateFrames, m.bench.failures0 = m.decodeFailures;
     m.bench.rtpLost0 = lost, m.bench.rtpRecovered0 = recovered, m.bench.rtpDropped0 = rtpDropped;

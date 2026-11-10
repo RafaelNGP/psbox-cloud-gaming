@@ -387,6 +387,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 if (g_autoplay.bench && platform::readFile(hwcfg, cfg) && !cfg.empty()) {
                     std::remove(hwcfg.c_str());
                     media::HwDecoder::Tuning t{};
+                    bool zeroCopy = true;  // "zc=0": the picture copied by the CPU, as before
                     size_t pos = 0;
                     while (pos < cfg.size()) {
                         size_t end = cfg.find_first_of(" \t\r\n", pos);
@@ -402,10 +403,18 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                         else if (k == "prio") t.cpuPriority = static_cast<int>(v);
                         else if (k == "aff") t.cpuAffinity = static_cast<uint64_t>(v);
                         else if (k == "opt") t.optimizeProgressive = static_cast<int>(v);
+                        else if (k == "res") t.resourceType = static_cast<int>(v);
+                        else if (k == "zc") zeroCopy = v != 0;
+                        else if (k == "sw" && v == 1) t.resourceType = -1;  // the software decoder (FFmpeg) instead
                     }
-                    media::HwDecoder::tuning() = t;
                     XC_LOGI("BENCH hwdec config \"%s\"", cfg.c_str());
-                    player.recreateHwDecoder();
+                    media::HwDecoder::output().enabled = zeroCopy;
+                    if (t.resourceType == -1) {
+                        player.switchDecoder(false);
+                    } else {
+                        media::HwDecoder::tuning() = t;
+                        player.recreateHwDecoder();
+                    }
                 }
             }
             if (!g_autoplay.bench && elapsed >= nextPeriodicShot) {

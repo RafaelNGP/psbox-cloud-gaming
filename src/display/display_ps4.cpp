@@ -820,6 +820,12 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v,
     return true;
 }
 
+bool videoSlots(size_t, uint8_t* out[2]) {
+    out[0] = out[1] = nullptr;
+    return false;  // no hardware decoder writes into the display here
+}
+void waitVideoSlot(const uint8_t*) {}
+
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
               int width, int height, bool wait) {
     if (g_videoHandle < 0 || !y || !uv || width <= 0 || height <= 0 ||

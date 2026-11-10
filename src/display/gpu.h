@@ -42,6 +42,9 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
                 int width, int height, bool wait);
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
               int width, int height, bool wait);
+// As display::videoSlots / waitVideoSlot.
+bool videoSlots(size_t bytes, uint8_t* out[2]);
+void waitVideoSlot(const uint8_t* p);
 void drawRgba(const uint32_t* pixels);  // 1920x1080, 0xAABBGGRR
 void present();
 

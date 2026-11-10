@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cstdlib>
+#include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <iterator>
 
 extern "C" {
@@ -105,16 +107,57 @@ void* directMemory(size_t size, int protection) {
     return addr;
 }
 
+// The decoder's memory, kept for the next decoder: nothing is ever unmapped
+// (a picture on its way to the screen may still point into it), so each
+// decoder made again (the in-game switch, a new stream) used to leave ~58 MB
+// behind. One decoder at a time takes it; a second one alive at once (the
+// "hwdecode" probe) maps its own, as before.
+struct Kept {
+    void* p = nullptr;
+    size_t size = 0;
+};
+struct Pool {
+    Kept compute, cpu, gpu, cpuGpu, frame;
+    bool inUse = false;
+    size_t mapped = 0;  // all it ever mapped
+} g_pool;
+
+void* keptDirect(Kept& k, size_t size, int protection, bool& reused) {
+    if (k.p && k.size >= size) return k.p;
+    reused = false;
+    void* p = directMemory(size, protection);
+    if (p) k = {p, size}, g_pool.mapped += size;  // a bigger one: the old stays mapped (sizes never change in a run)
+    return p;
+}
+
+void* keptFlexible(Kept& k, size_t size, bool& reused) {
+    if (k.p && k.size >= size) return k.p;
+    reused = false;
+    void* p = nullptr;
+    int rc = sceKernelMapNamedFlexibleMemory(&p, size, 0x03, 0, "PSBoxVdecCpu");
+    if (rc != 0) {
+        XC_LOGE("hwdec: flexible memory %zu: 0x%08x", size, static_cast<unsigned>(rc));
+        return nullptr;
+    }
+    k = {p, size}, g_pool.mapped += size;
+    return p;
+}
+
 }  // namespace
 
 HwDecoder::~HwDecoder() {
-    // The memory stays mapped: one decoder for the app's life is the plan.
     if (decoder_) sceVideodec2DeleteDecoder(decoder_);
     if (computeQueue_) sceVideodec2ReleaseComputeQueue(computeQueue_);
+    if (ownsPool_) g_pool.inUse = false;  // its memory stays mapped, for the next decoder
 }
 
 bool HwDecoder::init(int maxWidth, int maxHeight) {
     if (decoder_) return true;
+    if (!ownsPool_ && !g_pool.inUse) ownsPool_ = g_pool.inUse = true;
+    bool reused = true;
+    auto direct = [&](Kept& k, size_t size, int protection) {
+        return ownsPool_ ? keptDirect(k, size, protection, reused) : directMemory(size, protection);
+    };
     int rc = sceSysmoduleLoadModule(kVideodecModule);
     XC_LOGI("hwdec: sysmodule %u -> 0x%08x", kVideodecModule, static_cast<unsigned>(rc));
     if (rc != 0 && rc != static_cast<int>(0x80020063)) return false;
@@ -130,14 +173,15 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
         computeSize = 0x498000;
         XC_LOGI("hwdec: using Prospero compute size fallback %zu bytes", computeSize);
     }
-    compute.cpuGpu = directMemory(computeSize, kCpuGpuRw);
+    compute.cpuGpu = direct(g_pool.compute, computeSize, kCpuGpuRw);
     compute.cpuGpuSize = computeSize;
     if (!compute.cpuGpu) return false;
 
     void* queue = nullptr;
     const Tuning tune = tuning();
-    XC_LOGI("hwdec: setup pipe %d queue %d cpu priority %d affinity 0x%llx optimizeProgressive %d", tune.pipe,
-            tune.queue, tune.cpuPriority, static_cast<unsigned long long>(tune.cpuAffinity), tune.optimizeProgressive);
+    XC_LOGI("hwdec: setup pipe %d queue %d cpu priority %d affinity 0x%llx optimizeProgressive %d resourceType %d",
+            tune.pipe, tune.queue, tune.cpuPriority, static_cast<unsigned long long>(tune.cpuAffinity),
+            tune.optimizeProgressive, tune.resourceType);
     const uint16_t defaultOrder[] = {1, 2, 3, 4, 0};
     const uint16_t chosen[] = {static_cast<uint16_t>(tune.pipe)};
     const bool fixedPipe = tune.pipe >= 0;
@@ -173,7 +217,7 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     for (const auto& p : presets) {
         config = Vdec2DecoderConfig{};
         config.size = sizeof config;
-        config.resourceType = 1;
+        config.resourceType = static_cast<uint32_t>(tune.resourceType);  // 1 shipped
         config.codecType = 1;
         config.profile = p.profile;
         config.maxLevel = p.maxLevel;
@@ -197,22 +241,33 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     }
     if (rc != 0) return false;
     size_t cpuSize = align16k(memory.cpuSize);
-    rc = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpuSize, 0x03, 0, "PSBoxVdecCpu");
-    if (rc != 0) {
-        XC_LOGE("hwdec: flexible memory %zu: 0x%08x", cpuSize, static_cast<unsigned>(rc));
-        return false;
+    if (ownsPool_) {
+        memory.cpu = keptFlexible(g_pool.cpu, cpuSize, reused);
+        if (!memory.cpu) return false;
+    } else {
+        rc = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpuSize, 0x03, 0, "PSBoxVdecCpu");
+        if (rc != 0) {
+            XC_LOGE("hwdec: flexible memory %zu: 0x%08x", cpuSize, static_cast<unsigned>(rc));
+            return false;
+        }
     }
     memory.gpuSize = align16k(memory.gpuSize);
-    memory.gpu = directMemory(memory.gpuSize, kGpuRwCpuWrite);
+    memory.gpu = direct(g_pool.gpu, memory.gpuSize, kGpuRwCpuWrite);
     if (memory.cpuGpuSize) {
         memory.cpuGpuSize = align16k(memory.cpuGpuSize);
-        memory.cpuGpu = directMemory(memory.cpuGpuSize, kCpuGpuRw);
+        memory.cpuGpu = direct(g_pool.cpuGpu, memory.cpuGpuSize, kCpuGpuRw);
     }
-    // The frame the decoder writes; CPU-readable while the picture is
-    // copied from it.
+    // The frame the decoder writes when the display's video slots are not
+    // used (Output); CPU-readable while the picture is copied from it.
     frameBufferSize_ = align16k(memory.maxFrameSize);
-    frameBuffer_ = static_cast<uint8_t*>(directMemory(frameBufferSize_, kCpuGpuRw));
+    frameAlignment_ = memory.frameAlignment;
+    frameBuffer_ = static_cast<uint8_t*>(direct(g_pool.frame, frameBufferSize_, kCpuGpuRw));
     if (!memory.gpu || (memory.cpuGpuSize && !memory.cpuGpu) || !frameBuffer_) return false;
+    if (ownsPool_)
+        XC_LOGI("hwdec: memory %s (%zu MB mapped in all)", reused ? "kept from the last decoder" : "mapped, kept for the next one",
+                g_pool.mapped >> 20);
+    else
+        XC_LOGW("hwdec: another decoder holds the kept memory: this one maps its own");
     rc = sceVideodec2CreateDecoder(&config, &memory, &decoder_);
     XC_LOGI("hwdec: create decoder 0x%08x", static_cast<unsigned>(rc));
     if (rc != 0) decoder_ = nullptr;
@@ -222,12 +277,39 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
 bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& out) {
     if (!decoder_) return false;
     Vdec2Input in{sizeof(Vdec2Input), const_cast<uint8_t*>(data), len, pts, pts, 0};
-    Vdec2Frame frame{sizeof(Vdec2Frame), frameBuffer_, frameBufferSize_, 0, 0};
+    // The picture into the display's next video slot (no CPU copy there),
+    // once the GPU is done reading it; else into the decoder's own buffer.
+    uint8_t* outBuf = frameBuffer_;
+    size_t outSize = frameBufferSize_;
+    const Output& o = output();
+    const auto aligned = [this](const uint8_t* p) {
+        return frameAlignment_ == 0 || reinterpret_cast<uintptr_t>(p) % frameAlignment_ == 0;
+    };
+    const bool slots = ownsPool_ && o.enabled && o.buffers[0] && o.buffers[1] && o.size >= frameBufferSize_ &&
+                       aligned(o.buffers[0]) && aligned(o.buffers[1]);
+    static int slotsLogged = -1;
+    if (slotsLogged != static_cast<int>(slots)) {
+        slotsLogged = static_cast<int>(slots);
+        XC_LOGI("hwdec: pictures into %s", slots ? "the display's video slots (no CPU copy)" : "the decoder's own buffer");
+    }
+    if (slots) {
+        outBuf = o.buffers[nextOutput_];
+        outSize = o.size;
+        if (o.beforeWrite) o.beforeWrite(outBuf);
+    }
+    Vdec2Frame frame{sizeof(Vdec2Frame), outBuf, outSize, 0, 0};
     Vdec2Output info{};
     info.size = sizeof info;
+    // This thread's CPU time across the call too: equal to the wall time when
+    // the library decodes on the calling thread, near zero when it waits.
+    timespec c0{}, c1{};
+    const bool cpuClock = clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c0) == 0;
     uint64_t t0 = platform::nowUs();
     int rc = sceVideodec2Decode(decoder_, &in, &frame, &info);
     uint64_t tDecode = platform::nowUs() - t0;
+    int64_t cpuUs = -1;
+    if (cpuClock && clock_gettime(CLOCK_THREAD_CPUTIME_ID, &c1) == 0)
+        cpuUs = (static_cast<int64_t>(c1.tv_sec) - c0.tv_sec) * 1000000 + (c1.tv_nsec - c0.tv_nsec) / 1000;
     bool flushed = false;
     uint64_t tFlush = 0;
     // Depth 1: a picture not out yet is flushed out.
@@ -239,7 +321,7 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
         rc = sceVideodec2Flush(decoder_, &frame, &info);
         tFlush = platform::nowUs() - tf0;
     }
-    timing_ = {tDecode, tFlush, flushed};
+    timing_ = {tDecode, tFlush, flushed, cpuUs};
     static int logged = 0;
     if (logged < 15) {
         ++logged;
@@ -249,9 +331,10 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
                 static_cast<unsigned long long>(tDecode), static_cast<unsigned long long>(tFlush), flushed ? 1 : 0,
                 info.width, info.height, info.pitch, info.pitchBytes,
                 static_cast<unsigned long long>(info.bufferSize),
-                info.buffer == frameBuffer_ ? "our buffer" : "another address");
+                info.buffer == outBuf ? "our buffer" : "another address");
     }
     if (rc != 0 || !info.valid) return false;
+    if (slots) nextOutput_ ^= 1;  // the next picture into the other slot
     out.data = static_cast<const uint8_t*>(info.buffer);
     out.size = info.bufferSize;
     out.width = info.width;

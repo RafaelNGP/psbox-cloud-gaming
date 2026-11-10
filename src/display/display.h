@@ -45,6 +45,13 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
                 int width, int height, bool wait);
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
               int width, int height, bool wait);
+// Two GPU-visible buffers of `bytes` a hardware decoder writes its pictures
+// into, in turn: drawNv12() takes a picture there to the GPU without a CPU
+// copy. False where there are none (only the PS5 has them). Video thread.
+bool videoSlots(size_t bytes, uint8_t* out[2]);
+// Before a picture is written into the slot holding `p`: waits (bounded)
+// until the GPU is done reading it, when the frame in flight does.
+void waitVideoSlot(const uint8_t* p);
 
 // A picture laid over every video frame drawYuv420() draws from now on (the
 // in-game menu, the statistics): `w` x `h` RGBA pixels at (x, y), blended at

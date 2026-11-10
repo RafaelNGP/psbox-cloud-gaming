@@ -430,6 +430,12 @@ void drawRgba(const uint32_t* pixels) {
     });
 }
 
+bool videoSlots(size_t bytes, uint8_t* out[2]) { return gpu::ready() && gpu::videoSlots(bytes, out); }
+
+void waitVideoSlot(const uint8_t* p) {
+    if (gpu::ready()) gpu::waitVideoSlot(p);
+}
+
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
               int width, int height, bool wait) {
     if (gpu::ready()) return gpu::drawNv12(y, uv, strideY, strideUV, width, height, wait);

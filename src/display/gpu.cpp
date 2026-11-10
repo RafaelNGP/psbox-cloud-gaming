@@ -154,6 +154,10 @@ struct State {
     Buffer staging;         // this frame's planes or canvas
     Buffer overlayStaging;  // the overlay, when it changed
     Buffer readback;
+    // The hardware decoder's pictures (videoSlots()), used in turn: the slot
+    // the frame being recorded reads, and the one the frame in flight does.
+    Buffer videoSlot[2];
+    int recordingSlot = -1, inflightSlot = -1;
 
     // The frame being drawn: acquired image, recorded command buffer.
     bool frameOpen = false;
@@ -583,6 +587,15 @@ bool createBuffer(Buffer& b, size_t size, VkBufferUsageFlags usage) {
     return true;
 }
 
+// The video slot holding p, or -1.
+int slotOf(const uint8_t* p) {
+    for (int i = 0; i < 2; ++i) {
+        const Buffer& b = g.videoSlot[i];
+        if (b.map && p >= b.map && p < b.map + b.size) return i;
+    }
+    return -1;
+}
+
 bool createImage(Image& img, VkFormat format, uint32_t w, uint32_t h, VkImageUsageFlags usage) {
     VkImageCreateInfo info{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
     info.imageType = VK_IMAGE_TYPE_2D;
@@ -952,6 +965,7 @@ bool beginFrame(bool wait) {
         g.fencePending = false;
     }
     if (g.frameOpen) return true;  // drawn twice without a present: draw over it
+    g.recordingSlot = -1;
     if (g.wsi.getExtent) {
         uint32_t w = 0, h = 0;
         g.wsi.getExtent(g.wsi.user, w, h);
@@ -1158,6 +1172,34 @@ void shutdown() {
 
 bool ready() { return g.ready; }
 
+bool videoSlots(size_t bytes, uint8_t* out[2]) {
+    out[0] = out[1] = nullptr;
+    if (!g.ready) return false;
+    for (Buffer& b : g.videoSlot) {
+        // Made once, kept for the app's life: a decoder holds their addresses.
+        if (b.map && b.size >= bytes) continue;
+        if (b.map) return false;  // smaller than asked: not remade under a decoder
+        if (!createBuffer(b, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) {
+            XC_LOGW("gpu: no video slot of %zu bytes", bytes);
+            return false;
+        }
+    }
+    out[0] = g.videoSlot[0].map;
+    out[1] = g.videoSlot[1].map;
+    return true;
+}
+
+void waitVideoSlot(const uint8_t* p) {
+    const int slot = slotOf(p);
+    if (slot < 0 || !g.fencePending || g.inflightSlot != slot) return;
+    // The frame in flight still copies from this slot (frames came at once):
+    // its GPU work first, bounded as in beginFrame().
+    if (vkWaitForFences(g.device, 1, &g.fence, VK_TRUE, kGpuWaitNs) == VK_SUCCESS) {
+        g.fencePending = false;
+        g.inflightSlot = -1;
+    }
+}
+
 bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int strideY, int strideU, int strideV,
                 int width, int height, bool wait) {
     if (width <= 0 || height <= 0) return false;
@@ -1203,10 +1245,20 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
     if (ySize + uvSize > g.staging.size) return false;
     if (!beginFrame(wait)) return false;
     if (!videoImages(static_cast<uint32_t>(width), static_cast<uint32_t>(height))) return false;
-    std::memcpy(g.staging.map, y, ySize);
-    std::memcpy(g.staging.map + ySize, uv, uvSize);
-    copyToImage(g.staging, 0, static_cast<uint32_t>(strideY), g.luma);
-    copyToImage(g.staging, ySize, static_cast<uint32_t>(strideUV / 2), g.chromaUV);
+    // A picture the hardware decoder wrote into a video slot is copied to
+    // the images from there: no CPU copy.
+    const int slot = slotOf(y);
+    if (slot >= 0 && slotOf(uv + uvSize - 1) == slot && slotOf(y + ySize - 1) == slot) {
+        const Buffer& b = g.videoSlot[slot];
+        copyToImage(b, static_cast<size_t>(y - b.map), static_cast<uint32_t>(strideY), g.luma);
+        copyToImage(b, static_cast<size_t>(uv - b.map), static_cast<uint32_t>(strideUV / 2), g.chromaUV);
+        g.recordingSlot = slot;
+    } else {
+        std::memcpy(g.staging.map, y, ySize);
+        std::memcpy(g.staging.map + ySize, uv, uvSize);
+        copyToImage(g.staging, 0, static_cast<uint32_t>(strideY), g.luma);
+        copyToImage(g.staging, ySize, static_cast<uint32_t>(strideUV / 2), g.chromaUV);
+    }
     bool overlay = false;
     recordOverlay(overlay);
     barrier(g.rgb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
@@ -1257,6 +1309,7 @@ void present() {
         return;
     }
     g.fencePending = true;
+    g.inflightSlot = g.recordingSlot;
     VkPresentInfoKHR present{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
     uint64_t id = g.presented + 1;
     VkPresentIdKHR presentId{VK_STRUCTURE_TYPE_PRESENT_ID_KHR};
@@ -1372,6 +1425,7 @@ bool readBack(std::vector<uint8_t>& rgb, int& width, int& height) {
     submit.pCommandBuffers = &g.cmd;
     vkResetFences(g.device, 1, &g.fence);
     if (vkQueueSubmit(g.queue, 1, &submit, g.fence) != VK_SUCCESS) return false;
+    g.inflightSlot = g.recordingSlot;
     if (vkWaitForFences(g.device, 1, &g.fence, VK_TRUE, 1'000'000'000ull) == VK_TIMEOUT) {
         g.fencePending = true;  // still the GPU's: the next frame waits for it
         return false;
