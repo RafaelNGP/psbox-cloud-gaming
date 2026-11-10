@@ -203,3 +203,25 @@ Outros dados:
 ### 6.4 Achados à parte
 - **Vazamento de memória ao recriar o decodificador de hardware:** cada recriação (por exemplo, alternar HW/SW no menu in-game) deixa ~58 MB mapeados (16,7 MB de memória flexível, de 448 MB no total). O próprio código assume "um decodificador por vida do app". Não foi corrigido: liberar exige garantir que nenhum frame ainda aponte para o buffer antigo.
 - **Configurações por usuário x proteção do autoplay:** `guardSettingsForAutoplay` roda no boot com `settingsPath()`, que depende do usuário do controle; o arquivo `settings_<uid>.json` pode ficar fora do backup. Nos testes, o backup/restauração foi feito pelo script.
+
+### 6.5 Rodadas 6 e 7 (09/11/2026, noite)
+
+**O que o `VideoDec2` faz com a CPU.** Durante os ~6 ms da chamada, a thread que chama `sceVideodec2Decode` usa só **0,16 ms de CPU** (`CLOCK_THREAD_CPUTIME_ID`): ela espera. Mesmo assim, o processo inteiro gasta tanta CPU quanto com o FFmpeg (59% contra 58% de um núcleo na rodada 6; 56-57% contra 52% na rodada 7). Ou seja, uma thread interna da biblioteca consome o equivalente a um decode em software. Isso pode ser decode em software ou espera ocupada pelo hardware. O ProsperoLight usa o `VideoDec2` para HEVC 4K120 a 80 Mbps, o que só o hardware alcança, e mede um custo fixo de ~3,7 ms por frame (o nosso é ~3,3 ms). A leitura mais provável é **hardware com espera ocupada**. Em 1080p H.264 a 12 Mbps ele não vence o FFmpeg em tempo nem em CPU: na rodada 7, o SW fez 5,15 ms contra 5,8 ms do HW.
+
+**Sem efeito:** `resourceType` 0 e 2 (a criação falha e cai para software) e afinidade `0x1fff`.
+
+**FFmpeg:** já usa assembly externo (AVX2/SSSE3), assembly inline (CABAC, com EBX/EBP livres), `-march=znver2` e threads. Com um slice por frame, ~5-6 ms é o limite numa thread.
+
+**Corrigido: vazamento ao recriar o decodificador.** A memória do decodificador (compute, CPU, GPU, CPU+GPU e frame) fica guardada e é reaproveitada pelo próximo, um por vez. Nada é desmapeado, porque um frame a caminho da tela pode ainda apontar para ela. Um segundo decodificador vivo ao mesmo tempo (o probe `hwdecode`) mapeia a própria memória, como antes. Medido: **55 MB no total** depois de 5 recriações, incluindo HW→SW→HW (antes, +58 MB a cada uma). Trocar para "hardware" com o hardware já ativo agora não faz nada.
+
+**Latência: frame do hardware sem cópia pela CPU.** O decodificador escreve direto em dois buffers do Vulkan, usados alternadamente (`display::videoSlots`). A memória do RADV no PS5 é direta, tipo 12, `0x33`, a mesma que o decodificador exige. O `drawNv12` copia desses buffers para as imagens na GPU, sem `memcpy`. Antes de escrever num buffer que o frame em voo ainda lê, o decodificador espera a GPU (`display::waitVideoSlot`, com limite de tempo). A/B no mesmo stream (`hwcfg.req` `zc=0`), intercalado com cópia, sem cópia, sem cópia e com cópia:
+
+| | Com cópia (2 janelas) | Sem cópia (2 janelas) |
+|---|---|---|
+| Desenho na CPU, médio / p95 | 0,44 / 0,97 ms | 0,20 / 0,73 ms |
+| Até a tela, médio | 8,96 / 9,18 ms | 8,64 / 8,85 ms |
+| Do primeiro pacote até a tela, médio | 11,04 / 11,31 ms | 10,78 / 11,01 ms |
+
+**Próximo passo para o decode:** baixar de ~5-6 ms exige um caminho de hardware sem o custo fixo do `VideoDec2`: módulos nativos (`libSceVdecCore`, `libSceVdecSavc2`, ...) ou outra API. Isso é engenharia reversa das bibliotecas da Sony.
+
+**PS5_Vulkan / RADV:** o RADV linkado no xCloud é de 15/10 (fork PS5_Mesa `993732c`). Essa revisão tem 2 commits de 120 Hz (`wsi_videoout_set_high_refresh`) que **só existem localmente** e não estão no `origin/main` do fork. O remoto tem correções novas (`radv/ps5`, de 31/10 a 09/11), uma delas de memória liberada ainda em uso pela GPU. Atualizar exige aplicar os 2 commits locais por cima do remoto, recompilar o RADV e testar o app inteiro.
