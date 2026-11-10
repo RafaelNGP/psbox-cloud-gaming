@@ -743,7 +743,6 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   <div class="nav-tab" id="navTab-remap" onclick="switchTab('remap')">🎮 Mapeamento</div>
   <div class="nav-tab" id="navTab-gamepad" onclick="switchTab('gamepad')">🕹️ Controle</div>
   <div class="nav-tab" id="navTab-logs" onclick="switchTab('logs')">📋 Logs</div>
-  <a href="/generative_ui" target="_blank" class="nav-tab" style="text-decoration:none;color:inherit">🎨 UI Studio</a>
 </div>
 
 <div class="content">
