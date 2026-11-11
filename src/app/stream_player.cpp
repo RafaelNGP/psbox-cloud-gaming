@@ -152,6 +152,7 @@ struct StreamPlayer::Impl {
     int maxBitrateMbps = 0;
     bool hwProbe = false;
     bool preferHwDecode = true;
+    std::string tierSequence;  // setTierSequence() (measurements)
     std::atomic<bool> isHwDecode{false};
 
     static void atomicMax(std::atomic<uint64_t>& a, uint64_t v) {
@@ -1099,6 +1100,7 @@ struct StreamPlayer::Impl {
         case xcloud::Resolution::P1080HQ: opts.resolutionAlias = "1080HQ"; break;
         case xcloud::Resolution::P720: opts.resolutionAlias = "720HQ"; break;
         }
+        opts.tierSequence = tierSequence;
         opts.maxBitrate = gssv.resolution() == xcloud::Resolution::P720    ? 12000000
                           : gssv.resolution() == xcloud::Resolution::P1440 ? 40000000
                           : gssv.resolution() == xcloud::Resolution::P1080HQ ? 30000000
@@ -1579,6 +1581,8 @@ StreamPlayer::Stats StreamPlayer::stats() const {
 void StreamPlayer::switchDecoder(bool hardware) { impl_->decoderSwitch = hardware ? 1 : 0; }
 
 void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
+
+void StreamPlayer::setTierSequence(const std::string& seq) { impl_->tierSequence = seq; }
 
 namespace {
 // The process's CPU time, every thread (system libraries' too): -1 where unknown.

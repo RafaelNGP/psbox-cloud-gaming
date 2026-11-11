@@ -92,6 +92,7 @@ struct Autoplay {
     int sharpness = -1;          // sharp=0..3: instead of the setting
     int bitrateMbps = 0;         // bitrate=N or mbps=N: bitrate ceiling in Mbps
     std::string resolution;      // res=720p|1080p|1440p: instead of the setting
+    std::string tierSeq;         // tierseq=hq|none|late: StreamOptions::tierSequence (measurements)
     std::string updateFeed;      // updatefeed=<url>: the release JSON instead of GitHub's
     bool testCa = false;         // testca: also trust <dataDir>/test-ca.pem (the feed's server)
     bool updateTest = false;     // updatetest: accept the update pop-up, save update.ppm / updating.ppm

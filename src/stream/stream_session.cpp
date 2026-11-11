@@ -225,13 +225,18 @@ struct StreamSession::Impl {
     void sendResolution(const std::string& alias) {
         // The HQ tiers and 1440 need Game Pass Ultimate in a market where
         // they're enabled; elsewhere the service ignores them and keeps what
-        // it had (1080 at the start). The plain tier first, then: measured,
-        // "720" switches in a few seconds, "720HQ" is ignored in Brazil.
+        // it had (1080 at the start). 720: the plain tier first, then:
+        // measured, "720" switches in a few seconds, "720HQ" is ignored in Brazil.
         // 1440 alone, as the xbox.com client sends it (never 1080 before it).
         std::string base = alias;
         if (base.size() > 2 && base.compare(base.size() - 2, 2, "HQ") == 0) base.resize(base.size() - 2);
         // The user's own Xbox offers every tier on any plan: just the one asked for.
-        if (gssv.isHome()) base = alias;
+        if (gssv.isHome() || opt.tierSequence == "hq" || opt.tierSequence == "late") base = alias;
+        // 1080HQ alone too, as the xbox.com client sends it: a plain "1080"
+        // first pins the plain tier. Measured 2026-11-10 in a Fortnite match
+        // (Brazil): 1080 then 1080HQ ~11.3 Mbps p50, QP ~28; 1080HQ alone
+        // ~16.4 Mbps, QP ~26 (2 sessions each). 720 keeps the plain tier first.
+        if (alias == "1080HQ" && opt.tierSequence != "plain") base = alias;
         auto send = [this](const std::string& a) {
             json::Value res = json::Value::object();
             res.set("message", "userRequestedResolutionUpdate");
@@ -322,7 +327,9 @@ struct StreamSession::Impl {
         sendGamepadChanged(0, true);
         // 1440 once the picture is running (the first video frame), as the
         // xbox.com client sends it; the other tiers right away.
-        if (opt.resolutionAlias == "1440" && !gssv.isHome())
+        if (opt.tierSequence == "none")
+            XC_LOGI("stream resolution: none requested (tierseq=none)");
+        else if ((opt.resolutionAlias == "1440" && !gssv.isHome()) || opt.tierSequence == "late")
             resolutionPending = true;
         else if (!opt.resolutionAlias.empty())
             sendResolution(opt.resolutionAlias);

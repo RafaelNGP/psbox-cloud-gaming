@@ -165,6 +165,7 @@ void loadAutoplay() {
         if (opt == "imetest") g_autoplay.imeTest = true;
         if (opt == "menutest") g_autoplay.menuTest = true;
         if (opt.rfind("res=", 0) == 0) g_autoplay.resolution = opt.substr(4);
+        if (opt.rfind("tierseq=", 0) == 0) g_autoplay.tierSeq = opt.substr(8);
         if (opt.rfind("sharp=", 0) == 0) g_autoplay.sharpness = std::atoi(opt.c_str() + 6);
         if (opt.rfind("deband=", 0) == 0) g_autoplay.deband = std::atoi(opt.c_str() + 7);
         if (opt.rfind("bitrate=", 0) == 0) g_autoplay.bitrateMbps = std::atoi(opt.c_str() + 8);

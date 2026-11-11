@@ -62,6 +62,12 @@ struct StreamOptions {
     // Ultimate; the plain tier is asked for first, so it holds where they
     // aren't granted). Empty: don't send, the service picks.
     std::string resolutionAlias;
+    // Test hook (autoplay "tierseq="): how the alias is sent. Empty: shipped
+    // (1080HQ alone; 720: "720" then "720HQ"), at the handshake. "plain": the
+    // plain tier before 1080HQ too (the old way); "hq": the alias alone;
+    // "none": nothing (the identity decides); "late": the alias alone, at the
+    // first video frame.
+    std::string tierSequence;
     // Test hook: drop this percentage of video RTP packets before the jitter
     // buffer, to exercise NACK / key frame recovery.
     int simulatedVideoLoss = 0;

@@ -97,6 +97,8 @@ public:
     // Measurements only (autoplay "bench", hwcfg.req): the hardware decoder
     // made again from the next frame, with media::HwDecoder::tuning().
     void recreateHwDecoder();
+    // Measurements only (autoplay "tierseq="): StreamOptions::tierSequence. Before start().
+    void setTierSequence(const std::string& seq);
     void setMicEnabled(bool enabled);
     bool micEnabled() const;
     void setMicMuted(bool muted);

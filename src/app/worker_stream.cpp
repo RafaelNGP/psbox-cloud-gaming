@@ -132,6 +132,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         if (fpsLim > 0) XC_LOGI("stream: FPS limit %d FPS", fpsLim);
         else XC_LOGI("stream: FPS limit unlimited");
         player.setLegacyTuning(g_autoplay.legacy);
+        player.setTierSequence(g_autoplay.tierSeq);
         int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
         player.setMaxBitrate(cap);
         media::audioSetVolume(g_settings.gameVolume / 100.0f);
