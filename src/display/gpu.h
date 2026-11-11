@@ -58,6 +58,9 @@ void setDeband(int level);
 void setUpscaler(int mode);
 // Anime4K Restore (S) before the upscale: cleans compression artefacts.
 void setRestore(bool on);
+// Measurements only: the picture rounded to 8 bits between the passes and no
+// dither, as before the 16-bit images.
+void setLegacyPrecision(bool on);
 // 119.88 Hz output on or back to 59.94 Hz while running (a game's stream
 // only); false when the driver can't (a RADV without the PSBox patch, or the
 // console refused). The swapchain stays as it is.

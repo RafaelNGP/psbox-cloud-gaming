@@ -5,18 +5,20 @@
 #extension GL_GOOGLE_include_directive : require
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0) uniform sampler2D inputTex;  // linear
-layout(binding = 1, rgba8) uniform writeonly image2D upscaled;
+layout(binding = 1, rgba16f) uniform writeonly image2D upscaled;
 layout(push_constant) uniform Constants {
     uvec4 con0, con1, con2, con3;
+    uint quant8;  // measurements: the input rounded to 8 bits, as before the 16-bit images
 } pc;
 
 #define A_GPU 1
 #define A_GLSL 1
 #include "ffx_a.h"
 #define FSR_EASU_F 1
-AF4 FsrEasuRF(AF2 p) { return textureGather(inputTex, p, 0); }
-AF4 FsrEasuGF(AF2 p) { return textureGather(inputTex, p, 1); }
-AF4 FsrEasuBF(AF2 p) { return textureGather(inputTex, p, 2); }
+AF4 q8(AF4 v) { return pc.quant8 != 0u ? floor(v * 255.0 + 0.5) / 255.0 : v; }
+AF4 FsrEasuRF(AF2 p) { return q8(textureGather(inputTex, p, 0)); }
+AF4 FsrEasuGF(AF2 p) { return q8(textureGather(inputTex, p, 1)); }
+AF4 FsrEasuBF(AF2 p) { return q8(textureGather(inputTex, p, 2)); }
 #include "ffx_fsr1.h"
 
 void main() {

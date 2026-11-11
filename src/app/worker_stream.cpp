@@ -359,6 +359,13 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                     std::remove(req.c_str());
                     player.requestSnapshot(platform::dataDir() + "/now.ppm");
                 }
+                // img.req: the image test now, on this picture (autoplay "bench").
+                const std::string img = platform::dataDir() + "/img.req";
+                if (g_autoplay.bench && platform::readFile(img, unused)) {
+                    std::remove(img.c_str());
+                    player.requestImageTest();
+                    XC_LOGI("BENCH image test asked");
+                }
                 // A measurement window marked from outside (the file mark.req,
                 // its text the new window's name): the last one is logged. An
                 // empty file is one still being written (FTP creates it first):

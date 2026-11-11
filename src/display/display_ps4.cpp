@@ -957,6 +957,7 @@ void setVideoColor(bool bt601, bool fullRange) {
 void setDeband(int) {}
 void setUpscaler(int) {}
 void setRestore(bool) {}
+void setLegacyPrecision(bool) {}
 DisplayCaps caps() {
     DisplayCaps c{};
     c.asyncPresent = true;

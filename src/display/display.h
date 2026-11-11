@@ -66,6 +66,9 @@ void setDeband(int level);
 void setUpscaler(int mode);
 // Anime4K Restore before the upscale (GPU only).
 void setRestore(bool on);
+// Measurements only (autoplay "imgtest"): the picture rounded to 8 bits between
+// the passes and no dither, as before the 16-bit images.
+void setLegacyPrecision(bool on);
 
 // What this display can do, as of now (the GPU's part once init() has run):
 // an option it can't honour is hidden or has no effect.

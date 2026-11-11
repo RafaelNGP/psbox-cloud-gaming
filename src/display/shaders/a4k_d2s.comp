@@ -8,7 +8,7 @@
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(binding = 0, rgba16f) uniform readonly image2D lastLayer;
 layout(binding = 1) uniform sampler2D picture;  // linear
-layout(binding = 2, rgba8) uniform writeonly image2D upscaled;
+layout(binding = 2, rgba16f) uniform writeonly image2D upscaled;
 
 void main() {
     ivec2 q = ivec2(gl_GlobalInvocationID.xy);

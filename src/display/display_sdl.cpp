@@ -516,6 +516,10 @@ void setRestore(bool on) {
     gpu::setRestore(on);
     g_repaint = true;
 }
+void setLegacyPrecision(bool on) {
+    gpu::setLegacyPrecision(on);
+    g_repaint = true;
+}
 DisplayCaps caps() {
     DisplayCaps c;
     c.upscalers = c.deband = c.sharpen = gpu::ready();

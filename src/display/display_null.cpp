@@ -38,6 +38,7 @@ void setSharpness(int) {}
 void setDeband(int) {}
 void setUpscaler(int) {}
 void setRestore(bool) {}
+void setLegacyPrecision(bool) {}
 DisplayCaps caps() { return {}; }
 void setSwapImages(int) {}
 void setLowLatencyPresent(bool) {}

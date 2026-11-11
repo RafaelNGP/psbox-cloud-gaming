@@ -1246,16 +1246,21 @@ struct StreamPlayer::Impl {
         struct Look {
             const char* name;
             int upscaler, sharpness;  // stream_screen.cpp's applyUpscaler mode, kSharpAmount
+            bool legacy8 = false;     // rounded to 8 bits between the passes, no dither (before the 16-bit images)
+            bool full = false;        // the whole output saved, not a crop
         };
         static constexpr Look kLooks[] = {
             {"1_clean_med", 2, 176}, {"2_fsr_med", 0, 176},  {"3_clean_high", 2, 256}, {"4_clean_low", 2, 96},
             {"5_clean_off", 2, 0},   {"6_fsr_off", 0, 0},    {"7_a4k_med", 1, 176},    {"8_a4k_clean_med", 3, 176},
-            {"9_default", 2, 176},
+{"A_default_8bit", 2, 176, true, true},
+            {"B_default_16bit", 2, 176, false, true}, {"C_fsr_8bit", 0, 176, true, true},
+            {"D_fsr_16bit", 0, 176, false, true},     {"9_default", 2, 176},
         };
         for (const Look& look : kLooks) {
             display::setUpscaler(look.upscaler & 1);
             display::setRestore(look.upscaler >= 2);
             display::setSharpness(look.sharpness);
+            display::setLegacyPrecision(look.legacy8);
             std::vector<uint8_t> rgb;
             int w = 0, h = 0;
             {
@@ -1265,7 +1270,8 @@ struct StreamPlayer::Impl {
                 if (!display::readBackRgb(rgb, w, h)) continue;
             }
             if (std::string(look.name) == "9_default") break;
-            const int cw = std::min(1280, w), ch = std::min(720, h), x0 = std::min(1100, w - cw), y0 = std::min(300, h - ch);
+            const int cw = look.full ? w : std::min(1280, w), ch = look.full ? h : std::min(720, h);
+            const int x0 = look.full ? 0 : std::min(1100, w - cw), y0 = look.full ? 0 : std::min(300, h - ch);
             std::string data = "P6\n" + std::to_string(cw) + " " + std::to_string(ch) + "\n255\n";
             for (int y = 0; y < ch; ++y)
                 data.append(reinterpret_cast<const char*>(rgb.data() + (static_cast<size_t>(y0 + y) * w + x0) * 3),

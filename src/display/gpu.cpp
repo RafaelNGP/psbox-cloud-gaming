@@ -73,7 +73,7 @@ namespace {
     X(CreateComputePipelines) X(DestroyPipeline)                                                             \
     X(CreateDescriptorPool) X(DestroyDescriptorPool) X(AllocateDescriptorSets) X(UpdateDescriptorSets)       \
     X(CmdBindPipeline) X(CmdBindDescriptorSets) X(CmdPushConstants) X(CmdDispatch)                           \
-    X(CmdCopyBufferToImage) X(CmdCopyImageToBuffer) X(CmdCopyImage)
+    X(CmdCopyBufferToImage) X(CmdCopyImageToBuffer) X(CmdCopyImage) X(CmdBlitImage)
 
 #define XC_VK_DECLARE(name) PFN_vk##name vk##name = nullptr;
 XC_VK_GLOBAL(XC_VK_DECLARE)
@@ -174,6 +174,10 @@ std::atomic<int> g_sharpness{0};
 std::atomic<int> g_deband{1};
 std::atomic<int> g_upscaler{0};  // 0 FSR (EASU), 1 Anime4K
 std::atomic<bool> g_restore{false};  // Anime4K Restore before the upscale
+std::atomic<bool> g_legacy8{false};  // measurements: rounded to 8 bits between the passes, no dither
+// The picture between the passes: 16-bit float, rounded to the swapchain's 8
+// bits once, at the end (rcas.comp), with a dither.
+constexpr VkFormat kPictureFormat = VK_FORMAT_R16G16B16A16_SFLOAT;
 uint32_t g_frame = 0;
 uint32_t g_swapImages = 3;
 std::atomic<bool> g_mailbox{false};  // setMailbox(): any thread; the next frame rebuilds the swapchain
@@ -739,10 +743,10 @@ bool createPipelines() {
     const VkDescriptorSetLayoutBinding nv12[] = {binding(0, sampled), binding(1, sampled), binding(2, storage)};
     const VkDescriptorSetLayoutBinding easu[] = {binding(0, sampled), binding(1, storage)};
     const VkDescriptorSetLayoutBinding rcas[] = {binding(0, storage), binding(1, sampled), binding(2, storage)};
-    if (!createPipeline(g.yuv, kShader_yuv2rgb, sizeof kShader_yuv2rgb, yuv, 4, 20) ||
-        !createPipeline(g.nv12, kShader_nv122rgb, sizeof kShader_nv122rgb, nv12, 3, 20) ||
-        !createPipeline(g.easu, kShader_easu, sizeof kShader_easu, easu, 2, 64) ||
-        !createPipeline(g.rcas, kShader_rcas, sizeof kShader_rcas, rcas, 3, 24)) {
+    if (!createPipeline(g.yuv, kShader_yuv2rgb, sizeof kShader_yuv2rgb, yuv, 4, 24) ||
+        !createPipeline(g.nv12, kShader_nv122rgb, sizeof kShader_nv122rgb, nv12, 3, 24) ||
+        !createPipeline(g.easu, kShader_easu, sizeof kShader_easu, easu, 2, 68) ||
+        !createPipeline(g.rcas, kShader_rcas, sizeof kShader_rcas, rcas, 3, 32)) {
         XC_LOGE("gpu: the FSR pipelines");
         return false;
     }
@@ -786,7 +790,7 @@ bool createPipelines() {
     const VkImageUsageFlags upload = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
     if (!createImage(g.ui, VK_FORMAT_R8G8B8A8_UNORM, kUiW, kUiH, upload | VK_IMAGE_USAGE_TRANSFER_SRC_BIT) ||
         !createImage(g.overlay, VK_FORMAT_R8G8B8A8_UNORM, kUiW, kUiH, upload) ||
-        !createImage(g.upscaled, VK_FORMAT_R8G8B8A8_UNORM, g.boxW, g.boxH,
+        !createImage(g.upscaled, kPictureFormat, g.boxW, g.boxH,
                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT) ||
         !createBuffer(g.staging, kUiW * kUiH * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT) ||
         !createBuffer(g.overlayStaging, kUiW * kUiH * 4, VK_BUFFER_USAGE_TRANSFER_SRC_BIT)) {
@@ -826,7 +830,7 @@ bool recreateSwapchain() {
     destroyImage(g.upscaled);
     destroyBuffer(g.readback);
     if (!buildSwapchain(false)) return false;
-    if (!createImage(g.upscaled, VK_FORMAT_R8G8B8A8_UNORM, g.boxW, g.boxH,
+    if (!createImage(g.upscaled, kPictureFormat, g.boxW, g.boxH,
                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return false;
     bindSwapchainSets();
     return true;
@@ -850,7 +854,7 @@ bool videoImages(uint32_t w, uint32_t h) {
         !createImage(g.chromaU, VK_FORMAT_R8_UNORM, cw, ch, upload) ||
         !createImage(g.chromaV, VK_FORMAT_R8_UNORM, cw, ch, upload) ||
         !createImage(g.chromaUV, VK_FORMAT_R8G8_UNORM, cw, ch, upload) ||
-        !createImage(g.rgb, VK_FORMAT_R8G8B8A8_UNORM, w, h,
+        !createImage(g.rgb, kPictureFormat, w, h,
                      VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT)) {
         XC_LOGE("gpu: video images %ux%u", w, h);
         return false;
@@ -866,7 +870,7 @@ bool videoImages(uint32_t w, uint32_t h) {
     if (g.a4kReady) {
         if (!createImage(g.features[0], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_STORAGE_BIT) ||
             !createImage(g.features[1], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_STORAGE_BIT) ||
-            !createImage(g.a4k, VK_FORMAT_R8G8B8A8_UNORM, w * 2, h * 2,
+            !createImage(g.a4k, kPictureFormat, w * 2, h * 2,
                          VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT)) {
             XC_LOGD("gpu: no Anime4K feature maps; FSR only");
             g.a4kReady = false;
@@ -1060,6 +1064,8 @@ bool recordAnime4K(uint32_t w, uint32_t h, bool& direct) {
 
 void recordUpscale(VkDescriptorSet easuSet, uint32_t w, uint32_t h, int sharpness, bool overlay, bool ai = false) {
     bool direct = false;
+    const bool video = easuSet != g.easuUiSet;
+    const bool legacy8 = video && g_legacy8;
     if (ai && recordAnime4K(w, h, direct)) {
         if (!direct) {
             easuSet = g.easuA4kSet;
@@ -1075,17 +1081,28 @@ void recordUpscale(VkDescriptorSet easuSet, uint32_t w, uint32_t h, int sharpnes
             copyRegion.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             copyRegion.dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
             copyRegion.extent = {w, h, 1};
-            vkCmdCopyImage(g.cmd, srcImage, VK_IMAGE_LAYOUT_GENERAL,
-                           g.upscaled.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copyRegion);
+            if (video) {
+                vkCmdCopyImage(g.cmd, srcImage, VK_IMAGE_LAYOUT_GENERAL,
+                               g.upscaled.image, VK_IMAGE_LAYOUT_GENERAL, 1, &copyRegion);
+            } else {
+                // The menus are 8-bit: a copy can't change the format, a blit can.
+                VkImageBlit blit{};
+                blit.srcSubresource = copyRegion.srcSubresource;
+                blit.dstSubresource = copyRegion.dstSubresource;
+                blit.srcOffsets[1] = {static_cast<int32_t>(w), static_cast<int32_t>(h), 1};
+                blit.dstOffsets[1] = blit.srcOffsets[1];
+                vkCmdBlitImage(g.cmd, srcImage, VK_IMAGE_LAYOUT_GENERAL, g.upscaled.image, VK_IMAGE_LAYOUT_GENERAL, 1,
+                               &blit, VK_FILTER_NEAREST);
+            }
             memoryBarrier();
         } else {
             // EASU constants (FsrEasuCon), the picture filling the 16:9 display box.
             float ow = static_cast<float>(g.boxW), oh = static_cast<float>(g.boxH);
             float iw = static_cast<float>(w), ih = static_cast<float>(h);
-            uint32_t easu[16] = {asBits(iw / ow), asBits(ih / oh), asBits(0.5f * iw / ow - 0.5f), asBits(0.5f * ih / oh - 0.5f),
+            uint32_t easu[17] = {asBits(iw / ow), asBits(ih / oh), asBits(0.5f * iw / ow - 0.5f), asBits(0.5f * ih / oh - 0.5f),
                                  asBits(1.0f / iw), asBits(1.0f / ih), asBits(1.0f / iw), asBits(-1.0f / ih),
                                  asBits(-1.0f / iw), asBits(2.0f / ih), asBits(1.0f / iw), asBits(2.0f / ih),
-                                 asBits(0.0f / iw), asBits(4.0f / ih), 0, 0};
+                                 asBits(0.0f / iw), asBits(4.0f / ih), 0, 0, legacy8 ? 1u : 0u};
             barrier(g.upscaled.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
             vkCmdBindPipeline(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.easu.pipeline);
             vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.easu.layout, 0, 1, &easuSet, 0, nullptr);
@@ -1102,7 +1119,10 @@ void recordUpscale(VkDescriptorSet easuSet, uint32_t w, uint32_t h, int sharpnes
         uint32_t con[4];
         uint32_t sharpen;
         float opacity;
-    } rcas{{asBits(linear), 0, 0, 0}, sharpness > 0 ? 1u : 0u, overlay ? 1.0f : 0.0f};
+        float dither;  // the video only: the menus are 8-bit already
+        uint32_t quant8;
+    } rcas{{asBits(linear), 0, 0, 0}, sharpness > 0 ? 1u : 0u, overlay ? 1.0f : 0.0f,
+           video && !legacy8 ? 1.0f : 0.0f, legacy8 ? 1u : 0u};
     barrier(g.images[g.frameIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     vkCmdBindPipeline(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.rcas.pipeline);
     vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.rcas.layout, 0, 1, &g.rcasSets[g.frameIndex], 0,
@@ -1226,9 +1246,9 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
     struct {
         uint32_t iterations;
         float threshold, radius, grain;
-        uint32_t frame;
+        uint32_t frame, quant8;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            0.0f, ++g_frame};
+            0.0f, ++g_frame, g_legacy8 ? 1u : 0u};
     vkCmdPushConstants(g.cmd, g.yuv.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
@@ -1269,9 +1289,9 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
     struct {
         uint32_t iterations;
         float threshold, radius, grain;
-        uint32_t frame;
+        uint32_t frame, quant8;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            0.0f, ++g_frame};
+            0.0f, ++g_frame, g_legacy8 ? 1u : 0u};
     vkCmdPushConstants(g.cmd, g.nv12.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
@@ -1360,6 +1380,8 @@ void setDeband(int level) { g_deband = std::clamp(level, 0, 2); }
 void setUpscaler(int mode) { g_upscaler = std::clamp(mode, 0, 1); }
 
 void setRestore(bool on) { g_restore = on; }
+
+void setLegacyPrecision(bool on) { g_legacy8 = on; }
 
 void setPresentWait(bool on) { g_noPresentWait = !on; }
 
