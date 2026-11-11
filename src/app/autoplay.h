@@ -92,6 +92,8 @@ struct Autoplay {
     int sharpness = -1;          // sharp=0..3: instead of the setting
     int bitrateMbps = 0;         // bitrate=N or mbps=N: bitrate ceiling in Mbps
     std::string resolution;      // res=720p|1080p|1440p: instead of the setting
+    std::string gyroCurve;       // gyrocurve=fortnite: gyro aiming through the game's measured stick response (measurements)
+    int gyroLevel = 0;           // gyrolevel=N: gyro intensity 1..10 instead of the setting (measurements)
     std::string tierSeq;         // tierseq=hq|none|late: StreamOptions::tierSequence (measurements)
     std::string updateFeed;      // updatefeed=<url>: the release JSON instead of GitHub's
     bool testCa = false;         // testca: also trust <dataDir>/test-ca.pem (the feed's server)
@@ -125,6 +127,12 @@ struct Autoplay {
 extern Autoplay g_autoplay;
 extern std::atomic<bool> g_syntheticA;  // A held down for the game
 extern std::atomic<float> g_syntheticRightX, g_syntheticLeftY;  // sticks for the game (fnplay)
+// Measurements (autoplay "bench", sweep.req): the right stick held at one
+// level after another, each way, with L2 down, to read the game's response
+// from the picture's motion. 0: no sweep.
+extern std::atomic<uint64_t> g_sweepStartUs;
+// The sweep's stick at `nowUs`; false when no sweep runs (or it is over).
+bool sweepStick(uint64_t nowUs, float& x, float& y);
 
 void loadAutoplay();
 // After loadAutoplay(), before the settings are read. Starting in autoplay

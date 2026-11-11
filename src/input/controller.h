@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #pragma once
 
+#include <vector>
 #include "input/input_ext.h"
 
 #include <cstdint>
@@ -120,6 +121,22 @@ void resetLightBar(int pad = 0);
 void setGyro(int mode, int level);
 void setGyroActive(bool on);
 void setGyroCalibration(const float bias[3], float yawScale, float pitchScale);
+// Measurements only (autoplay "bench", gyro.req): pad 0's motion sensors and
+// what gyro aiming made of them, each poll, for `seconds`; then
+// gyroRecordingTake() gives the samples once (empty until it is over).
+struct GyroSample {
+    uint64_t us;         // platform::nowUs()
+    float gyro[3];       // rad/s, as read
+    float accel[3];      // g
+    float quat[4];       // the pad's fused orientation (x, y, z, w)
+    float thumbX, thumbY;  // the right stick, after its dead zone, before the gyro's push
+    float l2;
+    float outX, outY;    // gyro aiming's push (0 while it is off)
+    float dt;            // the step given to gyroToStick (0 while it is off)
+    uint32_t flags;      // 1 accel read, 2 orientation read, 4 gyro aiming on
+};
+void startGyroRecording(int seconds);
+bool gyroRecordingTake(std::vector<GyroSample>& out);
 // DualSense: suppresses vibration and trigger effect bleed while embedded mic is active
 void setEmbeddedMicActive(bool active, int pad = 0);
 

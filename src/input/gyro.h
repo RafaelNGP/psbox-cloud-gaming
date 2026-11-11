@@ -129,6 +129,20 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
 float gyroToSteering(const float rawW[3], const float* accel, int level, GyroState& s,
                      const float* orientationQuat = nullptr, float dt = 0.004f);
 
+// How the game turns the right stick into camera speed, measured (stick
+// level -> speed as a share of the speed at full stick, rising). With one
+// set, gyro aiming asks for the stick level that gives the camera speed the
+// hand's turn calls for; with none (nullptr), it assumes a 12 % dead zone and
+// a straight line after it.
+struct GyroResponse {
+    int count = 0;
+    float level[16] = {};  // level[0]: the dead zone's edge (speed 0)
+    float speed[16] = {};  // 0 at level[0] ... 1 at full stick
+};
+void setGyroGameResponse(const GyroResponse* response);
+// Fortnite aiming down sights, default "exponential" look curve (measured 2026-11-11).
+extern const GyroResponse kGyroResponseFortnite;
+
 // Global gyro calibration & hardware probing
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale);
 void getGlobalGyroCalibration(float bias[3], float& yawScale, float& pitchScale);

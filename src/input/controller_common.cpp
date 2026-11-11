@@ -18,6 +18,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cmath>
+#include <mutex>
+#include <vector>
 
 namespace xc::input {
 
@@ -88,6 +90,11 @@ std::atomic<int> g_triggerProfile{kTriggerProfileStandard};
 std::atomic<int> g_gyroMode{kGyroOff}, g_gyroLevel{5};
 std::atomic<bool> g_gyroActive{false};
 int g_gyroLogged = 0, g_gyroLoggedX = 0;  // the first turns up / down and sideways, to check the axes
+// Measurements (startGyroRecording): filled by the polling thread, taken by another once full.
+std::mutex g_gyroRecMutex;
+std::vector<GyroSample> g_gyroRec;
+uint64_t g_gyroRecUntilUs = 0;
+std::atomic<int> g_gyroRecState{0};  // 0 idle, 1 recording, 2 done (to be taken)
 
 void applyLightBar(int index, Pad& pad) {
     uint32_t want = pad.lightWanted;
@@ -334,6 +341,8 @@ bool pollPad(int index, ControllerState& out) {
 
     bool isSteeringMode = (gyroMode == kGyroSteering || gyroMode == kGyroSteeringDrive);
     bool gyroOn = g_gyroActive && (gyroAlwaysAiming || gyroAimingTrigger || gyroAlwaysSteering || gyroSteeringTrigger);
+    const float gyroRecThumbX = out.rightStickX, gyroRecThumbY = out.rightStickY;
+    float gyroRecOutX = 0, gyroRecOutY = 0, gyroRecDt = 0;
     if (gyroOn) {
         float dt = pad.gyroDt;
         if (dt <= 0.0f || !std::isfinite(dt)) {
@@ -366,6 +375,7 @@ bool pollPad(int index, ControllerState& out) {
             float gx, gy;
             gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed),
                         slot.gyro, gx, gy, pad.hasOrientation ? pad.orientation : nullptr, dt);
+            gyroRecOutX = gx, gyroRecOutY = gy, gyroRecDt = dt;
             float x = out.rightStickX + gx, y = out.rightStickY + gy, m = std::hypot(x, y);
             if (m > 1.0f) x /= m, y /= m;
             out.rightStickX = x;
@@ -380,6 +390,25 @@ bool pollPad(int index, ControllerState& out) {
     } else {
         slot.lastGyroUs = 0;
         resetGyroPosture(slot.gyro);
+    }
+
+    if (index == 0 && g_gyroRecState.load(std::memory_order_relaxed) == 1) {
+        std::lock_guard<std::mutex> lock(g_gyroRecMutex);
+        const uint64_t nowUs = platform::nowUs();
+        if (nowUs >= g_gyroRecUntilUs || g_gyroRec.size() >= g_gyroRec.capacity()) {
+            g_gyroRecState = 2;
+        } else {
+            GyroSample smp{};
+            smp.us = nowUs;
+            for (int i = 0; i < 3; ++i) smp.gyro[i] = pad.gyro[i], smp.accel[i] = pad.accel[i];
+            for (int i = 0; i < 4; ++i) smp.quat[i] = pad.orientation[i];
+            smp.thumbX = gyroRecThumbX, smp.thumbY = gyroRecThumbY;
+            smp.l2 = out.triggerL2;
+            smp.outX = gyroRecOutX, smp.outY = gyroRecOutY;
+            smp.dt = gyroRecDt;
+            smp.flags = (pad.hasAccel ? 1u : 0u) | (pad.hasOrientation ? 2u : 0u) | (gyroOn ? 4u : 0u);
+            g_gyroRec.push_back(smp);
+        }
     }
 
     if (pad.touching) {
@@ -400,6 +429,28 @@ void setGyro(int mode, int level) {
 }
 
 void setGyroActive(bool on) { g_gyroActive = on; }
+
+void startGyroRecording(int seconds) {
+    std::lock_guard<std::mutex> lock(g_gyroRecMutex);
+    seconds = std::clamp(seconds, 1, 180);
+    g_gyroRec.clear();
+    g_gyroRec.reserve(static_cast<size_t>(seconds) * 1100);
+    g_gyroRecUntilUs = platform::nowUs() + static_cast<uint64_t>(seconds) * 1000000u;
+    g_gyroRecState = 1;
+}
+
+bool gyroRecordingTake(std::vector<GyroSample>& out) {
+    if (g_gyroRecState.load(std::memory_order_relaxed) == 1) {
+        std::lock_guard<std::mutex> lock(g_gyroRecMutex);
+        if (platform::nowUs() >= g_gyroRecUntilUs) g_gyroRecState = 2;  // no poll came to end it
+    }
+    if (g_gyroRecState.load(std::memory_order_relaxed) != 2) return false;
+    std::lock_guard<std::mutex> lock(g_gyroRecMutex);
+    out.swap(g_gyroRec);
+    g_gyroRec.clear();
+    g_gyroRecState = 0;
+    return true;
+}
 
 void setGyroCalibration(const float bias[3], float yawScale, float pitchScale) {
     setGlobalGyroCalibration(bias, yawScale, pitchScale);

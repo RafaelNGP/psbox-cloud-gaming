@@ -3,6 +3,7 @@
 #include "input/gyro.h"
 #include "input/controller_backend.h"
 
+#include <atomic>
 #include <algorithm>
 #include <cmath>
 
@@ -14,6 +15,46 @@ float g_globalYawScale = 1.0f;
 float g_globalPitchScale = 0.8f;
 bool g_hasGlobalGyroBias = false;
 bool g_hasGlobalGyroScales = false;
+}
+
+static GyroResponse g_response;
+static std::atomic<bool> g_hasResponse{false};
+
+const GyroResponse kGyroResponseFortnite = {
+    14,
+    {0.22f, 0.24f, 0.26f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f, 0.70f, 0.80f, 0.90f, 1.00f},
+    {0.0f, 0.003f, 0.004f, 0.0055f, 0.009f, 0.018f, 0.027f, 0.047f, 0.084f, 0.19f, 0.345f, 0.517f, 0.69f, 1.0f},
+};
+
+void setGyroGameResponse(const GyroResponse* response) {
+    g_hasResponse = false;
+    if (!response || response->count < 2 || response->count > 16) return;
+    g_response = *response;
+    g_hasResponse = true;
+}
+
+// The stick level that gives camera speed `v` (0..1), and the speed a level gives.
+static float responseLevel(float v) {
+    const GyroResponse& r = g_response;
+    if (v >= 1.0f) return 1.0f;
+    for (int i = 1; i < r.count; ++i)
+        if (v <= r.speed[i]) {
+            const float span = r.speed[i] - r.speed[i - 1];
+            const float t = span > 1e-9f ? (v - r.speed[i - 1]) / span : 1.0f;
+            return r.level[i - 1] + (r.level[i] - r.level[i - 1]) * t;
+        }
+    return 1.0f;
+}
+static float responseSpeed(float level) {
+    const GyroResponse& r = g_response;
+    if (level <= r.level[0]) return 0.0f;
+    for (int i = 1; i < r.count; ++i)
+        if (level <= r.level[i]) {
+            const float span = r.level[i] - r.level[i - 1];
+            const float t = span > 1e-9f ? (level - r.level[i - 1]) / span : 1.0f;
+            return r.speed[i - 1] + (r.speed[i] - r.speed[i - 1]) * t;
+        }
+    return 1.0f;
 }
 
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale) {
@@ -378,15 +419,17 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
     } else {
         // In closed-loop aiming, emit lifted output >= kLift so fine aiming still moves the camera,
         // and integrate ONLY the effective deflection above deadzone into s.injected.
-        float lifted = std::min(1.0f, kLift + (1.0f - kLift) * m);
+        const bool measured = g_hasResponse.load(std::memory_order_relaxed);
+        float lifted = measured ? responseLevel(std::min(1.0f, m)) : std::min(1.0f, kLift + (1.0f - kLift) * m);
         x = s.x / m * lifted;
         y = s.y / m * lifted;
     }
 
     if (s.aimingActive) {
         float outMag = std::hypot(x, y);
-        if (outMag > kLift) {
-            float effMag = std::clamp((outMag - kLift) / (1.0f - kLift), 0.0f, 1.0f);
+        const bool measured = g_hasResponse.load(std::memory_order_relaxed);
+        if (measured ? outMag > g_response.level[0] : outMag > kLift) {
+            float effMag = measured ? responseSpeed(outMag) : std::clamp((outMag - kLift) / (1.0f - kLift), 0.0f, 1.0f);
             s.injected[0] += (x / outMag) * effMag * dt;
             s.injected[1] += (y / outMag) * effMag * dt;
         }

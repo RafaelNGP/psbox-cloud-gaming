@@ -30,6 +30,34 @@ namespace xc::app {
 Autoplay g_autoplay;
 std::atomic<bool> g_syntheticA{false};
 std::atomic<float> g_syntheticRightX{0.0f}, g_syntheticLeftY{0.0f};
+std::atomic<uint64_t> g_sweepStartUs{0};
+
+bool sweepStick(uint64_t nowUs, float& x, float& y) {
+    x = y = 0.0f;
+    const uint64_t start = g_sweepStartUs.load(std::memory_order_relaxed);
+    if (!start || nowUs < start) return false;
+    static constexpr float kX[] = {0.10f, 0.14f, 0.18f, 0.20f, 0.22f, 0.24f, 0.26f, 0.28f, 0.30f,
+                                   0.35f, 0.40f, 0.45f, 0.50f, 0.60f, 0.70f, 0.80f, 0.90f, 1.00f};
+    static constexpr float kY[] = {0.20f, 0.30f, 0.40f, 0.50f, 0.70f, 1.00f};
+    int64_t ms = static_cast<int64_t>((nowUs - start) / 1000) - 1000;  // 1 s with L2 only first
+    if (ms < 0) return true;
+    for (float v : kX) {  // right 1 s, rest 0.4 s, left 1 s, rest 0.4 s
+        if (ms < 2800) {
+            x = ms < 1000 ? v : ms < 1400 ? 0.0f : ms < 2400 ? -v : 0.0f;
+            return true;
+        }
+        ms -= 2800;
+    }
+    for (float v : kY) {  // down 0.5 s, rest 0.3 s, up 0.5 s, rest 0.3 s
+        if (ms < 1600) {
+            y = ms < 500 ? v : ms < 800 ? 0.0f : ms < 1300 ? -v : 0.0f;
+            return true;
+        }
+        ms -= 1600;
+    }
+    g_sweepStartUs = 0;
+    return false;
+}
 
 namespace {
 // The home screen was saved: the tests that start from it may go.
@@ -166,6 +194,8 @@ void loadAutoplay() {
         if (opt == "menutest") g_autoplay.menuTest = true;
         if (opt.rfind("res=", 0) == 0) g_autoplay.resolution = opt.substr(4);
         if (opt.rfind("tierseq=", 0) == 0) g_autoplay.tierSeq = opt.substr(8);
+        if (opt.rfind("gyrolevel=", 0) == 0) g_autoplay.gyroLevel = std::atoi(opt.c_str() + 10);
+        if (opt.rfind("gyrocurve=", 0) == 0) g_autoplay.gyroCurve = opt.substr(10);
         if (opt.rfind("sharp=", 0) == 0) g_autoplay.sharpness = std::atoi(opt.c_str() + 6);
         if (opt.rfind("deband=", 0) == 0) g_autoplay.deband = std::atoi(opt.c_str() + 7);
         if (opt.rfind("bitrate=", 0) == 0) g_autoplay.bitrateMbps = std::atoi(opt.c_str() + 8);

@@ -99,6 +99,19 @@ public:
     void recreateHwDecoder();
     // Measurements only (autoplay "tierseq="): StreamOptions::tierSequence. Before start().
     void setTierSequence(const std::string& seq);
+    // Measurements only (autoplay "bench", gyro.req): how far the picture moved
+    // from each frame to the next (the camera's turn), for `seconds`; then
+    // motionTake() gives the samples once.
+    struct MotionSample {
+        uint64_t us;      // platform::nowUs() when the frame was presented
+        float dx, dy;     // picture pixels, sub-pixel; + = the content moved right / down
+        float fitX, fitY; // best match error / mean error (0 = certain, 1 = no match)
+        float stickX, stickY;  // the sweep's right stick then (setMotionStick)
+    };
+    void startMotionRecording(int seconds);
+    bool motionTake(std::vector<MotionSample>& out);
+    using MotionStick = bool (*)(uint64_t nowUs, float& x, float& y);
+    void setMotionStick(MotionStick fn);
     void setMicEnabled(bool enabled);
     bool micEnabled() const;
     void setMicMuted(bool muted);

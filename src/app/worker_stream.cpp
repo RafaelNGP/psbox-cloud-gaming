@@ -8,6 +8,7 @@
 #include "app/stream_player.h"
 #include "display/display.h"
 #include "input/controller.h"
+#include "input/gyro.h"
 #include "media/audio_out.h"
 #include "media/audio_queue.h"
 #include "media/hw_decoder.h"
@@ -108,6 +109,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         bool hasCustom = false;
         GameProfile prof = g_settings.profileForGame(g_stageProduct, g_stageTitle, &hasCustom);
         bool preferHw = true;
+        if (g_autoplay.gyroLevel > 0) g_settings.gyroLevel = std::clamp(g_autoplay.gyroLevel, 1, 10);  // the settings are guarded under autoplay
         if (g_autoplay.swDecode) {
             preferHw = false;
             // The in-game menu shows the decoder forced here (not the saved
@@ -133,6 +135,8 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         else XC_LOGI("stream: FPS limit unlimited");
         player.setLegacyTuning(g_autoplay.legacy);
         player.setTierSequence(g_autoplay.tierSeq);
+        input::setGyroGameResponse(g_autoplay.gyroCurve == "fortnite" ? &input::kGyroResponseFortnite : nullptr);
+        if (!g_autoplay.gyroCurve.empty()) XC_LOGI("BENCH gyro aiming through the measured stick response: %s", g_autoplay.gyroCurve.c_str());
         int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
         player.setMaxBitrate(cap);
         media::audioSetVolume(g_settings.gameVolume / 100.0f);
@@ -365,6 +369,42 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                     std::remove(img.c_str());
                     player.requestImageTest();
                     XC_LOGI("BENCH image test asked");
+                }
+                // gyro.req ("N": seconds): pad 0's motion sensors recorded, then
+                // written to gyro.rec (autoplay "bench").
+                const std::string gyroReq = platform::dataDir() + "/gyro.req";
+                std::string gyroSecs;
+                if (g_autoplay.bench && platform::readFile(gyroReq, gyroSecs)) {
+                    std::remove(gyroReq.c_str());
+                    const int secs = std::max(1, std::atoi(gyroSecs.c_str()));
+                    input::startGyroRecording(secs);
+                    player.startMotionRecording(secs);
+                    XC_LOGI("BENCH gyro recording for %d s", secs);
+                }
+                // sweep.req: the right stick swept level by level with L2 down
+                // (sweepStick), the picture's motion recorded meanwhile.
+                const std::string sweepReq = platform::dataDir() + "/sweep.req";
+                if (g_autoplay.bench && platform::readFile(sweepReq, unused)) {
+                    std::remove(sweepReq.c_str());
+                    player.setMotionStick(sweepStick);
+                    player.startMotionRecording(64);
+                    input::startGyroRecording(64);
+                    g_sweepStartUs = platform::nowUs() + 500000;
+                    XC_LOGI("BENCH stick sweep starts");
+                }
+                std::vector<app::StreamPlayer::MotionSample> motionRec;
+                if (g_autoplay.bench && player.motionTake(motionRec)) {
+                    std::string data(reinterpret_cast<const char*>(motionRec.data()), motionRec.size() * sizeof(app::StreamPlayer::MotionSample));
+                    const bool ok = platform::writeFileAtomic(platform::dataDir() + "/motion.rec", data);
+                    XC_LOGI("BENCH motion recording: %zu frames of %zu bytes %s", motionRec.size(),
+                            sizeof(app::StreamPlayer::MotionSample), ok ? "saved" : "not saved");
+                }
+                std::vector<input::GyroSample> gyroRec;
+                if (g_autoplay.bench && input::gyroRecordingTake(gyroRec)) {
+                    std::string data(reinterpret_cast<const char*>(gyroRec.data()), gyroRec.size() * sizeof(input::GyroSample));
+                    const bool ok = platform::writeFileAtomic(platform::dataDir() + "/gyro.rec", data);
+                    XC_LOGI("BENCH gyro recording: %zu samples of %zu bytes %s", gyroRec.size(), sizeof(input::GyroSample),
+                            ok ? "saved" : "not saved");
                 }
                 // A measurement window marked from outside (the file mark.req,
                 // its text the new window's name): the last one is logged. An

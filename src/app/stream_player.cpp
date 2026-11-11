@@ -969,6 +969,7 @@ struct StreamPlayer::Impl {
             atomicMax(drawMaxUs, t3 - t2);
             benchAdd(&BenchWindow::draw, t3 - t2);
             if (decodedFrames == 1) XC_LOGI("first frame presented");
+            motionMeasure(pic, t3);
             if (imageTestWanted.exchange(false)) imageTest(pic, drawPic);
         }
     }
@@ -1241,6 +1242,72 @@ struct StreamPlayer::Impl {
     // look (upscaler, sharpening), a 1280x720 crop of the 4K output
     // saved for each (img_<name>.ppm). The stream is left with the defaults.
     std::atomic<bool> imageTestWanted{false};
+
+    // Measurements (startMotionRecording): the picture's shift between frames,
+    // from its luma's column and row averages over the upper middle (away from
+    // the HUD and the player's character).
+    std::mutex motionMutex;
+    std::vector<StreamPlayer::MotionSample> motionRec;
+    std::vector<float> motionPrevCols, motionPrevRows;
+    uint64_t motionUntilUs = 0;
+    std::atomic<int> motionState{0};  // 0 idle, 1 recording, 2 done
+    StreamPlayer::MotionStick motionStick = nullptr;
+    static float profileShift(const std::vector<float>& prev, const std::vector<float>& cur, int range, float& fit) {
+        const int n = static_cast<int>(cur.size());
+        std::vector<float> cost(static_cast<size_t>(2 * range + 1));
+        float sum = 0;
+        int best = 0;
+        for (int s = -range; s <= range; ++s) {
+            float c = 0;
+            int m = 0;
+            for (int i = range; i < n - range; ++i, ++m) c += std::abs(cur[i] - prev[i - s]);
+            c /= static_cast<float>(m > 0 ? m : 1);
+            cost[static_cast<size_t>(s + range)] = c;
+            sum += c;
+            if (c < cost[static_cast<size_t>(best + range)]) best = s;
+        }
+        const float mean = sum / static_cast<float>(cost.size()), c0 = cost[static_cast<size_t>(best + range)];
+        fit = mean > 1e-6f ? c0 / mean : 1.0f;
+        float sub = 0;
+        if (best > -range && best < range) {
+            const float a = cost[static_cast<size_t>(best + range - 1)], b = cost[static_cast<size_t>(best + range + 1)];
+            const float den = a - 2 * c0 + b;
+            if (den > 1e-9f) sub = 0.5f * (a - b) / den;
+        }
+        return static_cast<float>(best) + sub;
+    }
+    void motionMeasure(const media::Picture& pic, uint64_t nowUs) {
+        if (motionState.load(std::memory_order_relaxed) != 1 || !pic.y || pic.width < 640 || pic.height < 360) return;
+        const int x0 = pic.width / 5, x1 = pic.width * 4 / 5, y0 = pic.height / 8, y1 = pic.height / 2;
+        std::vector<float> cols(static_cast<size_t>((x1 - x0) / 2)), rows(static_cast<size_t>((y1 - y0) / 2));
+        for (size_t i = 0; i < cols.size(); ++i) {
+            const int x = x0 + static_cast<int>(i) * 2;
+            uint32_t sum = 0;
+            for (int y = y0; y < y1; y += 4) sum += pic.y[static_cast<size_t>(y) * pic.strideY + x] + pic.y[static_cast<size_t>(y) * pic.strideY + x + 1];
+            cols[i] = static_cast<float>(sum) / static_cast<float>(2 * ((y1 - y0 + 3) / 4));
+        }
+        for (size_t j = 0; j < rows.size(); ++j) {
+            const int y = y0 + static_cast<int>(j) * 2;
+            uint32_t sum = 0;
+            for (int x = x0; x < x1; x += 4) sum += pic.y[static_cast<size_t>(y) * pic.strideY + x] + pic.y[static_cast<size_t>(y + 1) * pic.strideY + x];
+            rows[j] = static_cast<float>(sum) / static_cast<float>(2 * ((x1 - x0 + 3) / 4));
+        }
+        std::lock_guard<std::mutex> lock(motionMutex);
+        if (nowUs >= motionUntilUs || motionRec.size() >= motionRec.capacity()) {
+            motionState = 2;
+            return;
+        }
+        if (motionPrevCols.size() == cols.size() && motionPrevRows.size() == rows.size()) {
+            StreamPlayer::MotionSample s{};
+            s.us = nowUs;
+            s.dx = 2.0f * profileShift(motionPrevCols, cols, 120, s.fitX);
+            s.dy = 2.0f * profileShift(motionPrevRows, rows, 60, s.fitY);
+            if (motionStick) motionStick(nowUs, s.stickX, s.stickY);
+            motionRec.push_back(s);
+        }
+        motionPrevCols.swap(cols);
+        motionPrevRows.swap(rows);
+    }
     template <class Draw>
     void imageTest(const media::Picture& pic, const Draw& drawPic) {
         struct Look {
@@ -1589,6 +1656,26 @@ void StreamPlayer::switchDecoder(bool hardware) { impl_->decoderSwitch = hardwar
 void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
 
 void StreamPlayer::setTierSequence(const std::string& seq) { impl_->tierSequence = seq; }
+void StreamPlayer::setMotionStick(MotionStick fn) { impl_->motionStick = fn; }
+void StreamPlayer::startMotionRecording(int seconds) {
+    std::lock_guard<std::mutex> lock(impl_->motionMutex);
+    seconds = std::clamp(seconds, 1, 180);
+    impl_->motionRec.clear();
+    impl_->motionRec.reserve(static_cast<size_t>(seconds) * 130);
+    impl_->motionPrevCols.clear();
+    impl_->motionPrevRows.clear();
+    impl_->motionUntilUs = platform::nowUs() + static_cast<uint64_t>(seconds) * 1000000u;
+    impl_->motionState = 1;
+}
+bool StreamPlayer::motionTake(std::vector<MotionSample>& out) {
+    std::lock_guard<std::mutex> lock(impl_->motionMutex);
+    if (impl_->motionState == 1 && platform::nowUs() >= impl_->motionUntilUs) impl_->motionState = 2;
+    if (impl_->motionState != 2) return false;
+    out.swap(impl_->motionRec);
+    impl_->motionRec.clear();
+    impl_->motionState = 0;
+    return true;
+}
 
 namespace {
 // The process's CPU time, every thread (system libraries' too): -1 where unknown.

@@ -915,6 +915,11 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         if (g_syntheticA) sent.btnA = true;
         if (float x = g_syntheticRightX; x != 0.0f) sent.rightStickX = x;
         if (float y = g_syntheticLeftY; y != 0.0f) sent.leftStickY = y;
+        if (float sx, sy; sweepStick(platform::nowUs(), sx, sy)) {  // measurements: nothing else on the right stick
+            sent.rightStickX = sx;
+            sent.rightStickY = sy;
+            sent.triggerL2 = 1.0f;
+        }
         // While another window has the focus on the cloud console (a
         // publisher's page such as NetEase's terms in Marvel Rivals,
         // which then shows its own pad-driven cursor), touch input is
