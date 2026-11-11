@@ -46,6 +46,9 @@ std::string contentVersionOf(const std::string& version) {
 bool findLatestRelease(Release& out, std::string& err, const std::string& feedUrl) {
     net::Request req;
     req.url = feedUrl.empty() ? kLatestRelease : feedUrl;
+    // A renamed repository answers 301: v1.6.3 and older never followed it and
+    // stopped finding releases after the rename to psbox-cloud-gaming (#409).
+    req.followRedirects = true;
     req.headers = {{"Accept", "application/vnd.github+json"}, {"User-Agent", "PSBox-Cloud-Gaming"}};
     req.timeoutMs = 10000;
     auto r = net::perform(req);
