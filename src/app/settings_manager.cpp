@@ -364,6 +364,22 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
                 ev.affectsHardware = true;
             }
         }
+        if (root.has("gyroCurveStart")) {
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroCurveStart"].asInt(settings_.gyroCurveStart), 0, 40));
+            if (v != settings_.gyroCurveStart) { settings_.gyroCurveStart = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroCurveExp")) {
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroCurveExp"].asInt(settings_.gyroCurveExp), 10, 40));
+            if (v != settings_.gyroCurveExp) { settings_.gyroCurveExp = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroInvertX")) {
+            bool v = root["gyroInvertX"].asBool(settings_.gyroInvertX);
+            if (v != settings_.gyroInvertX) { settings_.gyroInvertX = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroInvertY")) {
+            bool v = root["gyroInvertY"].asBool(settings_.gyroInvertY);
+            if (v != settings_.gyroInvertY) { settings_.gyroInvertY = v; changed = true; ev.affectsHardware = true; }
+        }
         if (root.has("gyroYawScale")) {
             int v = static_cast<int>(std::clamp<int64_t>(root["gyroYawScale"].asInt(settings_.gyroYawScale), 20, 200));
             if (v != settings_.gyroYawScale) {
@@ -574,6 +590,22 @@ bool SettingsManager::updateGameProfileFromJson(const std::string& gameKey, cons
         if (root.has("gyroLevel")) {
             int v = static_cast<int>(std::clamp<int64_t>(root["gyroLevel"].asInt(prof.gyroLevel), 1, 10));
             if (v != prof.gyroLevel) { prof.gyroLevel = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroCurveStart")) {
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroCurveStart"].asInt(prof.gyroCurveStart), 0, 40));
+            if (v != prof.gyroCurveStart) { prof.gyroCurveStart = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroCurveExp")) {
+            int v = static_cast<int>(std::clamp<int64_t>(root["gyroCurveExp"].asInt(prof.gyroCurveExp), 10, 40));
+            if (v != prof.gyroCurveExp) { prof.gyroCurveExp = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroInvertX")) {
+            bool v = root["gyroInvertX"].asBool(prof.gyroInvertX);
+            if (v != prof.gyroInvertX) { prof.gyroInvertX = v; changed = true; ev.affectsHardware = true; }
+        }
+        if (root.has("gyroInvertY")) {
+            bool v = root["gyroInvertY"].asBool(prof.gyroInvertY);
+            if (v != prof.gyroInvertY) { prof.gyroInvertY = v; changed = true; ev.affectsHardware = true; }
         }
         if (root.has("gyroYawScale")) {
             int v = static_cast<int>(std::clamp<int64_t>(root["gyroYawScale"].asInt(prof.gyroYawScale), 20, 200));

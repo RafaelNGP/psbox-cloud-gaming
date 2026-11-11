@@ -113,6 +113,10 @@ bool Settings::load(const std::string& path) {
     gyroLevel = static_cast<int>(std::clamp<int64_t>((*j)["gyroLevel"].asInt(gyroLevel), 1, 10));
     gyroYawScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroYawScale"].asInt(gyroYawScale), 20, 200));
     gyroPitchScale = static_cast<int>(std::clamp<int64_t>((*j)["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
+    gyroCurveStart = static_cast<int>(std::clamp<int64_t>((*j)["gyroCurveStart"].asInt(gyroCurveStart), 0, 40));
+    gyroCurveExp = static_cast<int>(std::clamp<int64_t>((*j)["gyroCurveExp"].asInt(gyroCurveExp), 10, 40));
+    gyroInvertX = (*j)["gyroInvertX"].asBool(gyroInvertX);
+    gyroInvertY = (*j)["gyroInvertY"].asBool(gyroInvertY);
     if ((*j)["gyroBias"].isArray() && (*j)["gyroBias"].items().size() >= 3) {
         gyroBias[0] = static_cast<float>((*j)["gyroBias"][0].asNumber(gyroBias[0]));
         gyroBias[1] = static_cast<float>((*j)["gyroBias"][1].asNumber(gyroBias[1]));
@@ -180,6 +184,10 @@ bool Settings::load(const std::string& path) {
         p.gyroLevel = static_cast<int>(std::clamp<int64_t>(obj["gyroLevel"].asInt(gyroLevel), 1, 10));
         p.gyroYawScale = static_cast<int>(std::clamp<int64_t>(obj["gyroYawScale"].asInt(gyroYawScale), 20, 200));
         p.gyroPitchScale = static_cast<int>(std::clamp<int64_t>(obj["gyroPitchScale"].asInt(gyroPitchScale), 20, 200));
+        p.gyroCurveStart = static_cast<int>(std::clamp<int64_t>(obj["gyroCurveStart"].asInt(gyroCurveStart), 0, 40));
+        p.gyroCurveExp = static_cast<int>(std::clamp<int64_t>(obj["gyroCurveExp"].asInt(gyroCurveExp), 10, 40));
+        p.gyroInvertX = obj["gyroInvertX"].asBool(gyroInvertX);
+        p.gyroInvertY = obj["gyroInvertY"].asBool(gyroInvertY);
         if (obj["gyroBias"].isArray() && obj["gyroBias"].items().size() >= 3) {
             p.gyroBias[0] = static_cast<float>(obj["gyroBias"][0].asNumber(gyroBias[0]));
             p.gyroBias[1] = static_cast<float>(obj["gyroBias"][1].asNumber(gyroBias[1]));
@@ -230,6 +238,10 @@ GameProfile Settings::defaultProfile() const {
     p.gyroLevel = gyroLevel;
     p.gyroYawScale = gyroYawScale;
     p.gyroPitchScale = gyroPitchScale;
+    p.gyroCurveStart = gyroCurveStart;
+    p.gyroCurveExp = gyroCurveExp;
+    p.gyroInvertX = gyroInvertX;
+    p.gyroInvertY = gyroInvertY;
     p.gyroBias[0] = gyroBias[0];
     p.gyroBias[1] = gyroBias[1];
     p.gyroBias[2] = gyroBias[2];
@@ -312,6 +324,10 @@ bool Settings::save(const std::string& path) const {
     v.set("gyroLevel", gyroLevel);
     v.set("gyroYawScale", gyroYawScale);
     v.set("gyroPitchScale", gyroPitchScale);
+    v.set("gyroCurveStart", gyroCurveStart);
+    v.set("gyroCurveExp", gyroCurveExp);
+    v.set("gyroInvertX", gyroInvertX);
+    v.set("gyroInvertY", gyroInvertY);
     json::Value biasArr = json::Value::array();
     biasArr.push(static_cast<double>(gyroBias[0]));
     biasArr.push(static_cast<double>(gyroBias[1]));
@@ -362,6 +378,10 @@ bool Settings::save(const std::string& path) const {
         obj.set("gyroLevel", p.gyroLevel);
         obj.set("gyroYawScale", p.gyroYawScale);
         obj.set("gyroPitchScale", p.gyroPitchScale);
+        obj.set("gyroCurveStart", p.gyroCurveStart);
+        obj.set("gyroCurveExp", p.gyroCurveExp);
+        obj.set("gyroInvertX", p.gyroInvertX);
+        obj.set("gyroInvertY", p.gyroInvertY);
         json::Value objBias = json::Value::array();
         objBias.push(static_cast<double>(p.gyroBias[0]));
         objBias.push(static_cast<double>(p.gyroBias[1]));

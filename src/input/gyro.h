@@ -129,19 +129,27 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
 float gyroToSteering(const float rawW[3], const float* accel, int level, GyroState& s,
                      const float* orientationQuat = nullptr, float dt = 0.004f);
 
-// How the game turns the right stick into camera speed, measured (stick
-// level -> speed as a share of the speed at full stick, rising). With one
-// set, gyro aiming asks for the stick level that gives the camera speed the
-// hand's turn calls for; with none (nullptr), it assumes a 12 % dead zone and
-// a straight line after it.
+// How the game turns the right stick into camera speed: nothing up to
+// `start`, then ((level - start) / (1 - start)) ^ `exponent` of its top speed.
+// Gyro aiming sends the stick level that gives the camera speed the hand's
+// turn calls for. The default (12 %, a straight line) is what it assumed
+// before this could be set. Measured in Fortnite aiming down sights
+// (2026-11-11): 13 %, exponent 2.9. `invertX` / `invertY` turn the aim the
+// other way on that axis.
 struct GyroResponse {
-    int count = 0;
-    float level[16] = {};  // level[0]: the dead zone's edge (speed 0)
-    float speed[16] = {};  // 0 at level[0] ... 1 at full stick
+    float start = 0.12f;
+    float exponent = 1.0f;
+    bool invertX = false, invertY = false;
 };
-void setGyroGameResponse(const GyroResponse* response);
-// Fortnite aiming down sights, default "exponential" look curve (measured 2026-11-11).
-extern const GyroResponse kGyroResponseFortnite;
+void setGyroResponse(const GyroResponse& response);
+GyroResponse gyroResponse();
+// The curves offered by name (start in percent, exponent in tenths).
+struct GyroPreset {
+    const char* id;  // "linear", "smooth", "exponential", "fortnite"
+    int startPct, exponentTenths;
+};
+constexpr GyroPreset kGyroPresets[] = {{"linear", 12, 10}, {"smooth", 15, 15}, {"exponential", 20, 20}, {"fortnite", 13, 29}};
+constexpr int kGyroCurveStartMin = 0, kGyroCurveStartMax = 40, kGyroCurveExpMin = 10, kGyroCurveExpMax = 40;
 
 // Global gyro calibration & hardware probing
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale);

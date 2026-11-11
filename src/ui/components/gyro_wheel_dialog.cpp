@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
+#include <iterator>
 
 namespace xc::ui {
 
@@ -62,6 +63,37 @@ void GyroWheelDialog::setPitchScale(int s) {
     applyToSettings();
 }
 
+void GyroWheelDialog::setCurve(int startPct, int exponentTenths) {
+    curveStart_ = std::clamp(startPct, input::kGyroCurveStartMin, input::kGyroCurveStartMax);
+    curveExp_ = std::clamp(exponentTenths, input::kGyroCurveExpMin, input::kGyroCurveExpMax);
+    applyToSettings();
+}
+
+void GyroWheelDialog::setInvert(bool x, bool y) {
+    invertX_ = x;
+    invertY_ = y;
+    applyToSettings();
+}
+
+int GyroWheelDialog::presetIndex() const {
+    for (int i = 0; i < static_cast<int>(std::size(input::kGyroPresets)); ++i)
+        if (input::kGyroPresets[i].startPct == curveStart_ && input::kGyroPresets[i].exponentTenths == curveExp_) return i;
+    return -1;
+}
+
+void GyroWheelDialog::stepPreset(int dir) {
+    const int n = static_cast<int>(std::size(input::kGyroPresets));
+    const int cur = presetIndex();
+    const int next = cur < 0 ? (dir > 0 ? 0 : n - 1) : (cur + dir + n) % n;
+    // Through a curve the same turn of the hand moves the aim much further at
+    // low speeds than the straight line did: start from a gentle intensity.
+    const bool wasLinear = curveExp_ == 10, isLinear = input::kGyroPresets[next].exponentTenths == 10;
+    if (wasLinear && !isLinear && level_ > 3) level_ = 3;
+    curveStart_ = input::kGyroPresets[next].startPct;
+    curveExp_ = input::kGyroPresets[next].exponentTenths;
+    applyToSettings();
+}
+
 void GyroWheelDialog::setBias(const float b[3]) {
     if (b) {
         bias_[0] = b[0];
@@ -93,6 +125,10 @@ void GyroWheelDialog::syncFromSettings() {
         level_ = prof.gyroLevel;
         yawScale_ = prof.gyroYawScale;
         pitchScale_ = prof.gyroPitchScale;
+        curveStart_ = prof.gyroCurveStart;
+        curveExp_ = prof.gyroCurveExp;
+        invertX_ = prof.gyroInvertX;
+        invertY_ = prof.gyroInvertY;
         bias_[0] = prof.gyroBias[0];
         bias_[1] = prof.gyroBias[1];
         bias_[2] = prof.gyroBias[2];
@@ -101,6 +137,10 @@ void GyroWheelDialog::syncFromSettings() {
         level_ = s.gyroLevel;
         yawScale_ = s.gyroYawScale;
         pitchScale_ = s.gyroPitchScale;
+        curveStart_ = s.gyroCurveStart;
+        curveExp_ = s.gyroCurveExp;
+        invertX_ = s.gyroInvertX;
+        invertY_ = s.gyroInvertY;
         bias_[0] = s.gyroBias[0];
         bias_[1] = s.gyroBias[1];
         bias_[2] = s.gyroBias[2];
@@ -120,6 +160,7 @@ void GyroWheelDialog::applyToSettings() {
     gyroState_.bias[2] = bias_[2];
 
     input::setGlobalGyroCalibration(bias_, gyroState_.yawScale, gyroState_.pitchScale);
+    input::setGyroResponse({curveStart_ / 100.0f, curveExp_ / 10.0f, invertX_, invertY_});
 
     auto& mgr = app::SettingsManager::instance();
     if (!gameKey_.empty() && mgr.hasCustomProfile(gameKey_)) {
@@ -128,6 +169,10 @@ void GyroWheelDialog::applyToSettings() {
             prof.gyroLevel = level_;
             prof.gyroYawScale = yawScale_;
             prof.gyroPitchScale = pitchScale_;
+            prof.gyroCurveStart = curveStart_;
+            prof.gyroCurveExp = curveExp_;
+            prof.gyroInvertX = invertX_;
+            prof.gyroInvertY = invertY_;
             prof.gyroBias[0] = bias_[0];
             prof.gyroBias[1] = bias_[1];
             prof.gyroBias[2] = bias_[2];
@@ -137,6 +182,10 @@ void GyroWheelDialog::applyToSettings() {
             s.gyroLevel = level_;
             s.gyroYawScale = yawScale_;
             s.gyroPitchScale = pitchScale_;
+            s.gyroCurveStart = curveStart_;
+            s.gyroCurveExp = curveExp_;
+            s.gyroInvertX = invertX_;
+            s.gyroInvertY = invertY_;
             s.gyroBias[0] = bias_[0];
             s.gyroBias[1] = bias_[1];
             s.gyroBias[2] = bias_[2];
@@ -171,6 +220,21 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
                 pitchScale_ = std::max(20, pitchScale_ - 10);
                 applyToSettings();
                 break;
+            case Item::Preset:
+                stepPreset(-1);
+                break;
+            case Item::CurveStart:
+                setCurve(curveStart_ - 1, curveExp_);
+                break;
+            case Item::CurveExp:
+                setCurve(curveStart_, curveExp_ - 1);
+                break;
+            case Item::InvertX:
+                setInvert(!invertX_, invertY_);
+                break;
+            case Item::InvertY:
+                setInvert(invertX_, !invertY_);
+                break;
             default:
                 break;
         }
@@ -188,6 +252,21 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
                 pitchScale_ = std::min(200, pitchScale_ + 10);
                 applyToSettings();
                 break;
+            case Item::Preset:
+                stepPreset(1);
+                break;
+            case Item::CurveStart:
+                setCurve(curveStart_ + 1, curveExp_);
+                break;
+            case Item::CurveExp:
+                setCurve(curveStart_, curveExp_ + 1);
+                break;
+            case Item::InvertX:
+                setInvert(!invertX_, invertY_);
+                break;
+            case Item::InvertY:
+                setInvert(invertX_, !invertY_);
+                break;
             default:
                 break;
         }
@@ -196,6 +275,10 @@ void GyroWheelDialog::handleInput(const NavInput& in) {
     if (in.accept) {
         if (selected_ == Item::Calibrate) {
             startCalibration();
+        } else if (selected_ == Item::InvertX) {
+            setInvert(!invertX_, invertY_);
+        } else if (selected_ == Item::InvertY) {
+            setInvert(invertX_, !invertY_);
         }
     }
 
@@ -246,7 +329,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     (void)x; (void)y; (void)w; (void)h;
 
     // Modal panel
-    constexpr int modalW = 1140, modalH = 640;
+    constexpr int modalW = 1140, modalH = 720;
     Rect panel{(kW - modalW) / 2, (kH - modalH) / 2 - 30, modalW, modalH};
     c.fillRect({panel.x + 8, panel.y + 12, panel.w, panel.h}, rgba(0, 0, 0, 120), 26); // shadow
     c.fillRect(panel, kPanel, 24);
@@ -272,7 +355,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     c.line(cx, cy - R, cx, cy + R, 1.0f, rgba(255, 255, 255, 30));
 
     // Deadband threshold circle (15%)
-    const float deadbandR = R * 0.15f;
+    const float deadbandR = R * (curveStart_ / 100.0f);
     c.fillCircle(cx, cy, deadbandR, rgba(230, 70, 70, 40));
     c.strokeArc(cx, cy, deadbandR, 1.5f, 0, 6.2832f, rgba(230, 90, 90, 140));
 
@@ -314,8 +397,8 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     // -------------------------------------------------------------
     int rx = panel.x + 460;
     int rw = panel.w - 508;
-    int ry = panel.y + 116;
-    constexpr int rowH = 70;
+    int ry = panel.y + 108;
+    constexpr int rowH = 56;
 
     auto drawRow = [&](Item it, const std::string& label, const std::string& val, bool isBtn = false) {
         bool chosen = (selected_ == it);
@@ -325,7 +408,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
             c.strokeRect(itemBox, kCustomFocusBorder, 2, 12);
         }
 
-        fonts.semibold.draw(c, label, itemBox.x + 20, fonts.semibold.centeredY(itemBox.y, itemBox.h, 22), 22,
+        fonts.semibold.draw(c, label, itemBox.x + 20, fonts.semibold.centeredY(itemBox.y, itemBox.h, 20), 20,
                             chosen ? kWhite : kGray);
 
         if (!val.empty()) {
@@ -336,9 +419,9 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
                                 chosen ? kWhite : kGray);
             } else {
                 std::string controlStr = "‹  " + val + "  ›";
-                int vw = fonts.bold.measure(controlStr, 22);
+                int vw = fonts.bold.measure(controlStr, 20);
                 fonts.bold.draw(c, controlStr, itemBox.x + itemBox.w - vw - 20,
-                                fonts.bold.centeredY(itemBox.y, itemBox.h, 22), 22,
+                                fonts.bold.centeredY(itemBox.y, itemBox.h, 20), 20,
                                 chosen ? kGameOutputColor : kWhite);
             }
         }
@@ -359,7 +442,7 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
 
     // If calibrating, show a dedicated progress bar below
     if (isCalibrating()) {
-        Rect barBox{rx + 20, ry - 16, rw - 40, 8};
+        Rect barBox{rx + 20, ry - 14, rw - 40, 5};
         c.fillRect(barBox, rgba(255, 255, 255, 30), 4);
         int fw = static_cast<int>(barBox.w * calibrationProgress());
         c.fillRect({barBox.x, barBox.y, fw, barBox.h}, kGameOutputColor, 4);
@@ -374,9 +457,32 @@ void GyroWheelDialog::draw(Canvas& c, const Fonts& fonts, int x, int y, int w, i
     // Row 3: Vertical (Pitch) scale
     drawRow(Item::PitchScale, tr(Str::GyroPitchSensitivity), fmt("%d %%", pitchScale_));
 
+    // Rows 4-6: the game's stick response, by name or by its two numbers
+    static constexpr Str kPresetNames[] = {Str::GyroPresetLinear, Str::GyroPresetSmooth, Str::GyroPresetExponential};
+    const int preset = presetIndex();
+    const std::string presetName = preset < 0 ? tr(Str::GyroPresetCustom)
+                                   : preset < static_cast<int>(std::size(kPresetNames)) ? tr(kPresetNames[preset])
+                                                                                        : "Fortnite";
+    drawRow(Item::Preset, tr(Str::GyroGameResponse), presetName);
+    drawRow(Item::CurveStart, tr(Str::GyroCurveStart), fmt("%d %%", curveStart_));
+    drawRow(Item::CurveExp, tr(Str::GyroCurveShape), fmt("%d.%d", curveExp_ / 10, curveExp_ % 10));
+
+    // Rows 7-8: the aim turned the other way
+    drawRow(Item::InvertX, tr(Str::GyroInvertX), tr(invertX_ ? Str::On : Str::Off));
+    drawRow(Item::InvertY, tr(Str::GyroInvertY), tr(invertY_ ? Str::On : Str::Off));
+
+    // The setup in one line, to write down and repeat in another game.
+    {
+        const int nx = panel.x + 48, ny = static_cast<int>(cy + R + 92);
+        fonts.semibold.draw(c, tr(Str::GyroYourNumbers), nx, ny, 18, kGray);
+        fonts.bold.draw(c, fmt("%d %% · %d.%d · %d/10 · H %d %% · V %d %%", curveStart_, curveExp_ / 10, curveExp_ % 10, level_,
+                               yawScale_, pitchScale_),
+                        nx, ny + 26, 20, kWhite);
+    }
+
     // Help text at bottom
     fonts.regular.draw(c, tr(Str::GyroTestHelp),
-                       panel.x + 48, panel.y + panel.h - 60, 18, kDim);
+                       panel.x + 48, panel.y + panel.h - 44, 18, kDim);
 
     // Footer Hints
     c.fillRect({0, kH - 64, kW, 64}, kBg);

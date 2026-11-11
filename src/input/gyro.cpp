@@ -17,44 +17,36 @@ bool g_hasGlobalGyroBias = false;
 bool g_hasGlobalGyroScales = false;
 }
 
-static GyroResponse g_response;
-static std::atomic<bool> g_hasResponse{false};
+// Read by the polling thread, set by the UI's: plain atomics.
+static std::atomic<float> g_responseStart{0.12f}, g_responseExponent{1.0f};
+static std::atomic<bool> g_invertX{false}, g_invertY{false};
 
-const GyroResponse kGyroResponseFortnite = {
-    14,
-    {0.22f, 0.24f, 0.26f, 0.28f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f, 0.70f, 0.80f, 0.90f, 1.00f},
-    {0.0f, 0.003f, 0.004f, 0.0055f, 0.009f, 0.018f, 0.027f, 0.047f, 0.084f, 0.19f, 0.345f, 0.517f, 0.69f, 1.0f},
-};
+void setGyroResponse(const GyroResponse& r) {
+    g_responseStart = std::clamp(r.start, 0.0f, 0.6f);
+    g_responseExponent = std::clamp(r.exponent, 0.5f, 5.0f);
+    g_invertX = r.invertX;
+    g_invertY = r.invertY;
+}
 
-void setGyroGameResponse(const GyroResponse* response) {
-    g_hasResponse = false;
-    if (!response || response->count < 2 || response->count > 16) return;
-    g_response = *response;
-    g_hasResponse = true;
+GyroResponse gyroResponse() {
+    GyroResponse r;
+    r.start = g_responseStart;
+    r.exponent = g_responseExponent;
+    r.invertX = g_invertX;
+    r.invertY = g_invertY;
+    return r;
 }
 
 // The stick level that gives camera speed `v` (0..1), and the speed a level gives.
-static float responseLevel(float v) {
-    const GyroResponse& r = g_response;
+static float responseLevel(float v, float start, float exponent) {
     if (v >= 1.0f) return 1.0f;
-    for (int i = 1; i < r.count; ++i)
-        if (v <= r.speed[i]) {
-            const float span = r.speed[i] - r.speed[i - 1];
-            const float t = span > 1e-9f ? (v - r.speed[i - 1]) / span : 1.0f;
-            return r.level[i - 1] + (r.level[i] - r.level[i - 1]) * t;
-        }
-    return 1.0f;
+    if (v <= 0.0f) return start;
+    return start + (1.0f - start) * (exponent == 1.0f ? v : std::pow(v, 1.0f / exponent));
 }
-static float responseSpeed(float level) {
-    const GyroResponse& r = g_response;
-    if (level <= r.level[0]) return 0.0f;
-    for (int i = 1; i < r.count; ++i)
-        if (level <= r.level[i]) {
-            const float span = r.level[i] - r.level[i - 1];
-            const float t = span > 1e-9f ? (level - r.level[i - 1]) / span : 1.0f;
-            return r.speed[i - 1] + (r.speed[i] - r.speed[i - 1]) * t;
-        }
-    return 1.0f;
+static float responseSpeed(float level, float start, float exponent) {
+    if (level <= start) return 0.0f;
+    const float u = std::min(1.0f, (level - start) / (1.0f - start));
+    return exponent == 1.0f ? u : std::pow(u, exponent);
 }
 
 void setGlobalGyroCalibration(const float bias[3], float yawScale, float pitchScale) {
@@ -395,7 +387,8 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         ty = ty_ff + kp * errY;
     }
 
-    constexpr float kLift = 0.12f;
+    const float kLift = g_responseStart.load(std::memory_order_relaxed);
+    const float kExponent = g_responseExponent.load(std::memory_order_relaxed);
     constexpr float kBlendRange = 0.025f;
     if (s.aimingActive && tx_ff == 0.0f && ty_ff == 0.0f && std::hypot(errX, errY) < 5e-5f) {
         s.x = s.y = 0.0f;
@@ -413,27 +406,28 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
     } else if (!s.aimingActive) {
         // The games ignore about the first 10-20 % of the stick: start past it with a C0 continuous ramp.
         float smoothBlend = std::clamp((m - minMag) / kBlendRange, 0.0f, 1.0f);
-        float lifted = std::min(1.0f, smoothBlend * (kLift + (1.0f - kLift) * m));
+        float lifted = std::min(1.0f, smoothBlend * responseLevel(std::min(1.0f, m), kLift, kExponent));
         x = s.x / m * lifted;
         y = s.y / m * lifted;
     } else {
         // In closed-loop aiming, emit lifted output >= kLift so fine aiming still moves the camera,
         // and integrate ONLY the effective deflection above deadzone into s.injected.
-        const bool measured = g_hasResponse.load(std::memory_order_relaxed);
-        float lifted = measured ? responseLevel(std::min(1.0f, m)) : std::min(1.0f, kLift + (1.0f - kLift) * m);
+        float lifted = responseLevel(std::min(1.0f, m), kLift, kExponent);
         x = s.x / m * lifted;
         y = s.y / m * lifted;
     }
 
     if (s.aimingActive) {
         float outMag = std::hypot(x, y);
-        const bool measured = g_hasResponse.load(std::memory_order_relaxed);
-        if (measured ? outMag > g_response.level[0] : outMag > kLift) {
-            float effMag = measured ? responseSpeed(outMag) : std::clamp((outMag - kLift) / (1.0f - kLift), 0.0f, 1.0f);
+        if (outMag > kLift) {
+            float effMag = responseSpeed(outMag, kLift, kExponent);
             s.injected[0] += (x / outMag) * effMag * dt;
             s.injected[1] += (y / outMag) * effMag * dt;
         }
     }
+    // Asked for by the player, as with an inverted stick: only what leaves here turns.
+    if (g_invertX.load(std::memory_order_relaxed)) x = -x;
+    if (g_invertY.load(std::memory_order_relaxed)) y = -y;
 }
 
 float gyroToSteering(const float rawW[3], const float* accel, int level, GyroState& s,

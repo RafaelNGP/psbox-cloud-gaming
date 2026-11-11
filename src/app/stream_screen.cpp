@@ -10,6 +10,7 @@
 #include "app/stream_player.h"
 #include "app/web_server.h"
 #include "display/display.h"
+#include "input/gyro.h"
 #include "input/input_ext.h"
 #include "input/kbm.h"
 #include "input/keyboard_nav.h"
@@ -142,6 +143,7 @@ void StreamScreen::syncFromSettings() {
     gyroLevel_ = prof.gyroLevel;
     input::setGyro(gyroMode_, gyroLevel_);
     input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
+    input::setGyroResponse({prof.gyroCurveStart / 100.0f, prof.gyroCurveExp / 10.0f, prof.gyroInvertX, prof.gyroInvertY});
     input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
     input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
     media::setAudioHapticsLevel(audioHaptics_);
@@ -334,6 +336,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         gyroLevel_ = prof.gyroLevel;
         input::setGyro(gyroMode_, gyroLevel_);
         input::setGyroCalibration(prof.gyroBias, prof.gyroYawScale / 100.0f, prof.gyroPitchScale / 100.0f);
+    input::setGyroResponse({prof.gyroCurveStart / 100.0f, prof.gyroCurveExp / 10.0f, prof.gyroInvertX, prof.gyroInvertY});
         input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
         input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
         input::setCircleConfirms(prof.circleConfirms);
@@ -651,6 +654,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                         menu_.setGyroPitchScale(def.gyroPitchScale);
                         menu_.setGyroBias(def.gyroBias);
                         input::setGyroCalibration(def.gyroBias, def.gyroYawScale / 100.0f, def.gyroPitchScale / 100.0f);
+                        input::setGyroResponse({def.gyroCurveStart / 100.0f, def.gyroCurveExp / 10.0f, def.gyroInvertX, def.gyroInvertY});
                         menu_.setTouchpadShortcuts(touchpadShortcuts_);
                         display::setSharpness(kSharpAmount[sharpness_]);
                         applyDeband_();

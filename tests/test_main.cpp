@@ -2839,6 +2839,37 @@ static void testGyro() {
     CHECK(xRoll < -0.3f);
     CHECK(std::abs(yRoll) < 1e-6f); // Decoupled pitch: zero crosstalk from roll turning
 
+    // The game's stick response (setGyroResponse): through a measured curve
+    // the stick level sent gives a camera speed in step with the hand's turn.
+    {
+        const GyroResponse fortnite{0.13f, 2.9f, false, false};
+        auto camera = [&](float rate) {  // the game's speed (share of its top) for a steady turn
+            GyroState g;
+            anchorGyroPosture(g, nullptr, level);  // as the pad's polling does before the first step
+            float gx = 0, gy = 0;
+            const float turn[3] = {0.0f, rate, 0.0f};
+            for (int i = 0; i < 200; ++i) gyroToStick(turn, level, 3, g, gx, gy);
+            const float m = std::hypot(gx, gy);
+            return m <= 0.13f ? 0.0f : std::pow((m - 0.13f) / 0.87f, 2.9f);
+        };
+        setGyroResponse(fortnite);
+        const float slow = camera(0.05f), mid = camera(0.2f), fast = camera(0.8f);
+        CHECK(slow > 0.0f);
+        CHECK(std::abs(mid / slow - 4.0f) < 0.2f);   // 4x the turn, 4x the camera
+        CHECK(std::abs(fast / mid - 4.0f) < 0.2f);
+        // Inverted on one axis: that axis alone turns the other way.
+        GyroState a, b;
+        anchorGyroPosture(a, nullptr, level);
+        anchorGyroPosture(b, nullptr, level);
+        float ax = 0, ay = 0, bx = 0, by = 0;
+        const float both[3] = {0.3f, 0.5f, 0.0f};
+        for (int i = 0; i < 60; ++i) gyroToStick(both, level, 3, a, ax, ay);
+        setGyroResponse({0.13f, 2.9f, true, false});
+        for (int i = 0; i < 60; ++i) gyroToStick(both, level, 3, b, bx, by);
+        CHECK(std::abs(bx + ax) < 1e-5f && std::abs(by - ay) < 1e-5f && std::abs(ax) > 0.1f);
+        setGyroResponse(GyroResponse{});  // the default again for the tests below
+    }
+
     // Steering wheel mode (gyroToSteering):
     // 1. Center deadzone: tiny tilt (< 1.5 deg) produces 0 deflection
     GyroState steerState;

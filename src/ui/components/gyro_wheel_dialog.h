@@ -20,6 +20,11 @@ public:
         Intensity,
         YawScale,
         PitchScale,
+        Preset,      // the game's stick response, by name
+        CurveStart,  // its two numbers, for a response of one's own
+        CurveExp,
+        InvertX,
+        InvertY,
         ItemCount
     };
 
@@ -44,6 +49,13 @@ public:
     int pitchScale() const { return pitchScale_; }
     void setPitchScale(int s);
 
+    int curveStart() const { return curveStart_; }
+    int curveExp() const { return curveExp_; }
+    bool invertX() const { return invertX_; }
+    bool invertY() const { return invertY_; }
+    void setCurve(int startPct, int exponentTenths);
+    void setInvert(bool x, bool y);
+
     const float* bias() const { return bias_; }
     void setBias(const float b[3]);
 
@@ -53,6 +65,8 @@ public:
 
 private:
     void applyToSettings();
+    int presetIndex() const;  // in input::kGyroPresets, -1: one's own numbers
+    void stepPreset(int dir);
     void syncFromSettings();
 
     bool open_ = false;
@@ -63,6 +77,9 @@ private:
     int yawScale_ = 100;    // 20..200%
     int pitchScale_ = 80;   // 20..200%
     float bias_[3] = {0.0f, 0.0f, 0.0f};
+    int curveStart_ = 12;   // percent of the stick (input::GyroResponse::start)
+    int curveExp_ = 10;     // tenths (input::GyroResponse::exponent)
+    bool invertX_ = false, invertY_ = false;
 
     Item selected_ = Item::Calibrate;
     input::GyroCalibrator calibrator_;

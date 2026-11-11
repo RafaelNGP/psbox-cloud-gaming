@@ -489,6 +489,16 @@ constexpr Column kFrench = {
     "Échec : Gardez immobile",                        // GyroCalibratedFailedShort
     "Mode Démo (Automatique)",                        // GyroDemoMode
     "Bougez la manette pour tester ; utilisez les flèches pour ajuster la sensibilité.", // GyroTestHelp
+    "Réponse du jeu",                               // GyroGameResponse
+    "Début de la réponse",                          // GyroCurveStart
+    "Courbe",                                       // GyroCurveShape
+    "Inverser l'horizontale",                       // GyroInvertX
+    "Inverser la verticale",                        // GyroInvertY
+    "Linéaire",                                     // GyroPresetLinear
+    "Douce",                                        // GyroPresetSmooth
+    "Exponentielle",                                // GyroPresetExponential
+    "Personnalisée",                                // GyroPresetCustom
+    "Vos valeurs",                                  // GyroYourNumbers
     "Qualité vidéo",                                  // StatVideoQuality
     "Ouvre le menu Xbox Guide ou envoie la commande Xbox au jeu.", // MenuDescXboxButton
     "Configure et affiche les statistiques de performance, réseau et latence à l'écran.", // MenuDescStats

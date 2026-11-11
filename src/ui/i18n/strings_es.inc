@@ -489,6 +489,16 @@ constexpr Column kSpanish = {
     "Fallo: Mantenga inmóvil",                        // GyroCalibratedFailedShort
     "Modo Demostración (Automático)",                 // GyroDemoMode
     "Mueva el control para probar; use las flechas para ajustar sensibilidad horizontal/vertical.", // GyroTestHelp
+    "Respuesta del juego",                          // GyroGameResponse
+    "Inicio de la respuesta",                       // GyroCurveStart
+    "Curva",                                        // GyroCurveShape
+    "Invertir horizontal",                          // GyroInvertX
+    "Invertir vertical",                            // GyroInvertY
+    "Lineal",                                       // GyroPresetLinear
+    "Suave",                                        // GyroPresetSmooth
+    "Exponencial",                                  // GyroPresetExponential
+    "Propia",                                       // GyroPresetCustom
+    "Tus números",                                  // GyroYourNumbers
     "Calidad de vídeo",                               // StatVideoQuality
     "Abre el menú Xbox Guide o envía el comando del botón Xbox al juego.", // MenuDescXboxButton
     "Configura y muestra las estadísticas de rendimiento, red y latencia en pantalla.", // MenuDescStats

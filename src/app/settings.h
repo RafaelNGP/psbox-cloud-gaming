@@ -48,6 +48,11 @@ struct GameProfile {
     int gyroLevel = 5;
     int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
     int gyroPitchScale = 80;   // vertical sensitivity percent (20..200%, default 80%)
+    // The game's stick response gyro aiming works through (input/gyro.h GyroResponse):
+    // where the camera starts to answer (percent of the stick) and the curve's exponent (tenths).
+    int gyroCurveStart = 12;
+    int gyroCurveExp = 10;
+    bool gyroInvertX = false, gyroInvertY = false;  // the aim turned the other way on that axis
     float gyroBias[3] = {0.0f, 0.0f, 0.0f}; // static zero-drift bias
     // Touchpad as mouse in games with native MKB support (OFF by default)
     bool touchpadMouse = false;
@@ -126,6 +131,11 @@ struct Settings {
     int gyroLevel = 5;         // its intensity, 1..10
     int gyroYawScale = 100;    // horizontal sensitivity percent (20..200%, default 100%)
     int gyroPitchScale = 80;   // vertical sensitivity percent (20..200%, default 80%)
+    // The game's stick response gyro aiming works through (input/gyro.h GyroResponse):
+    // where the camera starts to answer (percent of the stick) and the curve's exponent (tenths).
+    int gyroCurveStart = 12;
+    int gyroCurveExp = 10;
+    bool gyroInvertX = false, gyroInvertY = false;  // the aim turned the other way on that axis
     float gyroBias[3] = {0.0f, 0.0f, 0.0f}; // static zero-drift bias
     bool touchpadMouse = false; // touchpad as mouse in games with native MKB support
     input::TouchpadShortcuts touchpadShortcuts = input::defaultTouchpadShortcuts();

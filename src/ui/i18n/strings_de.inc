@@ -489,6 +489,16 @@ constexpr Column kGerman = {
     "Fehlgeschlagen: Ruhig halten",                   // GyroCalibratedFailedShort
     "Demo-Modus (Automatisch)",                       // GyroDemoMode
     "Controller bewegen zum Testen; Pfeiltasten für Empfindlichkeit nutzen.", // GyroTestHelp
+    "Spielreaktion",                                // GyroGameResponse
+    "Beginn der Reaktion",                          // GyroCurveStart
+    "Kurve",                                        // GyroCurveShape
+    "Horizontal umkehren",                          // GyroInvertX
+    "Vertikal umkehren",                            // GyroInvertY
+    "Linear",                                       // GyroPresetLinear
+    "Sanft",                                        // GyroPresetSmooth
+    "Exponentiell",                                 // GyroPresetExponential
+    "Eigene",                                       // GyroPresetCustom
+    "Deine Werte",                                  // GyroYourNumbers
     "Videoqualität",                                  // StatVideoQuality
     "Öffnet das Xbox Guide-Menü oder sendet die Xbox-Taste an das Spiel.", // MenuDescXboxButton
     "Konfiguriert und zeigt Leistungs-, Netzwerk- und Latenzstatistiken auf dem Bildschirm an.", // MenuDescStats

@@ -489,6 +489,16 @@ constexpr Column kEnglish = {
     "Failed: Keep still",                             // GyroCalibratedFailedShort
     "Demo Mode (Automatic)",                          // GyroDemoMode
     "Move controller to test; use arrows to adjust horizontal/vertical sensitivity.", // GyroTestHelp
+    "Game response",                                // GyroGameResponse
+    "Response start",                               // GyroCurveStart
+    "Curve",                                        // GyroCurveShape
+    "Invert horizontal",                            // GyroInvertX
+    "Invert vertical",                              // GyroInvertY
+    "Linear",                                       // GyroPresetLinear
+    "Smooth",                                       // GyroPresetSmooth
+    "Exponential",                                  // GyroPresetExponential
+    "Custom",                                       // GyroPresetCustom
+    "Your numbers",                                 // GyroYourNumbers
     "Video quality",                                  // StatVideoQuality
     "Opens the Xbox Guide menu or sends the Xbox button to the game.", // MenuDescXboxButton
     "Configures and displays performance, network, and latency overlay on screen.", // MenuDescStats

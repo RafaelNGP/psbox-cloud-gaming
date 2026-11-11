@@ -110,6 +110,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         GameProfile prof = g_settings.profileForGame(g_stageProduct, g_stageTitle, &hasCustom);
         bool preferHw = true;
         if (g_autoplay.gyroLevel > 0) g_settings.gyroLevel = std::clamp(g_autoplay.gyroLevel, 1, 10);  // the settings are guarded under autoplay
+        if (g_autoplay.gyroCurve == "fortnite") g_settings.gyroCurveStart = 13, g_settings.gyroCurveExp = 29;
         if (g_autoplay.swDecode) {
             preferHw = false;
             // The in-game menu shows the decoder forced here (not the saved
@@ -135,8 +136,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         else XC_LOGI("stream: FPS limit unlimited");
         player.setLegacyTuning(g_autoplay.legacy);
         player.setTierSequence(g_autoplay.tierSeq);
-        input::setGyroGameResponse(g_autoplay.gyroCurve == "fortnite" ? &input::kGyroResponseFortnite : nullptr);
-        if (!g_autoplay.gyroCurve.empty()) XC_LOGI("BENCH gyro aiming through the measured stick response: %s", g_autoplay.gyroCurve.c_str());
+
         int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
         player.setMaxBitrate(cap);
         media::audioSetVolume(g_settings.gameVolume / 100.0f);
