@@ -10,6 +10,7 @@
 // threads fill a back frame under frameMutex(), present() swaps it into a
 // one-slot mailbox (the newest wins, nobody waits for the screen), and
 // pump(), each pass of the main loop, presents it.
+#include <cstdint>
 #include "display/display.h"
 #include "display/display_sdl.h"
 #include "display/gpu.h"

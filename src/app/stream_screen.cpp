@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // The streaming screen on the main thread; see stream_screen.h.
+#include <cstddef>
+#include <cstdint>
 #include "app/stream_screen.h"
 
 #include "app/app_state.h"

@@ -4,6 +4,7 @@
 // its own in 256-sample grains; gain, mute, the meter and the 20 ms frames
 // are audio_in_common.h's. audio_in_sdl.cpp and audio_in_null.cpp stand in
 // elsewhere.
+#include <cstdint>
 #include "media/audio_in.h"
 #include "input/controller.h"
 #include "media/audio_in_common.h"

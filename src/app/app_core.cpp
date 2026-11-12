@@ -7,6 +7,7 @@
 // gestures and controllers while streaming), price_loop.cpp (store prices)
 // and autoplay.cpp (the unattended tests). What only some platforms do is
 // behind app/shell.h.
+#include <cstdint>
 #include "app/app_core.h"
 #include "build_id.h"  // generated: XC_BUILD_ID (cmake/build_id.cmake)
 

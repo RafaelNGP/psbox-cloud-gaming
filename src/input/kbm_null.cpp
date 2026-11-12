@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // No USB keyboard or mouse read (a build without a kbm backend).
+#include <cstdint>
 #include "input/input_ext.h"
 #include "input/kbm.h"
 

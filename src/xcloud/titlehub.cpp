@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstddef>
 #include "xcloud/titlehub.h"
 
 #include "net/http.h"

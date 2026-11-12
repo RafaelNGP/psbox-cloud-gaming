@@ -3,6 +3,7 @@
 // No controllers (a build without a pad backend): every slot is empty, so
 // the shared code (controller_common.cpp) reads nothing and sends no effect;
 // the settings it keeps (dead zones, confirm button...) still answer.
+#include <cstdint>
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/input_ext.h"

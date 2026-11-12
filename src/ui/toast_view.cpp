@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // The in-app notices' look (ui/toast_view.h).
+#include <cstddef>
 #include "ui/toast_view.h"
 
 #include <algorithm>

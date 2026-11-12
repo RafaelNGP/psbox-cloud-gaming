@@ -4,6 +4,7 @@
 // parts, each through the same calls the app makes, checked and saved as
 // screenshots read back from the renderer. No account, no network: the data
 // folder is <dir> unless XCLOUD_DATA_DIR says otherwise.
+#include <cstdint>
 #include "app/desktop_selftest.h"
 
 #include "app/app_core.h"

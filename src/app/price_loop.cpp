@@ -3,6 +3,7 @@
 // Store prices for the games to buy as they come on screen, kept a day in
 // <dataDir>/prices.json; the same thread fetches the description of an
 // opened game that has none yet.
+#include <cstdint>
 #include "app/app_state.h"
 #include "app/settings.h"
 #include "platform/toasts.h"

@@ -10,6 +10,7 @@
 // shows the "slow connection" icon and keeps the bitrate low.
 #pragma once
 
+#include <cstddef>
 #include <rtc/rtc.hpp>
 
 #include <atomic>

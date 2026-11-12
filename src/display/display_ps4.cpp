@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "display/display.h"
 #include "platform/ps4/video_color_ps4.h"
 #include "platform/platform.h"

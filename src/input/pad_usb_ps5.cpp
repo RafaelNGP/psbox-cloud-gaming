@@ -7,6 +7,7 @@
 // OmniPad CE does (usb_hotplug.c, github.com/jpemendonca/OmniPad-CE,
 // GPL-3.0); the wake-up packets each kind of pad wants come from there too.
 // A thread looks for pads plugged in and unplugged every 1.5 s.
+#include <cstdint>
 #include "input/pad_usb.h"
 #include "util/log.h"
 

@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 // USB keyboards and mice through libSceKeyboard and libSceMouse (kbm.h).
 // kbm_null.cpp stands in elsewhere.
+#include <cstdint>
 #include "input/input_ext.h"
 #include "input/kbm.h"
 

@@ -16,6 +16,7 @@
 //   xcloud-cli render-icon <out.png> [size]
 //                               the PS5 home-screen icon (icon0.png: 512)
 //   xcloud-cli logout
+#include <cstdint>
 #include "app/library.h"
 #include "app/updater.h"
 #include "app/report.h"

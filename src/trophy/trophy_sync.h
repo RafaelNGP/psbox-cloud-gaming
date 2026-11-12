@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #pragma once
 
+#include <cstdint>
 #include "trophy/trophy_backend.h"
 #include "trophy/trophy_types.h"
 #include "ui/app_ui.h"

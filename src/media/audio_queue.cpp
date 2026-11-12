@@ -2,6 +2,8 @@
 // Copyright (C) 2026 RafaelNGP
 // The audio queue (audio_queue.h) and the parts of audio_out.h every
 // backend shares: pushing, the volume, the route.
+#include <cstddef>
+#include <cstdint>
 #include "media/audio_queue.h"
 
 #include "input/controller.h"

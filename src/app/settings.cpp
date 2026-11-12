@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "app/settings.h"
 #include "app/settings_manager.h"
 #include "input/gyro.h"

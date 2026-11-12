@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "stream/h264_receiver.h"
 
 #include "stream/rtcp_reporter.h"

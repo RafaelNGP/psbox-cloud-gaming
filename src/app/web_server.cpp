@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "app/web_server.h"
 #include "app/web_server_gamepad.h"
 #include "app/report.h"

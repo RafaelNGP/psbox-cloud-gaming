@@ -8,6 +8,7 @@
 // the directory is trimmed to a size limit, oldest files first.
 #pragma once
 
+#include <cstddef>
 #include "platform/platform.h"
 #include "ui/canvas.h"
 

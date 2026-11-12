@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Generic USB HID gamepad parser and descriptor interpreter.
 // Ported from OneFamily (ChiricoG/OneFamily, MIT) and AnyPad-PS4 (Vld439 / elmonomalvad0).
+#include <cstdint>
 #include "input/pad_usb_hid.h"
 
 #include <algorithm>

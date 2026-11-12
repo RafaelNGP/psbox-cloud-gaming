@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "display/gpu.h"
 
 #include "platform/platform.h"
@@ -328,9 +329,11 @@ bool createDevice() {
     uint32_t n = 16;
     vkGetPhysicalDeviceQueueFamilyProperties(g.physical, &n, families);
     // What the driver offers for hardware video decoding (Vulkan Video).
+    // VK_QUEUE_VIDEO_DECODE_BIT_KHR by value: older Vulkan headers (Ubuntu 22.04's) do not have the name.
+    constexpr VkQueueFlags kQueueVideoDecode = 0x00000020;
     for (uint32_t i = 0; i < n; ++i)
         XC_LOGI("gpu: queue family %u: flags 0x%x, %u queue(s)%s", i, families[i].queueFlags, families[i].queueCount,
-                (families[i].queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) ? " (video decode)" : "");
+                (families[i].queueFlags & kQueueVideoDecode) ? " (video decode)" : "");
     {
         static VkExtensionProperties ext[512];
         uint32_t count = 512;

@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // The in-app notices' queue (platform/toasts.h).
+#include <cstddef>
+#include <cstdint>
 #include "platform/toasts.h"
 
 #include <algorithm>

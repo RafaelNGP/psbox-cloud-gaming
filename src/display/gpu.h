@@ -9,6 +9,7 @@
 // display.h, which forwards to these once init() succeeded.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 

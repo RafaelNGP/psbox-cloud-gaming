@@ -12,6 +12,7 @@
 // caller's callback) and nothing is shown until that key frame: a short
 // freeze instead of corruption.
 #pragma once
+#include <cstddef>
 #include <atomic>
 
 #include "stream/video_stats.h"

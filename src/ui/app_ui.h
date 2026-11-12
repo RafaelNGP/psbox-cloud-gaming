@@ -8,6 +8,7 @@
 // Model setters are thread-safe; handle() and render() run on the UI thread.
 #pragma once
 
+#include <cstddef>
 #include "app/settings.h"
 #include "ui/canvas.h"
 #include "ui/font.h"

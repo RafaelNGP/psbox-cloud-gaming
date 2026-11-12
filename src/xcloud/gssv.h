@@ -8,6 +8,7 @@
 // change them, so every response is checked defensively.
 #pragma once
 
+#include <cstdint>
 #include "auth/xbox_live.h"
 
 #include <string>

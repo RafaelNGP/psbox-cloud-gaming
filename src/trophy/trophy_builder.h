@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #pragma once
 
+#include <cstddef>
 #include "trophy/trophy_types.h"
 #include <cstdint>
 #include <map>

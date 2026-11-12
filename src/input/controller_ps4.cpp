@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/input_ext.h"

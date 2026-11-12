@@ -5,6 +5,7 @@
 // the PS5 and of stb_image's RGBA output. The canvas itself is opaque.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 

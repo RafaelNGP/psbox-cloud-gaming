@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // H.264 on Android via NDK AMediaCodec.
+#include <cstdint>
 #include "media/hw_decoder.h"
 #include "util/log.h"
 

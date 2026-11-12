@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstddef>
+#include <cstdint>
 #include "ui/app_ui_internal.h"
 
 namespace xc::ui {

@@ -4,6 +4,8 @@
 // Coordinates are the top-left corner of the line box.
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include "ui/canvas.h"
 
 #include <memory>

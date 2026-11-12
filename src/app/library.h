@@ -23,6 +23,8 @@
 // but load() can run on another thread, one after the other.
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include "ui/app_ui.h"
 #include "xcloud/catalog.h"
 #include "xcloud/gssv.h"

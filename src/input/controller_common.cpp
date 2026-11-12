@@ -7,6 +7,8 @@
 // it was last used). The backend (controller_ps5.cpp, controller_sdl.cpp,
 // controller_null.cpp) opens the pads and talks to them through
 // controller_backend.h.
+#include <cstddef>
+#include <cstdint>
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/gyro.h"

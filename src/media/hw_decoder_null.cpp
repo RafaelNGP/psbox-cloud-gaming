@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // No hardware decoder (anywhere but the PS5): init() fails, FFmpeg decodes.
+#include <cstddef>
+#include <cstdint>
 #include "media/hw_decoder.h"
 
 namespace xc::media {

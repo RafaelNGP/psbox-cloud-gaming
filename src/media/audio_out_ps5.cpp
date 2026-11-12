@@ -4,6 +4,8 @@
 // thread of its own in 256-frame grains from the shared queue
 // (audio_queue.h). audio_out_sdl.cpp and audio_out_null.cpp stand in
 // elsewhere.
+#include <cstddef>
+#include <cstdint>
 #include "media/audio_out.h"
 
 #include "input/controller.h"

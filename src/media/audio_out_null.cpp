@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 // No sound device (xcloud-tests, psbox-headless): the sound pushed is queued
 // as on the PS5 (the queue keeps itself to ~60 ms) and never played.
+#include <cstddef>
 #include "media/audio_out.h"
 
 #include "media/audio_queue.h"

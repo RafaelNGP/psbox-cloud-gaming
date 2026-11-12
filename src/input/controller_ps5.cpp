@@ -4,6 +4,7 @@
 // the pads opened as users sign in and out, read, and sent the effects the
 // shared code (controller_common.cpp) works out. controller_sdl.cpp and
 // controller_null.cpp stand in elsewhere.
+#include <cstdint>
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/input_ext.h"

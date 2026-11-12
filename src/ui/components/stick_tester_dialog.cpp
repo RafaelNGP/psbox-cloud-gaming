@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "ui/components/stick_tester_dialog.h"
 #include "input/tuning.h"
 #include "ui/input_mode.h"

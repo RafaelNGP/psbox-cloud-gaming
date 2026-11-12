@@ -3,6 +3,7 @@
 // The worker thread: sign-in, the library, the account's consoles, and
 // playing a title (queue -> /connect -> Provisioned -> StreamPlayer). It
 // owns AuthManager and the GssvClients and does all the network work.
+#include <cstdint>
 #include "app/worker_internal.h"
 
 #include "app/autoplay.h"

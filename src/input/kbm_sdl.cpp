@@ -21,6 +21,7 @@
 //   come after the pointer's from the same SDL_PumpEvents, so a touch also
 //   drops what the mouse gathered since the last poll. This needs the pad
 //   opened through HIDAPI (controller_sdl.cpp), which reports its touchpad.
+#include <cstdint>
 #include "input/input_ext.h"
 #include "input/kbm.h"
 #include "input/sdl_backend.h"

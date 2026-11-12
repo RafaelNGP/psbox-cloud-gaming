@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // The state the app's threads share (app_state.h).
+#include <cstdint>
 #include "app/app_state.h"
 
 #include "input/controller.h"

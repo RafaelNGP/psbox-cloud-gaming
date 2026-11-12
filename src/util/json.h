@@ -6,6 +6,7 @@
 // xCloud protocol only needs plain objects, arrays, strings and numbers.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>

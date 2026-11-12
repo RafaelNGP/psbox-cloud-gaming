@@ -3,6 +3,8 @@
 // No screen (a headless build): init() succeeds so the app runs as usual,
 // pictures go nowhere and present() waits about a 60 Hz refresh, so a loop
 // paced by it doesn't spin.
+#include <cstddef>
+#include <cstdint>
 #include "display/display.h"
 
 #include "platform/platform.h"

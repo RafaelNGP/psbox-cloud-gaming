@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 // The PS5's display: the GPU (gpu.cpp) when it comes up, else VideoOut
 // buffers drawn on the CPU. display_null.cpp stands in elsewhere.
+#include <cstdint>
 #include "display/display.h"
 #include "display/gpu.h"
 #include "platform/platform.h"

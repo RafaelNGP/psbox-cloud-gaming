@@ -2,6 +2,8 @@
 // Copyright (C) 2026 RafaelNGP
 #pragma once
 
+#include <cstddef>
+#include <cstdint>
 #include "ui/app_ui.h"
 #include "ui/input_mode.h"
 #include "ui/pad_glyphs.h"

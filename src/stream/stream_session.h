@@ -8,6 +8,7 @@
 // Annex-B access units, audio as single Opus packets (48 kHz).
 #pragma once
 
+#include <cstddef>
 #include "stream/input_packet.h"
 #include "stream/video_stats.h"
 #include "xcloud/gssv.h"

@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstddef>
+#include <cstdint>
 #include "media/audio_out.h"
 #include "media/audio_queue.h"
 #include "platform/platform.h"

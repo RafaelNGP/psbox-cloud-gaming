@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "media/audio_in.h"
 #include "input/controller.h"
 #include "media/audio_in_common.h"

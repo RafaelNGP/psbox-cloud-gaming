@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "platform/platform.h"
 #include "platform/toasts.h"
 #include "util/log.h"

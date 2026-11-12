@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 // The Windows platform layer (psbox): WinSock2 networking, AppData storage,
 // QueryPerformanceCounter timers, and thread pinning via SetThreadAffinityMask.
+#include <cstdint>
 #include "platform/platform.h"
 #include "platform/toasts.h"
 #include "util/log.h"

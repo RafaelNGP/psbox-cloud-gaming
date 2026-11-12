@@ -3,6 +3,7 @@
 // Decoupled Telemetry Overlay component (2-column stats, sparkline, degradation pill).
 #pragma once
 
+#include <cstddef>
 #include "ui/canvas.h"
 #include "ui/font.h"
 #include "ui/strings.h"

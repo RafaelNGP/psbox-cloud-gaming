@@ -29,6 +29,7 @@
 // driver off would lose every pad without hidraw access.
 // One pad seen twice (two instance ids for one HID device) never takes two
 // slots, and a pad SDL removes and adds again takes its slot back.
+#include <cstdint>
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/input_ext.h"

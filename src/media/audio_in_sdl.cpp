@@ -4,6 +4,7 @@
 // device, 48 kHz mono S16, handed to audio_in_common.h's gain, mute, meter
 // and 20 ms frames in the PS5's 256-sample grains, on SDL's device thread.
 // No system mute is read here (isHardwareMuted() stays false).
+#include <cstdint>
 #include "media/audio_in.h"
 #include "media/audio_in_common.h"
 #include "util/log.h"

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // Unattended test mode (tools/ps5/autotest.sh); see autoplay.h.
+#include <cstdint>
 #include "app/autoplay.h"
 #include "ui/input_mode.h"
 

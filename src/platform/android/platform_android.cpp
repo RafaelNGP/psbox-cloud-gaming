@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 // The Android platform layer (psbox): app data directory in internal storage,
 // assets from package, POSIX threads and networking.
+#include <cstdint>
 #include "platform/platform.h"
 #include "util/log.h"
 

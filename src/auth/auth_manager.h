@@ -5,6 +5,7 @@
 // shows the device code; it never sees passwords.
 #pragma once
 
+#include <cstddef>
 #include "auth/msa.h"
 #include "auth/xbox_live.h"
 #include "xcloud/gssv.h"

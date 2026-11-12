@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstddef>
+#include <cstdint>
 #include "app/library_internal.h"
 
 #include "platform/platform.h"

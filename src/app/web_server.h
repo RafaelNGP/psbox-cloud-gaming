@@ -4,6 +4,7 @@
 // live search typing, and log download via mobile browser / QR code.
 #pragma once
 
+#include <cstddef>
 #include "input/controller.h"
 #include "platform/platform.h"
 #include "util/json.h"

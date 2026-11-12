@@ -6,6 +6,7 @@
 // buffers, as the PS5's grain; the system may give others (logged).
 // Both routes play on the default device (the system picks the speakers or
 // a headset).
+#include <cstddef>
 #include "media/audio_out.h"
 
 #include "media/audio_queue.h"

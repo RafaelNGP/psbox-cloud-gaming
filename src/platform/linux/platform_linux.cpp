@@ -4,6 +4,7 @@
 // xcloud-tests): the data folder where XDG puts it, the assets beside the
 // executable, and notifications as toasts inside the desktop app (or on
 // stdout for the tools).
+#include <cstdint>
 #include "platform/platform.h"
 #include "platform/handheld.h"
 

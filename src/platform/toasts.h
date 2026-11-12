@@ -7,6 +7,7 @@
 // notifications, the tools print to stdout.
 #pragma once
 
+#include <cstddef>
 #include <atomic>
 #include <cstdint>
 #include <mutex>

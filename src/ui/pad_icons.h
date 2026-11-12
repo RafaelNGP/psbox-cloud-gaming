@@ -3,6 +3,7 @@
 // The controllers in use, as numbered pad glyphs (home screen, in-game menu).
 #pragma once
 
+#include <cstdint>
 #include "ui/canvas.h"
 #include "ui/font.h"
 

@@ -5,6 +5,7 @@
 // display::setOverlay() lays over the video.
 #pragma once
 
+#include <cstdint>
 #include "ui/app_ui.h"
 #include "ui/canvas.h"
 #include "ui/font.h"

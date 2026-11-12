@@ -3,6 +3,7 @@
 // Standalone Single-Wheel Gyroscope Testing & Calibration Modal.
 #pragma once
 
+#include <cstdint>
 #include "app/gyro_calibration.h"
 #include "input/gyro.h"
 #include "ui/app_ui.h"

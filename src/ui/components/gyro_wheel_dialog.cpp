@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <cstdint>
 #include "ui/components/gyro_wheel_dialog.h"
 #include "app/settings_manager.h"
 #include "ui/app_ui_internal.h"

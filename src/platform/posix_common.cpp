@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 // File helpers shared by both platforms (the PS5 libc is POSIX enough).
+#include <cstdint>
 #include "platform/platform.h"
 
 #include <arpa/inet.h>

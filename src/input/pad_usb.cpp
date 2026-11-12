@@ -3,6 +3,8 @@
 // USB pads (pad_usb.h): their reports parsed, and their state kept for
 // pollUsbPad(). The report layouts are those of the Linux xpad driver and
 // OmniPad CE (usb_controllers.c).
+#include <cstddef>
+#include <cstdint>
 #include "input/pad_usb.h"
 #include "input/pad_usb_hid.h"
 

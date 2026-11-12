@@ -7,6 +7,7 @@
 // lines, filtered for private data.
 #pragma once
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
