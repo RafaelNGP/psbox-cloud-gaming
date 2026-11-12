@@ -10,6 +10,10 @@ with MARKER) in the reporter's language (English, Portuguese, or Spanish)
 saying what is known, asking to update when the release is older than the
 fix or the latest, and asking for what is missing.
 
+A new issue that repeats one the same person opened minutes before (the same
+text, sent again) gets one line pointing at the first and is closed as a
+duplicate; the first one stays and is triaged as usual.
+
 The issue's text is someone else's: it is only matched with regular
 expressions here, never run or put in a command.
 
@@ -18,16 +22,22 @@ expressions here, never run or put in a command.
   Locally:        triage.py --dry-run issue.json --latest 1.3.2
                   (issue.json: {"title": ..., "body": ...}, e.g. from `gh issue view N --json title,body`)
 """
+import datetime
 import json
 import os
 import re
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 
 MARKER = "<!-- psbox-triage -->"
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_TEXT = 200_000  # characters of an issue looked at
+DUPLICATE_WINDOW_MIN = 60  # the same person, the same text, this long after the first: a repeat
+# What the app writes by itself when the report has no text of the person's: it says nothing about the problem.
+PLACEHOLDER_WHAT = re.compile(r"^(reported from settings|problem report)?$", re.I)
+PLACEHOLDER_TITLE = re.compile(r"^(problem report|bug|\[bug\]:?|ps[45])?$", re.I)
 LATEST_RELEASE_URL = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"
 
 LABEL_COLOURS = {
@@ -36,6 +46,7 @@ LABEL_COLOURS = {
     "crash": "b60205",
     "unofficial-port": "d93f0b",
     "unsupported-platform": "d93f0b",
+    "duplicate": "cfd3d7",
 }
 AREA_COLOUR = "1d76db"
 FIRMWARE_COLOUR = "ededed"
@@ -61,6 +72,9 @@ STRINGS = {
         "empty_title_known": (
             "\n*(This issue was submitted with only a title. As it matches a known problem, "
             "the solution above has been provided automatically and this issue is now closed.)*"
+        ),
+        "duplicate": (
+            "Automatic triage: this is the same report as #{first}, sent a few minutes before by you. One is enough: this one is closed, and #{first} is where it is followed (add anything new there)."
         ),
         "ask_release": "the **app release** (Settings > Updates shows it, e.g. v1.3.2)",
         "ask_log": (
@@ -95,6 +109,9 @@ STRINGS = {
             "\n*(Esta issue foi enviada apenas com o título. Como corresponde a um problema já conhecido, "
             "a orientação acima foi fornecida automaticamente e a issue está sendo encerrada.)*"
         ),
+        "duplicate": (
+            "Triagem automática: este é o mesmo relato da #{first}, enviado por você poucos minutos antes. Um só basta: esta issue está sendo fechada e o acompanhamento segue na #{first} (acrescente lá qualquer informação nova)."
+        ),
         "ask_release": "a **versão do app** (mostrada em Configurações > Atualizações, ex.: v1.3.2)",
         "ask_log": (
             "o **xcloud.log** (`/data/psbox/xcloud.log` via FTP, ou use *Relatar um problema* "
@@ -127,6 +144,9 @@ STRINGS = {
         "empty_title_known": (
             "\n*(Esta incidencia se envió únicamente con el título. Dado que coincide con un problema conocido, "
             "la solución anterior se ha proporcionado automáticamente y se procede a cerrar la incidencia.)*"
+        ),
+        "duplicate": (
+            "Triaje automático: este es el mismo reporte que #{first}, enviado por ti unos minutos antes. Con uno basta: este se cierra y el seguimiento continúa en #{first} (añade allí cualquier información nueva)."
         ),
         "ask_release": "la **versión de la app** (se muestra en Configuración > Actualizaciones, ej.: v1.3.2)",
         "ask_log": (
@@ -248,6 +268,59 @@ def is_unsupported_147(fields, release, title, body):
     if re.search(r"\bv?1\.4\.7\b", text, re.I):
         return True
     return False
+
+
+def report_key(issue):
+    """What a report says, to compare two of them: (the person's text, the title), lower
+    case, spaces as one; "" for the one that says nothing (the app's own placeholder)."""
+    title = (issue.get("title") or "")[:1000]
+    body = (issue.get("body") or "")[:MAX_TEXT]
+    fields = parse_form(body)
+    what = field(fields, "what happened") if fields else body
+    norm = lambda t: re.sub(r"\s+", " ", t).strip().lower()
+    what, title = norm(what), norm(title)
+    return ("" if PLACEHOLDER_WHAT.match(what) else what, "" if PLACEHOLDER_TITLE.match(title) else title)
+
+
+def same_report(a, b):
+    """The same text, or the same title (the app's reports carry the error in both; some come with one empty)."""
+    return bool((a[0] and a[0] == b[0]) or (a[1] and a[1] == b[1]))
+
+
+def created_at(issue):
+    try:
+        return datetime.datetime.fromisoformat((issue.get("created_at") or "").replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def duplicate_of(issue, earlier, window_min=DUPLICATE_WINDOW_MIN):
+    """The number of the first issue this one repeats, or None. `earlier`: the same
+    person's other issues. A repeat: opened before this one, at most window_min
+    minutes before, saying the same (same_report)."""
+    key, when = report_key(issue), created_at(issue)
+    if not any(key) or when is None:
+        return None
+    firsts = []
+    for other in earlier:
+        other_when = created_at(other)
+        if other.get("pull_request") or other_when is None or other.get("number") is None:
+            continue
+        if other["number"] >= issue.get("number", 0) or other_when > when:
+            continue
+        if (when - other_when).total_seconds() > window_min * 60:
+            continue
+        if same_report(report_key(other), key):
+            firsts.append(other["number"])
+    return min(firsts) if firsts else None
+
+
+def duplicate_comment(issue, first):
+    title = (issue.get("title") or "")[:1000]
+    fields = parse_form((issue.get("body") or "")[:MAX_TEXT])
+    lang = detect_lang(title, field(fields, "what happened") if fields else issue.get("body") or "", field(fields, "xcloud.log"))
+    author = (issue.get("user") or {}).get("login") or issue.get("author")
+    return "\n".join([MARKER] + ([f"@{author}"] if author else []) + [STRINGS[lang]["duplicate"].format(first=first)])
 
 
 def triage(issue, rules, latest):
@@ -400,9 +473,24 @@ def main(argv):
             return 1
         issue = api("GET", f"/repos/{repo}/issues/{number}", token)
     else:
-        issue = json.load(open(os.environ["GITHUB_EVENT_PATH"]))["issue"]
+        event = json.load(open(os.environ["GITHUB_EVENT_PATH"]))
+        issue = event["issue"]
     if issue.get("pull_request") or issue.get("user", {}).get("type") == "Bot":
         return 0
+    # Only as it is opened: an edit, a reopening by the maintainer or a run by hand never closes it as a repeat.
+    if not number and event.get("action") == "opened":
+        login = issue.get("user", {}).get("login") or ""
+        try:
+            earlier = api("GET", f"/repos/{repo}/issues?creator={urllib.parse.quote(login)}&state=all&sort=created"
+                                 "&direction=desc&per_page=50", token) if login else []
+        except urllib.error.HTTPError as e:
+            print(f"Warning: could not list the earlier issues: {e}")
+            earlier = []
+        first = duplicate_of(issue, earlier)
+        if first:
+            print(f"issue #{issue['number']}: repeats #{first}, closed as a duplicate")
+            apply(repo, issue["number"], ["duplicate"], duplicate_comment(issue, first), token, close="duplicate")
+            return 0
     try:
         latest = api("GET", f"/repos/{repo}/releases/latest", token)["tag_name"].lstrip("v")
     except urllib.error.HTTPError:
