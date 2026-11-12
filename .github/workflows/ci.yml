@@ -63,11 +63,11 @@ jobs:
         run: ctest --test-dir build-host --output-on-failure
 
   # The SDL3 desktop app (psbox) and its Linux AppImage. Built on the oldest
-  # supported runner: its glibc is the package's baseline. SDL3 is built
-  # from its release (every backend loaded at run time, so one libSDL3.so.0
+  # supported runner: its glibc is the package's baseline (ubuntu-22.04 with glibc 2.35).
+  # SDL3 is built from its release (every backend loaded at run time, so one libSDL3.so.0
   # serves X11 and Wayland, PulseAudio, PipeWire and ALSA) and bundled.
   linux-app:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-22.04
     env:
       SDL3_VERSION: 3.4.18
       CC: clang
@@ -92,7 +92,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/.cache/xcloud-ps5/sdl3-${{ env.SDL3_VERSION }}
-          key: linux-app-sdl3-${{ env.SDL3_VERSION }}-ubuntu-24.04-r1
+          key: linux-app-sdl3-${{ env.SDL3_VERSION }}-ubuntu-22.04-r1
 
       - name: SDL3 ${{ env.SDL3_VERSION }}
         if: steps.sdl3-cache.outputs.cache-hit != 'true'

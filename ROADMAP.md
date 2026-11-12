@@ -46,6 +46,17 @@ Status: **Em andamento (in progress / next)**, **Planejado (planned)**, **Futuro
 ### 5. Atalhos Diretos na Tela Inicial do PS5 (Home-Screen Forwarders) — *later*
 - Criação de atalhos individuais na dashboard principal do PS5 para iniciar títulos específicos da nuvem diretamente, utilizando o formato ProsperoLight forwarder.
 
+### 6. Jogos locais de PC Game Pass no PS5 — *exploração (research)*
+- **Ideia**: listar, baixar e rodar no próprio console jogos de PC Game Pass que não estão no xCloud, apoiado em projetos de terceiros, em vez de só transmitir. Surgiu a partir da issue #405 (PUBG), mas **não resolve a #405**: PUBG é online com BattlEye, e nada neste caminho roda anti-cheat.
+- **O que existe hoje (levantado em 2026-11-11, tudo alpha)**:
+  - **XoDen** (`griches/xoden_ps5`, GPL-3.0, v0.1.0 de 2026-10-28): lista a biblioteca PC Game Pass, baixa dos servidores da Microsoft com a conta do usuário e cria um tile por jogo no PS5. UI/runtime derivados do Playden, downloader derivado do Xodus. Exige assinatura ativa e um PC para o login. Só LIMBO com gameplay confirmado.
+  - **Xodus** (`xodus-gaming/xodus`, Rust, GPL-3.0): login, download MSIXVC e licenças no Linux; ainda sem decriptação sob demanda de executáveis, MSIXVC2 e `xgameruntime.dll` completos.
+  - **Playden** (`leolobato/playden-ps5`, GPL-3.0, v0.6.0): launcher que roda a biblioteca Steam no PS5 via `prospero-win` (port do Wine), só FW 13.60, offline.
+  - **MihawkOS** (`mihawk-99/PS5_MihawkOS`, GPL-3.0): "desktop" com Wine/Proton + DXVK/VKD3D no PS5 (FW 13.40/13.60).
+- **Questões em aberto**: maturidade do `xgameruntime`; firmwares suportados; dezenas de GB por jogo; se vale embutir ou apenas abrir/integrar o XoDen; compatibilidade de licença (todos GPL-3.0, como o PSBox).
+- **Riscos**: os pacotes são criptografados, e rodá-los fora do Windows pode configurar contorno de DRM; viola os termos da Microsoft, com risco de banimento da conta não quantificado; expectativa errada de online/anti-cheat; depender de uma pilha alpha de terceiros.
+- **Primeiros passos**: acompanhar XoDen e Xodus; testar o XoDen com conta secundária (nunca a principal); só então decidir entre integrar, abrir por atalho ou descartar.
+
 ---
 
 ## 🚫 Decisões Técnicas e Recursos Descartados (Dropped)

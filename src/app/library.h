@@ -46,6 +46,7 @@ public:
 
     // Where the cache lives (read by load(), written by the later phases).
     void setCachePath(std::string path) { cachePath_ = std::move(path); }
+    const std::string& market() const { return market_; }
     // The account's Game Pass plan ("Ultimate", "Premium", "Essential", ...).
     void setSubscription(std::string sub) { subscription_ = std::move(sub); }
     // Games marked as favourite (product IDs)
@@ -55,7 +56,7 @@ public:
 
     // Calls `changed` after each row arrives; false only when nothing loaded.
     bool load(xcloud::GssvClient& gssv, const std::string& language, const Changed& changed, std::string& err,
-              bool forceRefresh = false);
+              bool forceRefresh = false, const std::string& storeMarket = {});
     // The first screen, before anything else: hero art, descriptions and
     // console badges of the first cards of every row and of "Your games".
     void loadFirstScreen(const std::string& xblAuth, const Changed& changed, const std::atomic<bool>* stop = nullptr);
@@ -86,6 +87,8 @@ public:
     // The account streams games through a Game Pass plan (titles it has by
     // a subscription's program, not bought nor free): its badge in the UI.
     bool gamePassMember() const { return gamePassMember_; }
+    // The free tier with ads: how long one session may last (0: the account does not play through it).
+    int freeTierSessionSeconds() const { return freeTierSessionSeconds_; }
     // The background refresh of the lists: whether it runs, and (while
     // names come in) how far it is; total 0 = no measure yet.
     struct Progress {
@@ -112,7 +115,7 @@ public:
         acquiredTitles_.insert(titles.begin(), titles.end());
     }
     // Delta-sync: discovers new/updated titles, only fetches missing metadata, updates rows in-place.
-    size_t syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std::string& err, const std::string& language = {});
+    size_t syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std::string& err, const std::string& language = {}, const std::string& storeMarket = {});
     void markUnclaimable(const std::string& productId);
     // Generates a tile for a product/title.
     ui::GameTile tile(const std::string& productId, const std::string& titleId = {}) const;
@@ -150,6 +153,7 @@ private:
     // The account (loadOwned() or the cache).
     bool ownershipKnown_ = false;
     bool gamePassMember_ = false;
+    int freeTierSessionSeconds_ = 0;
     bool ownershipFresh_ = false;            // the account's list of this start (not the cache's) is in
     std::set<std::string> knownGamePass_;    // the Game Pass catalog at the last start (cache)
     std::set<std::string> knownProducts_;    // all products known at the last start (cache)

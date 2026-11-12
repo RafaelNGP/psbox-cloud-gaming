@@ -115,6 +115,7 @@ struct SettingsChoice {
     int language = 0;      // ui::Language
     int resolution = 0;    // 0 = 1080p, 1 = 720p, 2 = 1440p (experimental)
     std::string region;    // gssv region name; empty = automatic
+    std::string storeCountry;  // store offers; empty = the cloud session’s market
     std::string loginCountry;  // "Sign in as another country" (kLoginCountries); empty = off
     int deadzone[2] = {15, 15};  // left, right stick: percent of the travel, 0..kMaxDeadzone
     int triggerStrength = 2;     // 0 off .. 4 max (input/tuning.h)
@@ -202,7 +203,7 @@ std::vector<SettingsRowPos> visibleGameSettingsRows(const UiCaps& caps, bool cus
 
 // The largest stick dead zone Settings offers, in percent of the travel.
 constexpr int kMaxDeadzone = 30;
-constexpr int kSettingRows = 27;  // language, resolution, region, dead zone, triggers, confirm, light bar, updates,
+constexpr int kSettingRows = 28;  // language, resolution, region, dead zone, triggers, confirm, light bar, updates,
                                   // sign-in country, 120 Hz output, bitrate cap, game volume, keyboard keys,
                                   // display mode (a desktop's window), controller buttons, gyro aiming, queue chime,
                                   // check sign-in, network test, support project, video decoder, audio-to-haptics,
@@ -244,6 +245,7 @@ enum class Action {
     None, Play, SignOut, Retry, CancelLaunch, SettingsChanged, PrefsChanged, ConsolesShown, UpdateNow, UpdateLater,
     GameSettingsChanged,
     Report,  // "Report a problem" (Triangle on an error or in Settings): reportWhat is the error shown
+    StoreCountry,  // store country changed: save and refresh the catalog
     LoginCountry,  // the sign-in country changed (settings): save them and sign in again
     OpenUrl,  // a link on screen to open in the browser (UiCaps::openUrl): `url`
     Quit,     // desktop: the user closed the app from the home screen
@@ -308,6 +310,8 @@ public:
     // From the title list: a Game Pass member or not; only when the plan
     // itself isn't known ("GamePass" or nothing).
     void setMembership(bool member);
+    // The free tier with ads: one session's length in seconds (0: not this account's way to play).
+    void setFreeTierSession(int seconds);
     std::string gamertag() const;  // for keeping it out of reports
     std::vector<std::string> consoleNames() const;  // the same: the user's names for their consoles
     // "Report a problem": a QR code of `url` (the GitHub bug form, filled
@@ -339,6 +343,8 @@ public:
     bool trophySyncing() const;
     // Store prices, formatted: productId -> {now, regular (empty unless on sale)}.
     void setPrices(const std::map<std::string, PriceInfo>& prices);
+    // A new store market must recheck both prices and unavailable products.
+    void resetStorePrices();
     // Saved preferences: hidden games, the "Your games" order, favorites, and wishlist.
     void setPrefs(const std::vector<std::string>& hidden, LibrarySort sort, const std::vector<std::string>& favorites = {}, const std::vector<std::string>& wishlist = {});
     // Asks for achievements of the open details page game; empty if not wanted
@@ -352,6 +358,8 @@ public:
     std::vector<std::string> pricesWanted(size_t max, bool background = false);
     // Their request failed (offline...): asked for again later.
     void pricesFailed(const std::vector<std::string>& productIds);
+    // Products the store answered about with no price of their own.
+    void pricesNone(const std::vector<std::string>& productIds);
     // The game whose page is open, if its description or hero art hasn't
     // arrived; asked again every 5 s while missing (empty otherwise).
     std::string detailWanted(uint64_t nowMs);
@@ -371,6 +379,8 @@ public:
                        const std::vector<std::string>& ratingDescriptors = {});
     // Opens a game's page (autoplay tests).
     void showDetails(const GameTile& tile);
+    // Tests: the game's settings with the row of this id chosen; false when it isn't on screen.
+    bool selectGameSettingsRow(int rowId);
     // The `index`-th game to buy, if loaded (autoplay tests).
     bool purchasableAt(size_t index, GameTile& out) const;
     // Any loaded game on the home screen or catalog.
@@ -392,6 +402,7 @@ public:
     bool isFreeAccountLocked() const;
     bool isEffectivePlayable(const GameTile& t) const;
     bool isEffectivePlayableLocked(const GameTile& t) const;
+    bool storeUnavailableLocked(const GameTile& t) const;
     // The sign-in refused by xCloud: an error that also offers to sign in as
     // another country (Square), and Settings (Options).
     void showRegionRefused(const std::string& message);
@@ -658,6 +669,7 @@ private:
     std::string gamertag_, gamerpicUrl_, gamerscore_, subscription_;
     int64_t playtimeRemaining_ = -1, playtimeMax_ = -1;
     bool playtimeUnlimited_ = false;
+    int freeTierSessionSeconds_ = 0;  // setFreeTierSession(): the free tier's session length
     std::vector<GameRow> rows_;
     int focusRow_ = 0;
     std::vector<int> focusCol_;
@@ -718,6 +730,7 @@ private:
     std::map<std::string, int> regionMs_;
     std::map<std::string, PriceInfo> prices_;
     std::set<std::string> pricesAsked_;
+    std::set<std::string> pricesNone_;  // confirmed unavailable in the active store market
     std::set<std::string> unclaimable_;
     std::string detailAskedFor_;
     uint64_t detailAskedAt_ = 0;

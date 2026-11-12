@@ -9,11 +9,27 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <dirent.h>
 #include <sys/stat.h>
 
 namespace xc::app {
 
 std::unique_ptr<ui::AppUi> g_ui;
+static bool anyUserSettings() {
+    DIR* d = ::opendir(platform::dataDir().c_str());
+    if (!d) return false;
+    bool found = false;
+    while (struct dirent* de = ::readdir(d)) {
+        const std::string n = de->d_name;
+        if (n.rfind("settings_", 0) == 0 && n.size() > 14 && n.substr(n.size() - 5) == ".json") {
+            found = true;
+            break;
+        }
+    }
+    ::closedir(d);
+    return found;
+}
+
 std::string settingsPath() {
     int32_t uid = input::padUserId(0);
     if (uid > 0) {
@@ -23,7 +39,10 @@ std::string settingsPath() {
         // If user-specific settings don't exist yet, check if legacy global settings exist to migrate
         std::string legacy = platform::dataDir() + "/settings.json";
         struct stat st {};
-        if (::stat(userPath.c_str(), &st) != 0 && ::stat(legacy.c_str(), &st) == 0) {
+        // Only the first console user ever gets the settings from before they were per user: a
+        // later one starts from the defaults (hidden games, per-game settings, favourites and play
+        // time are each user's own).
+        if (::stat(userPath.c_str(), &st) != 0 && ::stat(legacy.c_str(), &st) == 0 && !anyUserSettings()) {
             std::string content;
             if (platform::readFile(legacy, content)) {
                 platform::writeFileAtomic(userPath, content);
@@ -34,12 +53,28 @@ std::string settingsPath() {
     }
     return platform::dataDir() + "/settings.json";
 }
+std::string userFilePath(const char* base, const char* legacyName) {
+    const std::string legacy = platform::dataDir() + "/" + legacyName;
+    const int32_t uid = input::padUserId(0);
+    if (uid <= 0) return legacy;
+    char buf[64];
+    std::snprintf(buf, sizeof(buf), "/%s_%08x.json", base, static_cast<unsigned int>(uid));
+    const std::string path = platform::dataDir() + buf;
+    struct stat st {};
+    if (::stat(path.c_str(), &st) != 0 && ::stat(legacy.c_str(), &st) == 0) {
+        // Moved, not copied: the next profile to open the app must not find it.
+        if (std::rename(legacy.c_str(), path.c_str()) == 0)
+            XC_LOGI("user files: %s is now %s (user 0x%08x)", legacyName, buf + 1, static_cast<unsigned int>(uid));
+    }
+    return path;
+}
 bool allow1440Locked() { return std::max(g_settings.maxHeightCloud, g_settings.maxHeightHome) >= 1440; }
 void refreshSettingsUiLocked() {
     ++g_settingsVersion;
     if (g_ui) g_ui->setSettings(ui::choiceFromSettings(g_settings));
 }
 std::atomic<int> g_command{kSignIn};
+std::atomic<bool> g_playPending{false};
 std::atomic<bool> g_cancel{false};
 std::mutex g_argMutex;
 ui::GameTile g_playTile;

@@ -1018,6 +1018,20 @@ int main(int argc, char** argv) {
         return 0;
     } else if (cmd == "ui-preview" && argi < argc) {
         rc = cmdUiPreview(am, argv[argi]);
+    } else if (cmd == "prices" && argi + 1 < argc) {
+        // prices <market> <productId>...: what the store sells each for (its own sale, or the
+        // cheapest edition that contains it); "-" for one it does not sell there. No sign-in.
+        std::vector<std::string> ids;
+        for (int i = argi + 1; i < argc; ++i) ids.push_back(argv[i]);
+        std::map<std::string, xcloud::Price> got;
+        std::string err;
+        const bool ok = xcloud::fetchPrices(ids, argv[argi], "en-us", got, err);
+        for (const auto& id : ids) {
+            auto it = got.find(id);
+            std::printf("%s %s\n", id.c_str(), it == got.end() ? "-" : xcloud::formatPrice(it->second.list, it->second.currency).c_str());
+        }
+        if (!ok) std::printf("lookup failed: %s\n", err.c_str());
+        rc = ok ? 0 : 1;
     } else if (cmd == "logout") {
         am.signOut();
         std::printf("Signed out.\n");

@@ -120,7 +120,7 @@ constexpr Column kGerman = {
     "Free-to-play",
     "Einmal kostenlos auf xbox.com oder in der Xbox-App holen (Code mit dem Handy scannen), dann Spielen drücken.",
     "Scannen, um es kostenlos zu holen",
-    "%s ist noch nicht in deinem Konto. Es ist kostenlos: Code auf seiner Seite scannen, Abrufen wählen und erneut versuchen (kann eine Minute dauern).",
+    "%s ist noch nicht in deinem Konto. Es ist kostenlos: seine Seite öffnen, Abrufen wählen und erneut versuchen (kann eine Minute dauern).",
     "Dein Konto kann %s nicht spielen: nicht in deinem Abo oder nicht gekauft.",
     "Meine Konsolen",
     "An",
@@ -433,6 +433,8 @@ constexpr Column kGerman = {
     "%s verbleibend", // CloudTimeLeft
     "von %s", // CloudTimeOf
     "Unbegrenzte Cloud-Zeit", // CloudTimeUnlimited
+    "Sitzungen von %s Min. (gratis mit Werbung)", // CloudTimeFreeTier
+    "NICHT EINZELN", // NotSoldAloneBadge
     "Noch %s Xbox-Cloud-Spielzeit in diesem Monat", // CloudTimeWarn
     "Trophäen synchronisieren",                       // SyncTrophies
     "Synchronisiert alle Xbox-Erfolge Ihres Kontos und weist entsprechende Trophäen Ihrem PlayStation-Profil zu.", // SettingDescSyncTrophies
@@ -476,15 +478,15 @@ constexpr Column kGerman = {
     "Controller wurde während der Messung bewegt.",   // GyroCalibratedFailedDesc
     "Controller ruhig halten und erneut versuchen.",  // GyroCalibratedRetry
     "Gyroskop kalibrieren",                           // GyroCalibrateAction
-    "Horizontale Empfindlichkeit: %s%%",              // GyroYawSens
-    "Vertikale Empfindlichkeit: %s%%",                // GyroPitchSens
+    "Horizontale Empfindlichkeit: %s%",              // GyroYawSens
+    "Vertikale Empfindlichkeit: %s%",                // GyroPitchSens
     "Gyroskop-Position",                              // GyroSensorPos
     "Spieleingabe",                                   // GyroGameOutput
     "Gesamtempfindlichkeit",                          // GyroSensitivityIntensity
     "Horizontale Empfindlichkeit",                    // GyroYawSensitivity
     "Vertikale Empfindlichkeit",                      // GyroPitchSensitivity
     "Gyroskop-Kalibrierung",                          // GyroCalibration
-    "Kalibrieren... %s%%",                            // GyroCalibratingPct
+    "Kalibrieren... %s%",                            // GyroCalibratingPct
     "Erfolgreich kalibriert!",                        // GyroCalibratedSuccessShort
     "Fehlgeschlagen: Ruhig halten",                   // GyroCalibratedFailedShort
     "Demo-Modus (Automatisch)",                       // GyroDemoMode
@@ -499,6 +501,39 @@ constexpr Column kGerman = {
     "Exponentiell",                                 // GyroPresetExponential
     "Eigene",                                       // GyroPresetCustom
     "Deine Werte",                                  // GyroYourNumbers
+    "Spielreaktion kalibrieren", // GyroAutoCal
+    "Starten", // GyroAutoCalStart
+    "Kalibrierung der Spielreaktion", // GyroAutoCalTitle
+    "Die App dreht die Kamera etwa 40 Sekunden lang selbst und liest, wie dieses Spiel auf den Stick reagiert. Danach folgt das Gyro-Zielen deiner Hand bei jeder Geschwindigkeit.", // GyroAutoCalIntro
+    "1. Sei so, wie du das Gyro nutzt: Waffe in der Hand, an einem sicheren Ort.", // GyroAutoCalStep1
+    "2. Schau auf eine detailreiche Umgebung (Gebäude, Bäume). Meide Himmel, glatte Wände und Dunkelheit.", // GyroAutoCalStep2
+    "3. Schließe die Menüs des Spiels, wähle Starten und lass den Controller los.", // GyroAutoCalStep3
+    "4. Jede Taste bricht ab. Nichts ändert sich, bis du das Ergebnis annimmst.", // GyroAutoCalStep4
+    "Öffne das Gyro-Zielen im Spiel über das Spielmenü, um zu kalibrieren.", // GyroAutoCalOnlyInGame
+    "Spielreaktion wird kalibriert... %s%  -  jede Taste bricht ab", // GyroAutoCalRunning
+    "Ergebnis", // GyroAutoCalResult
+    "Gemessen", // GyroAutoCalMeasured
+    "Aktuell", // GyroAutoCalCurrent
+    "Vertikale Geschwindigkeit des Spiels, im Verhältnis zur horizontalen", // GyroAutoCalVertical
+    "Anwenden", // GyroAutoCalApply
+    "Erneut versuchen", // GyroAutoCalRetry
+    "Die Kamera hat sich nicht bewegt. Schließe die Menüs des Spiels und versuche es erneut.", // GyroAutoCalFailNoMotion
+    "Das Bild konnte nicht gelesen werden. Schau auf eine detailreiche, gut beleuchtete Umgebung und versuche es erneut.", // GyroAutoCalFailUnreadable
+    "Die Messwerte folgen keiner einzelnen Kurve. Bleib stehen, fern von anderen Spielern, und versuche es erneut.", // GyroAutoCalFailNoFit
+    "Kalibrierung abgebrochen.", // GyroAutoCalCancelled
+    "Wie dieses Spiel den Stick in Kameradrehung umsetzt. Wähle eine, kalibriere dieses Spiel oder stelle die Werte ein. \"Eigene\" gilt nur für dieses Spiel.", // GyroHelpPreset
+    "Liest die Drift des Sensors, während der Controller still auf einem Tisch liegt. Nutze es, wenn das Zielen sich bei ruhendem Controller von selbst bewegt.", // GyroHelpCalibrate
+    "Misst die Reaktion dieses Spiels, indem die Kamera etwa 40 Sekunden lang selbst gedreht wird. Der beste Ausgangspunkt.", // GyroHelpAutoCal
+    "Dreht das Zielen entgegen dem Controller, nach links und rechts.", // GyroHelpInvertX
+    "Hebt das Zielen, wenn der Controller nach unten kippt, und umgekehrt.", // GyroHelpInvertY
+    "Wie weit das Zielen bei gleicher Controller-Drehung dreht, bei jeder Geschwindigkeit. Insgesamt zu schnell oder zu langsam: hier ändern.", // GyroHelpIntensity
+    "Nur links und rechts, zusätzlich zur Gesamtempfindlichkeit.", // GyroHelpYaw
+    "Nur hoch und runter. Viele Spiele drehen vertikal langsamer als horizontal.", // GyroHelpPitch
+    "Wie viel vom Stick das Spiel ignoriert, bevor sich die Kamera bewegt. Zielen zittert oder wandert in Ruhe: senken. Kleine Korrekturen ohne Wirkung: erhöhen.", // GyroHelpCurveStart
+    "Wie stark langsame Drehungen gegenüber schnellen verstärkt werden. Zielen bei feinen Korrekturen nervös: senken. Langsame Drehungen träge und schnelle schießen davon: erhöhen.", // GyroHelpCurveExp
+    "Im Spiel testen", // GyroLiveTest
+    "Vollbild", // GyroLiveTestOff
+    "Halte L2 und ziele: Das Spiel folgt dem Gyro, während du einstellst. (experimentell)", // GyroLiveHint
     "Videoqualität",                                  // StatVideoQuality
     "Öffnet das Xbox Guide-Menü oder sendet die Xbox-Taste an das Spiel.", // MenuDescXboxButton
     "Konfiguriert und zeigt Leistungs-, Netzwerk- und Latenzstatistiken auf dem Bildschirm an.", // MenuDescStats
@@ -512,4 +547,7 @@ constexpr Column kGerman = {
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
     "Lenkrad (Linker Stick)",                          // GyroSteering
     "Lenkrad (Gas R2)",                                // GyroSteeringDrive
+    "Land des Stores", // StoreCountry
+    "Automatisch (Anmeldeland)", // StoreCountryAuto
+    "Wählt das Land für Preise und kostenlose Angebote im Store. Der Streaming-Server bleibt unverändert.", // SettingDescStoreCountry
 };

@@ -313,7 +313,7 @@ UiEvent AppUi::onMouseMove(float x, float y) {
         if (dropdownOpen_ || tester_ != Tester::None || pickerOpen_ || countryPickerOpen_ || reportOpen_) {
             return ev;
         }
-        constexpr int kRowW = 1140, kRowH = 30, kGap = 2, kGroupGap = 4;
+        constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
         int curY = 184;
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
             if (groupStart) curY += kGroupGap;
@@ -695,7 +695,7 @@ UiEvent AppUi::onMouseDown(float x, float y, int button) {
             constexpr int kItemH = 62, kVisible = 8, kListW = 640;
             int n = static_cast<int>(options.size());
             int visible = std::min(n, kVisible);
-            constexpr int kRowW = 1140, kRowH = 30, kGap = 2, kGroupGap = 4;
+            constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
             Rect panel{kMargin + kRowW - kListW, 184, kListW, visible * kItemH + 16};
             int curY = 184;
             for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
@@ -720,7 +720,7 @@ UiEvent AppUi::onMouseDown(float x, float y, int button) {
                         if (settingsRow_ == 6 && i == 1) {
                             openColourPicker(before);
                         } else if (settingsRow_ != 8) {
-                            ev.action = Action::SettingsChanged;
+                            ev.action = settingsRow_ == 27 ? Action::StoreCountry : Action::SettingsChanged;
                             ev.settings = settings_;
                         }
                         return ev;
@@ -732,7 +732,7 @@ UiEvent AppUi::onMouseDown(float x, float y, int button) {
                 return ev;
             }
         }
-        constexpr int kRowW = 1140, kRowH = 30, kGap = 2, kGroupGap = 4;
+        constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
         int curY = 184;
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
             if (groupStart) curY += kGroupGap;
@@ -1126,7 +1126,7 @@ UiEvent AppUi::handle(const NavInput& in) {
                 if (in.accept && settingsRow_ == 6 && dropdownIndex_ == 1) {
                     openColourPicker(before);
                 } else if (in.accept && settingsRow_ != 8) {
-                    ev.action = Action::SettingsChanged;
+                    ev.action = settingsRow_ == 27 ? Action::StoreCountry : Action::SettingsChanged;
                     ev.settings = settings_;
                 }
                 dirty_ = true;
@@ -1163,14 +1163,14 @@ UiEvent AppUi::handle(const NavInput& in) {
             if (in.right && settingsRow_ != 23 && settingsRow_ != 25) {
                 changeSetting(+1);
                 if (settingsRow_ != 8) {
-                    ev.action = Action::SettingsChanged;
+                    ev.action = settingsRow_ == 27 ? Action::StoreCountry : Action::SettingsChanged;
                     ev.settings = settings_;
                 }
             }
             if (in.left && settingsRow_ != 23 && settingsRow_ != 25) {
                 changeSetting(-1);
                 if (settingsRow_ != 8) {
-                    ev.action = Action::SettingsChanged;
+                    ev.action = settingsRow_ == 27 ? Action::StoreCountry : Action::SettingsChanged;
                     ev.settings = settings_;
                 }
             }

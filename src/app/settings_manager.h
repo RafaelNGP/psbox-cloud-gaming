@@ -47,6 +47,15 @@ public:
 
     std::string path() const;
     void setPath(const std::string& path);
+    // The settings of the console user who opened the app, loaded from their own
+    // file: from here on the manager reads and saves that file, and holds these
+    // settings. Until this was called it held the old shared settings.json, and
+    // using it (the WebUI, a dialog) copied that file's hidden games, per-game
+    // settings and play time over whoever was using the app.
+    void adoptUser(const std::string& path, const Settings& s);
+    // `s` was just saved to `path` by code that holds the settings itself
+    // (g_settings): kept in step, when the path is the manager's own.
+    static void noteSaved(const Settings& s, const std::string& path);
 
     // Thread-safe writes with mutation functor (Unique Lock)
     template <typename Fn>

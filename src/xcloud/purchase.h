@@ -28,6 +28,8 @@ bool claimFreeProduct(const std::string& marketplaceAuthHeader, const PurchaseOf
 
 // Tracks products known to fail claim (bundles, token/code-only, or no valid purchase action)
 void markProductUnclaimable(const std::string& productId);
+// Regional failures do not carry over to another store market.
+void resetUnclaimableProducts();
 bool isProductUnclaimable(const std::string& productId);
 void loadUnclaimableProducts(const std::string& path);
 void saveUnclaimableProducts(const std::string& path);

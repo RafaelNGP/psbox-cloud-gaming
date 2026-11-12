@@ -12,6 +12,7 @@
 #include "xcloud/achievements.h"
 #include "xcloud/catalog.h"
 #include "xcloud/prices.h"
+#include "xcloud/purchase.h"
 
 #include <algorithm>
 #include <ctime>
@@ -23,6 +24,7 @@ namespace xc::app {
 namespace {
 
 std::mutex g_priceMutex;
+uint64_t g_priceGeneration = 0;
 std::string g_priceMarket, g_priceLanguage;  // set by setPriceMarket() (empty: not yet)
 std::string g_priceXblAuth, g_priceXuid;      // g_priceMutex
 std::set<std::string> g_notifiedSale;
@@ -66,8 +68,13 @@ bool stopPriceLoop(uint32_t ms) {
 
 void setPriceMarket(const std::string& market, const std::string& language) {
     std::lock_guard<std::mutex> lock(g_priceMutex);
+    if (g_priceMarket == market && g_priceLanguage == language) return;
+    if (g_priceMarket != market) xcloud::resetUnclaimableProducts();
     g_priceMarket = market;
     g_priceLanguage = language;
+    ++g_priceGeneration;
+    g_notifiedSale.clear();
+    if (g_ui) g_ui->resetStorePrices();
 }
 
 void setPriceAuth(const std::string& xblAuth, const std::string& xuid) {
@@ -86,32 +93,46 @@ namespace {
 void priceLoop() {
     platform::setThreadAffinity(platform::ThreadRole::Worker, "xcloud_price");
     json::Value cache = json::Value::object();
-    {
-        std::string text;
-        if (platform::readFile(pricesPath(), text))
-            if (auto j = json::parse(text)) cache = *j;
-    }
-    // Fresh cached prices to the UI right away.
-    int64_t now = static_cast<int64_t>(std::time(nullptr));
-    std::map<std::string, ui::PriceInfo> shown;
-    json::Value kept = json::Value::object();
-    for (const auto& [id, v] : cache.members()) {
-        if (now - v["t"].asInt() > kPriceTtlSeconds) continue;
-        xcloud::Price p{v["list"].asNumber(), v["msrp"].asNumber(), v["cur"].str()};
-        if (p.list < 0.005) continue;
-        kept.set(id, v);
-        shown[id] = priceTexts(p);
-    }
-    cache = kept;
-    if (!shown.empty()) g_ui->setPrices(shown);
+    int64_t now = 0;
+    uint64_t activeGeneration = 0;
     uint64_t pauseMs = 0;  // after failed requests: 2 s, doubling to a minute
     while (!g_stopPrices) {
         for (uint64_t slept = 0; slept < pauseMs && !g_stopPrices; slept += 300) platform::sleepMs(300);
         std::string market, language;
+        uint64_t generation;
         {
             std::lock_guard<std::mutex> lock(g_priceMutex);
             market = g_priceMarket;
             language = g_priceLanguage;
+            generation = g_priceGeneration;
+        }
+        if (market.empty()) {
+            platform::sleepMs(300);
+            continue;
+        }
+        if (generation != activeGeneration) {
+            cache = json::Value::object();
+            now = static_cast<int64_t>(std::time(nullptr));
+            std::map<std::string, ui::PriceInfo> shown;
+            std::string text;
+            if (platform::readFile(pricesPath(), text)) {
+                auto saved = json::parse(text);
+                // Legacy caches have no market and cannot establish a regional offer.
+                if (saved && (*saved)["market"].str() == market && (*saved)["language"].str() == language) {
+                    for (const auto& [id, v] : (*saved)["entries"].members()) {
+                        if (now - v["t"].asInt() > kPriceTtlSeconds) continue;
+                        xcloud::Price p{v["list"].asNumber(), v["msrp"].asNumber(), v["cur"].str()};
+                        if (p.list < 0.005) continue;
+                        cache.set(id, v);
+                        shown[id] = priceTexts(p);
+                    }
+                }
+            }
+            std::lock_guard<std::mutex> lock(g_priceMutex);
+            if (generation != g_priceGeneration) continue;
+            activeGeneration = generation;
+            pauseMs = 0;
+            if (!shown.empty()) g_ui->setPrices(shown);
         }
         // The open page's description, for games that only have the light
         // catalog data (games to buy, search results).
@@ -170,15 +191,30 @@ void priceLoop() {
                 }
             }
         }
-        std::vector<std::string> ids = market.empty() ? std::vector<std::string>() : g_ui->pricesWanted(20, true);
+        std::vector<std::string> ids;
+        {
+            std::lock_guard<std::mutex> lock(g_priceMutex);
+            if (generation != g_priceGeneration) continue;
+            ids = g_ui->pricesWanted(20, true);
+        }
         if (ids.empty()) {
             platform::sleepMs(300);
             continue;
         }
         std::map<std::string, xcloud::Price> got;
         std::string err;
-        if (xcloud::fetchPrices(ids, market, language, got, err)) {
+        bool fetched = xcloud::fetchPrices(ids, market, language, got, err);
+        // A region can change while the request is in flight (including BR -> JP -> BR).
+        // Publish/reset under the same lock so a stale reply never restores old prices.
+        std::lock_guard<std::mutex> lock(g_priceMutex);
+        if (generation != g_priceGeneration) continue;
+        if (fetched) {
             pauseMs = 0;
+            // All regional product and bundle lookups succeeded: absence is confirmed.
+            std::vector<std::string> none;
+            for (const auto& id : ids)
+                if (!got.count(id)) none.push_back(id);
+            g_ui->pricesNone(none);
         } else {
             // Those without a price are asked for again, after a pause (not
             // every game to buy marked asked in seconds while offline).
@@ -216,7 +252,11 @@ void priceLoop() {
         }
         if (!texts.empty()) {
             g_ui->setPrices(texts);
-            if (!platform::writeFileAtomic(pricesPath(), cache.dump())) XC_LOGW("prices: could not save the cache");
+            json::Value saved = json::Value::object();
+            saved.set("market", market);
+            saved.set("language", language);
+            saved.set("entries", cache);
+            if (!platform::writeFileAtomic(pricesPath(), saved.dump())) XC_LOGW("prices: could not save the cache");
         }
     }
 }

@@ -19,6 +19,8 @@ namespace xc::app {
 
 json::Value keyMapToJson(const input::KeyMap& m);
 input::KeyMap keyMapFromJson(const json::Value& v, const input::KeyMap& fallback);
+// Supported optional store-country override; empty means the session market.
+std::string normalizeStoreCountry(const std::string& country);
 
 struct GameProfile {
     // Picture
@@ -60,8 +62,11 @@ struct GameProfile {
     input::TouchpadShortcuts touchpadShortcuts = input::defaultTouchpadShortcuts();
     // Per-game audio/subtitle language: "" = system default, else e.g. "en-US", "pt-BR"
     std::string locale;
-    // Per-game trophy synchronization: false by default (user must opt-in)
+    // This game's trophies. They follow the general setting (Settings::syncTrophies)
+    // until the player chooses for this game: only then syncTrophiesChosen is set,
+    // and only a chosen "off" keeps the game out of the sync.
     bool syncTrophies = false;
+    bool syncTrophiesChosen = false;
     // Optional title metadata persisted for background trophy sync filtering
     std::string xboxTitleId;
     std::string gameName;
@@ -79,6 +84,8 @@ struct Settings {
     std::string region;                // gssv region name; empty = automatic
     // "Sign in as another country" (xcloud::loginCountryAddress): "" off.
     std::string loginCountry;
+    std::string storeCountry;  // catalog/store only; never changes the streaming datacenter
+    std::string storeMarket(const std::string& sessionMarket) const;
     // Round trip to the stream server measured in past sessions, per region (ms).
     std::map<std::string, int> regionRtt;
     // Games hidden with Square (product ids), and the "Your games" order

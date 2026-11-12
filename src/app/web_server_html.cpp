@@ -846,6 +846,18 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
       </div>
 
       <div class="btn-row" style="margin-top: 16px;">
+        <div class="map-item" style="margin-bottom: 14px;">
+          <label for="selectStoreCountry">País da loja</label>
+          <select id="selectStoreCountry" onchange="markSettingsChanged()">
+            <option value="">Automático (país da conta)</option>
+            <option value="br">Brasil</option>
+            <option value="jp">Japão</option>
+            <option value="kr">Coreia do Sul</option>
+            <option value="pl">Polônia</option>
+            <option value="us">Estados Unidos</option>
+          </select>
+          <p>Define o catálogo, os preços e as ofertas. Não altera a região de streaming.</p>
+        </div>
         <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Configurações</button>
       </div>
     </div>
@@ -1779,7 +1791,8 @@ function saveGeneralSettings() {
     lightBarColour: document.getElementById('inputLightBarColor').value,
     queueReadyAlert: document.getElementById('checkQueueAlert').checked,
     videoDecoder: parseInt(document.getElementById('selectVideoDecoder').value, 10),
-    voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10)
+    voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10),
+    storeCountry: document.getElementById('selectStoreCountry').value
   };
   if (rowUsb && rowUsb.style.display !== 'none') {
     payload.usbControllers = document.getElementById('checkUsbControllers') ? document.getElementById('checkUsbControllers').checked : true;
@@ -2207,6 +2220,10 @@ function applyLoadedSettings(s) {
   if (s.videoDecoder !== undefined) {
     const el = document.getElementById('selectVideoDecoder');
     if (el) el.value = s.videoDecoder;
+  }
+  if (s.storeCountry !== undefined) {
+    const el = document.getElementById('selectStoreCountry');
+    if (el) el.value = s.storeCountry;
   }
   if (s.voiceRouting !== undefined) {
     const el = document.getElementById('selectVoiceRouting');

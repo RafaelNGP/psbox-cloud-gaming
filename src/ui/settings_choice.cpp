@@ -14,6 +14,7 @@ SettingsChoice choiceFromSettings(const app::Settings& s) {
     c.resolution = s.resolution == "720p" ? 1 : (s.resolution == "1440p" || s.resolution == "best") ? 2 : 0;
     c.region = s.region;
     c.loginCountry = s.loginCountry;
+    c.storeCountry = s.storeCountry;
     c.deadzone[0] = std::clamp(s.deadzoneLeft, 0, kMaxDeadzone);
     c.deadzone[1] = std::clamp(s.deadzoneRight, 0, kMaxDeadzone);
     c.triggerStrength = s.triggerStrength;
@@ -58,6 +59,7 @@ void applyChoice(const SettingsChoice& c, app::Settings& s) {
     s.resolution = c.resolution == 1 ? "720p" : c.resolution == 2 ? "best" : "1080p";
     s.region = c.region;
     s.loginCountry = c.loginCountry;
+    s.storeCountry = c.storeCountry;
     s.deadzoneLeft = c.deadzone[0];
     s.deadzoneRight = c.deadzone[1];
     s.triggerStrength = c.triggerStrength;

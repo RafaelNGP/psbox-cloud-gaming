@@ -43,6 +43,10 @@ struct Title {
     // besides F2P, such as CALLISTO for Game Pass). Entitled but not this:
     // the account's own game, bought or free-to-play.
     bool viaSubscription = false;
+    // Playable through the free tier with ads (userPrograms has FERDINAND):
+    // no subscription, sessions of maxSessionSeconds.
+    bool freeTier = false;
+    int maxSessionSeconds = 0;  // details.maxSessionLengthInSeconds (0: not said)
     // The cloud streams it with native mouse and keyboard (its
     // supportedInputTypes has "MKB").
     bool mouseKeyboard = false;

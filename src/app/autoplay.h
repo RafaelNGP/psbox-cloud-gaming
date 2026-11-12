@@ -113,11 +113,13 @@ struct Autoplay {
                                  // bar's colour picker moved (picker.ppm), chosen (settings.ppm)
     bool noRestart = false;      // norestart: after an update, close instead of restarting
     bool gridTest = false;       // gridtest: navigate to All games grid, verify 2D navigation and capture screenshots
+    bool gameGyroTest = false;     // gamegyrotest: the game's settings, its Gyro aiming dialog opened from the gyro row
     bool gameSettingsTest = false; // gamesettingstest: test details and game settings modal
     bool publisherTest = false;  // publishertest: test publisher filter dropdown and search results
     bool friendsTest = false;    // friendstest: test friends playing row and card badge
     bool streamMenuTest = false; // streammenutest: render StreamMenu with mic and audio route options
     bool tlsCheck = false;       // tlscheck: refused certificates (badssl.com) classified and logged, nothing else
+    bool storeCountryTest = false; // settings store country and picker, closed without a change
     bool regionTest = false;     // regiontest: the refused sign-in (region.ppm), its country list (region_picker.ppm,
                                  // closed unchanged), Settings on the sign-in country (region_settings.ppm), back
                                  // (region_back.ppm). The sign-in country is never changed.
@@ -131,6 +133,7 @@ extern std::atomic<float> g_syntheticRightX, g_syntheticLeftY;  // sticks for th
 // level after another, each way, with L2 down, to read the game's response
 // from the picture's motion. 0: no sweep.
 extern std::atomic<uint64_t> g_sweepStartUs;
+extern std::atomic<bool> g_sweepL2;  // L2 held during the sweep (aiming down sights)
 // The sweep's stick at `nowUs`; false when no sweep runs (or it is over).
 bool sweepStick(uint64_t nowUs, float& x, float& y);
 

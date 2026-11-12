@@ -29,6 +29,15 @@ extern std::mutex g_settingsMutex;
 extern Settings g_settings;
 extern std::atomic<uint64_t> g_settingsVersion;
 std::string settingsPath();
+// Files that belong to the console's user who opened the app (the pad's user),
+// as the settings do: <dataDir>/<base>_<user id>.json. Each console profile
+// has its own Xbox sign-in and its own library cache; signing out of one
+// leaves the others signed in. The file from before this (one for the whole
+// console) goes to the first profile that opens the app, once. Without a
+// console user (the desktop) it is <dataDir>/<legacy name>.
+std::string userFilePath(const char* base, const char* legacyName);
+inline std::string accountPath() { return userFilePath("account", "account.json"); }
+inline std::string libraryCachePath() { return userFilePath("library_cache", "library_cache.json"); }
 // Caller holds g_settingsMutex. 1440p is offered once a stream delivered it.
 bool allow1440Locked();
 // Settings' screen takes g_settings again (ui::choiceFromSettings) after
@@ -41,6 +50,10 @@ void refreshSettingsUiLocked();
 // --- Worker commands (worker.cpp) ----------------------------------------------
 enum Command { kNone, kSignIn, kPlay, kSignOut, kReloadLibrary, kConsoles, kUpdate, kClaimFree, kCheckSignIn, kNetworkTest, kSyncTrophies, kRemoveTrophies };
 extern std::atomic<int> g_command;
+// Play was pressed and the worker has not taken it yet (it may be finishing a
+// library refresh that takes seconds): the launch screen is up already, and a
+// cancel made now withdraws the command instead of stopping a stream.
+extern std::atomic<bool> g_playPending;
 extern std::atomic<bool> g_cancel;
 extern std::mutex g_argMutex;
 extern ui::GameTile g_playTile;  // what kPlay plays

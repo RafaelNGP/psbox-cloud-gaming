@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "app/settings.h"
+#include "app/settings_manager.h"
 #include "input/gyro.h"
 
 #include "platform/platform.h"
@@ -9,9 +10,25 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cctype>
 #include <cstdlib>
 
 namespace xc::app {
+
+std::string normalizeStoreCountry(const std::string& country) {
+    std::string code = country;
+    for (char& c : code) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    for (const char* supported : {"br", "jp", "kr", "pl", "us"})
+        if (code == supported) return code;
+    return {};
+}
+
+std::string Settings::storeMarket(const std::string& sessionMarket) const {
+    std::string market = normalizeStoreCountry(storeCountry);
+    if (market.empty()) market = sessionMarket.empty() ? "US" : sessionMarket;
+    for (char& c : market) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return market;
+}
 
 json::Value keyMapToJson(const input::KeyMap& m) {
     json::Value v = json::Value::array();
@@ -58,6 +75,7 @@ bool Settings::load(const std::string& path) {
     resolution = (*j)["resolution"].str(resolution);
     region = (*j)["region"].str(region);
     loginCountry = (*j)["loginCountry"].str(loginCountry);
+    storeCountry = normalizeStoreCountry((*j)["storeCountry"].str(storeCountry));
     if (resolution != "720p" && resolution != "1440p" && resolution != "best") resolution = "1080p";
     hidden.clear();
     for (const auto& id : (*j)["hidden"].items())
@@ -200,7 +218,10 @@ bool Settings::load(const std::string& path) {
         p.touchpadMouse = obj["touchpadMouse"].asBool(touchpadMouse);
         p.touchpadShortcuts = readTouchpadShortcutsOr(obj["touchpadShortcuts"], touchpadShortcuts);
         p.locale = obj["locale"].str();
-        p.syncTrophies = obj["syncTrophies"].asBool(false);
+        // A profile written before the choice was recorded has "syncTrophies" too, false by
+        // default from merely being made: without the choice it follows the general setting.
+        p.syncTrophiesChosen = obj["syncTrophiesChosen"].asBool(false);
+        p.syncTrophies = p.syncTrophiesChosen ? obj["syncTrophies"].asBool(syncTrophies) : syncTrophies;
         p.xboxTitleId = obj["xboxTitleId"].str();
         p.gameName = obj["gameName"].str();
         p.soloInputRedirect = obj["soloInputRedirect"].asBool(obj["solo_input_redirect"].asBool(soloInputRedirect));
@@ -237,6 +258,8 @@ GameProfile Settings::defaultProfile() const {
     p.gyroMode = gyroMode;
     p.gyroLevel = gyroLevel;
     p.gyroYawScale = gyroYawScale;
+    p.syncTrophies = syncTrophies;  // follows the general setting until chosen for the game
+    p.syncTrophiesChosen = false;
     p.gyroPitchScale = gyroPitchScale;
     p.gyroCurveStart = gyroCurveStart;
     p.gyroCurveExp = gyroCurveExp;
@@ -276,6 +299,7 @@ bool Settings::save(const std::string& path) const {
     v.set("resolution", resolution);
     v.set("region", region);
     v.set("loginCountry", loginCountry);
+    v.set("storeCountry", normalizeStoreCountry(storeCountry));
     json::Value rtt = json::Value::object();
     for (const auto& [name, ms] : regionRtt) rtt.set(name, ms);
     v.set("regionRtt", rtt);
@@ -390,7 +414,8 @@ bool Settings::save(const std::string& path) const {
         obj.set("touchpadMouse", p.touchpadMouse);
         obj.set("touchpadShortcuts", input::touchpadShortcutsJson(p.touchpadShortcuts));
         if (!p.locale.empty()) obj.set("locale", p.locale);
-        obj.set("syncTrophies", p.syncTrophies);
+        obj.set("syncTrophies", p.syncTrophiesChosen ? p.syncTrophies : syncTrophies);
+        obj.set("syncTrophiesChosen", p.syncTrophiesChosen);
         if (!p.xboxTitleId.empty()) obj.set("xboxTitleId", p.xboxTitleId);
         if (!p.gameName.empty()) obj.set("gameName", p.gameName);
         obj.set("soloInputRedirect", p.soloInputRedirect);
@@ -398,7 +423,10 @@ bool Settings::save(const std::string& path) const {
     }
     v.set("perGame", pg);
     v.set("settingsVersion", 3);
-    if (platform::writeFileAtomic(path, v.dump())) return true;
+    if (platform::writeFileAtomic(path, v.dump())) {
+        SettingsManager::noteSaved(*this, path);  // the manager holds the same settings from here on
+        return true;
+    }
     XC_LOGW("settings: could not save %s", path.c_str());  // every caller's warning
     return false;
 }

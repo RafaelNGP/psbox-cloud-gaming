@@ -20,6 +20,8 @@
 #include "media/decoder.h"
 #include "media/hw_decoder.h"
 #include "input/controller.h"
+#include "app/gyro_calibration.h"
+#include "auth/account_seal.h"
 #include "input/gyro.h"
 #include "input/tuning.h"
 #include "input/pad_usb.h"
@@ -291,6 +293,69 @@ static void testPrices() {
     CHECK(formatPrice(59.99, "USD") == "$59.99");
     CHECK(formatPrice(69.99, "EUR") == "69,99 \xE2\x82\xAC");
     CHECK(formatPrice(4, "XYZ") == "XYZ 4.00");
+
+    // A bundle is a valid regional offer; failure to inspect it is not proof
+    // that the base game cannot be bought.
+    bool failBundle = false, malformed = false;
+    xc::net::setTestTransport([&](const xc::net::Request& req) {
+        xc::net::Response r;
+        r.status = 200;
+        CHECK(req.url.find("market=BR") != std::string::npos);
+        if (malformed) { r.body = "{}"; return r; }
+        if (req.url.find("bigIds=SELLER") != std::string::npos) {
+            if (failBundle) { r.status = 503; r.body = "{}"; return r; }
+            r.body = R"({"Products":[{"ProductId":"SELLER","DisplaySkuAvailabilities":[{"Availabilities":[{"Actions":["Purchase","Browse"],"OrderManagementData":{"Price":{"ListPrice":7.8,"MSRP":39,"CurrencyCode":"BRL"}}}]}]}]})";
+        } else {
+            r.body = R"({"Products":[{"ProductId":"BASE","MarketProperties":[{"RelatedProducts":[{"RelationshipType":"Bundle","RelatedProductId":"SELLER"}]}]},{"ProductId":"UNAVAILABLE"}]})";
+        }
+        return r;
+    });
+    std::map<std::string, xc::xcloud::Price> offers;
+    std::string err;
+    CHECK(xc::xcloud::fetchPrices({"BASE", "UNAVAILABLE"}, "BR", "pt-br", offers, err));
+    CHECK(offers.count("BASE") && offers["BASE"].list == 7.8 && !offers.count("UNAVAILABLE"));
+    offers.clear();
+    failBundle = true;
+    CHECK(!xc::xcloud::fetchPrices({"BASE"}, "BR", "pt-br", offers, err));
+    malformed = true;
+    CHECK(!xc::xcloud::fetchPrices({"BASE"}, "BR", "pt-br", offers, err));
+    xc::net::setTestTransport({});
+
+    xc::ui::Fonts fonts;
+    xc::ui::ImageCache images([] {});
+    xc::ui::AppUi ui(fonts, images);
+    xc::ui::GameTile candidate, owned;
+    candidate.productId = "REGIONAL";
+    candidate.titleId = "REGIONAL_TITLE";
+    candidate.name = "Regional Game";
+    candidate.purchasable = true;
+    candidate.playable = false;
+    owned = candidate;
+    owned.productId = "OWNED";
+    owned.titleId = "OWNED_TITLE";
+    owned.name = "Owned Game";
+    owned.playable = true;
+    owned.purchasable = false;
+    ui.setOwned({owned}, {candidate}, true);
+    ui.setSearchPools({}, {candidate, owned});
+    ui.showHome();
+    CHECK(ui.pricesWanted(20, true).size() == 1);
+    ui.pricesFailed({"REGIONAL"});
+    xc::ui::GameTile tile;
+    CHECK(ui.purchasableAt(0, tile)); // offline does not remove the candidate
+    ui.pricesNone({"REGIONAL", "OWNED"});
+    CHECK(!ui.purchasableAt(0, tile));
+    CHECK(ui.isAcquired(owned));
+    ui.setSearchTab(xc::ui::Tab::Library);
+    ui.setSearchQuery("Game");
+    CHECK(ui.searchResults(10).size() == 1);
+    // Switching from BR (not sold) to JP rechecks the original source.
+    ui.resetStorePrices();
+    CHECK(ui.pricesWanted(20, true).size() == 1);
+    ui.setPrices({{"REGIONAL", {"JPY 1990", "", 1990, 1990}}});
+    CHECK(ui.purchasableAt(0, tile));
+    CHECK(ui.searchResults(10).size() == 2);
+
 }
 
 static void testAccentColor() {
@@ -658,6 +723,35 @@ static void testPerGameSettings() {
     CHECK(loadedP1.sharpness == 3 && loadedP1.upscaler == 3 && loadedP1.circleConfirms);
     CHECK(loadedP1.highRefresh && loadedP1.touchpadMouse && loadedP1.locale == "pt-BR" && loadedP1.videoDecoder == 1);
     CHECK(loadedP1.deadzoneLeft == 5 && loadedP1.deadzoneRight == 8 && loadedP1.triggerStrength == 1);
+
+    // A game's trophies follow the general setting until the player chooses for
+    // that game: a profile merely made (or written by a version before the choice
+    // was recorded, with "syncTrophies": false) does not turn them off.
+    {
+        xc::app::Settings t;
+        t.syncTrophies = true;
+        t.perGame["MADE"] = t.defaultProfile();          // made for some other setting
+        CHECK(t.perGame["MADE"].syncTrophies && !t.perGame["MADE"].syncTrophiesChosen);
+        t.perGame["OFF"] = t.defaultProfile();
+        t.perGame["OFF"].syncTrophies = false;           // turned off by the player, for this game
+        t.perGame["OFF"].syncTrophiesChosen = true;
+        t.perGame["OLD"] = t.defaultProfile();
+        t.perGame["OLD"].syncTrophies = false;           // as an older version left it, with no choice made
+        const std::string tp = path + ".trophies";
+        CHECK(t.save(tp));
+        xc::app::Settings tb;
+        CHECK(tb.load(tp));
+        CHECK(tb.perGame["MADE"].syncTrophies && !tb.perGame["MADE"].syncTrophiesChosen);
+        CHECK(!tb.perGame["OFF"].syncTrophies && tb.perGame["OFF"].syncTrophiesChosen);
+        CHECK(tb.perGame["OLD"].syncTrophies && !tb.perGame["OLD"].syncTrophiesChosen);
+        // The general setting turned off and on again: the unchosen ones follow it.
+        tb.syncTrophies = false;
+        CHECK(tb.save(tp));
+        xc::app::Settings tc;
+        CHECK(tc.load(tp));
+        CHECK(!tc.perGame["MADE"].syncTrophies && !tc.perGame["MADE"].syncTrophiesChosen);
+        std::remove(tp.c_str());
+    }
 
     // Remove game profile restores default.
     reloaded.perGame.erase("GAME1");
@@ -1829,6 +1923,8 @@ static void testTokenRefresh() {
     auto storedRefresh = [&] {
         std::string text;
         xc::platform::readFile(store, text);
+        CHECK(text.find("_rt-") == std::string::npos);  // sealed: no token readable in the file
+        if (std::string plain; xc::auth::unsealAccount(text, plain)) text = plain;
         auto j = json::parse(text);
         return j ? (*j)["refreshToken"].str() : std::string();
     };
@@ -2791,6 +2887,98 @@ static void testLoginRetry() {
     net::setTestTransport({});
 }
 
+// The saved sign-in sealed for this device: opens here, not when altered, and
+// a file from before is told apart.
+static void testAccountSeal() {
+    using namespace xc::auth;
+    const std::string plain = R"({"version":1,"clientId":"c","refreshToken":"M.R3_secret","userId":"u","gamertag":"g","xuid":"1"})";
+    const std::string sealed = sealAccount(plain);
+    CHECK(!sealed.empty() && isSealedAccount(sealed) && !isSealedAccount(plain));
+    CHECK(sealed.find("M.R3_secret") == std::string::npos && sealed.find("refreshToken") == std::string::npos);
+    std::string back;
+    CHECK(unsealAccount(sealed, back) && back == plain);
+    CHECK(sealAccount(plain) != sealed);  // a new nonce each time
+    std::string bad = sealed;
+    const size_t at = bad.find("\"data\":\"") + 12;
+    bad[at] = bad[at] == 'A' ? 'B' : 'A';
+    CHECK(!unsealAccount(bad, back));
+    CHECK(!unsealAccount(plain, back));
+}
+
+// The game's stick response measured from the picture (app/gyro_calibration.h):
+// a scene that turns behind a HUD that stays put, through a known curve.
+static void testGyroCalibration() {
+    using namespace xc::app::gyrocal;
+    // A wide random scene; the picture is a window of it, with fixed blocks drawn over (the HUD).
+    constexpr int kSceneW = 4096;
+    std::vector<uint8_t> scene(static_cast<size_t>(kSceneW) * kThumbH);
+    uint32_t seed = 12345;
+    auto rnd = [&] { return seed = seed * 1664525u + 1013904223u, seed >> 24; };
+    for (int y = 0; y < kThumbH; y += 4)  // 4x4 blocks: texture a 16x12 tile can lock on to
+        for (int x = 0; x < kSceneW; x += 4) {
+            const uint8_t v = static_cast<uint8_t>(40 + rnd() % 170);
+            for (int yy = 0; yy < 4; ++yy)
+                for (int xx = 0; xx < 4 && x + xx < kSceneW; ++xx) scene[static_cast<size_t>(y + yy) * kSceneW + x + xx] = v;
+        }
+    auto view = [&](float pos, uint8_t* out) {  // the window at scene column `pos` (bilinear in x)
+        for (int y = 0; y < kThumbH; ++y)
+            for (int x = 0; x < kThumbW; ++x) {
+                const float fx = pos + static_cast<float>(x);
+                const int ix = static_cast<int>(std::floor(fx));
+                const float t = fx - static_cast<float>(ix);
+                const uint8_t* row = scene.data() + static_cast<size_t>(y) * kSceneW;
+                out[y * kThumbW + x] = static_cast<uint8_t>(row[ix] * (1 - t) + row[ix + 1] * t + 0.5f);
+            }
+        for (int y = 0; y < 24; ++y)  // the HUD: a third of the tiles never move
+            for (int x = 0; x < kThumbW; ++x) out[y * kThumbW + x] = static_cast<uint8_t>(((x / 5 + y / 5) % 2) ? 220 : 30);
+    };
+    std::vector<uint8_t> a(kThumbW * kThumbH), b(kThumbW * kThumbH);
+    view(2000.0f, a.data());
+    view(2003.4f, b.data());  // the camera turned right: the content moved 3.4 px left
+    float shift = 0;
+    int moving = 0;
+    CHECK(pictureShift(a.data(), b.data(), false, shift, moving));
+    CHECK(moving >= 10 && std::abs(shift + 3.4f) < 0.25f);
+    CHECK(pictureShift(a.data(), a.data(), false, shift, moving) && shift == 0.0f && moving == 0);
+
+    // The sweep, with a game that answers from 18 % of the stick along an exponent of 2.2,
+    // 2400 px/s (of a 1920-wide picture) at full stick, 60 pictures a second.
+    Recording rec;
+    rec.reserve(sweepDurationMs() * 60 / 1000 + 8);
+    float pos = 2000.0f;
+    const float pxPerThumb = 1920.0f / kThumbW;
+    std::vector<uint8_t> frame(kThumbW * kThumbH);
+    float sx = 0, sy = 0;
+    for (uint64_t f = 0;; ++f) {
+        const uint64_t ms = f * 1000 / 60;
+        if (!sweepStickAt(ms, sx, sy)) break;
+        const float m = std::abs(sx);
+        const float speed = m <= 0.18f ? 0.0f : 2400.0f * std::pow((m - 0.18f) / 0.82f, 2.2f);
+        pos += (sx > 0 ? 1.0f : -1.0f) * speed / 60.0f / pxPerThumb;
+        view(pos, frame.data());
+        rec.addThumb(frame.data(), 1000000 + f * 1000000 / 60, sx, sy);
+    }
+    const Result res = analyze(rec);
+    CHECK(res.ok());
+    CHECK(std::abs(res.startPct - 18) <= 3 && std::abs(res.exponentTenths - 22) <= 3);
+    CHECK(res.fitError < 0.03f && std::abs(res.topSpeed - 2400.0f) < 200.0f);
+    // Its numbers put through gyro aiming's own curve: within 20 % of the game's speeds.
+    for (const Point& p : res.horizontal) {
+        if (p.level < 0.3f) continue;
+        const float model = 2400.0f * std::pow((p.level - res.startPct / 100.0f) / (1.0f - res.startPct / 100.0f), res.exponentTenths / 10.0f);
+        const float truth = 2400.0f * std::pow((p.level - 0.18f) / 0.82f, 2.2f);
+        CHECK(std::abs(model / truth - 1.0f) < 0.2f);
+    }
+    // A picture that never moves (a menu was open): said so, nothing made up.
+    Recording still;
+    view(2000.0f, frame.data());
+    for (uint64_t f = 0;; ++f) {
+        if (!sweepStickAt(f * 1000 / 60, sx, sy)) break;
+        still.addThumb(frame.data(), 1000000 + f * 1000000 / 60, sx, sy);
+    }
+    CHECK(analyze(still).failure == Failure::NoMotion);
+}
+
 // Gyro aiming: still is nothing, a turn left aims left (past the games'
 // dead zone), more intensity aims further, the push eases back to nothing.
 static void testGyro() {
@@ -3557,21 +3745,21 @@ static void testVisibleSettingsRows() {
     };
     const ui::UiCaps ps5;
     auto all = ui::visibleSettingsRows(ps5);
-    CHECK((ids(all) == std::vector<int>{0, 2, 8, 17, 18, 24, 25, 1, 20, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
-    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
+    CHECK((ids(all) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 25, 1, 20, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
+    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
     ui::UiCaps pc;
     pc.lightBar = pc.triggerRumble = pc.adaptiveTriggers = pc.gyro = pc.touchpad = false;
     pc.upscalers = pc.sharpen = pc.deband = pc.highRefresh = pc.console = pc.selfUpdate = false;
     pc.openUrl = true;
     auto desk = ui::visibleSettingsRows(pc);
-    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
     // The desktop app's window: Display mode after the resolution, in the stream's group.
     ui::UiCaps win = pc;
     win.desktopWindow = true;
     auto w = ui::visibleSettingsRows(win);
-    CHECK((ids(w) == std::vector<int>{0, 2, 8, 17, 18, 24, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(w) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
     ui::UiCaps xbox = pc;  // an Xbox pad: impulse triggers, no light bar
     xbox.triggerRumble = true;
     auto x = ids(ui::visibleSettingsRows(xbox));
@@ -3617,16 +3805,16 @@ static void testVisibleSettingsRows() {
     CHECK((ids(game) == std::vector<int>{0, 4, 15, 14, 18, 5, 7, 11, 9}));
     CHECK((groups(game) == std::vector<bool>{false, true, false, false, false, true, false, false, false}));
     // How far down the autoplay tests walk to each row (autoplay.cpp's downsTo).
-    CHECK(ui::settingsRowPosition(ps5, 24) == 5);
-    CHECK(ui::settingsRowPosition(ps5, 25) == 6);
-    CHECK(ui::settingsRowPosition(ps5, 1) == 7 && ui::settingsRowPosition(ps5, 3) == 14);
-    CHECK(ui::settingsRowPosition(ps5, 16) == 20);
-    CHECK(ui::settingsRowPosition(ps5, 5) == 18 && ui::settingsRowPosition(ps5, 6) == 19);
-    CHECK(ui::settingsRowPosition(ps5, 12) == 13 && ui::settingsRowPosition(ps5, 14) == 12);
-    CHECK(ui::settingsRowPosition(ps5, 22) == 21);
-    CHECK(ui::settingsRowPosition(ps5, 7) == 23 && ui::settingsRowPosition(ps5, 19) == 22 && ui::settingsRowPosition(ps5, 2) == 1);
-    CHECK(ui::settingsRowPosition(ps5, 21) == 17);
-    CHECK(ui::settingsRowPosition(pc, 5) == 13 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
+    CHECK(ui::settingsRowPosition(ps5, 24) == 6);
+    CHECK(ui::settingsRowPosition(ps5, 25) == 7);
+    CHECK(ui::settingsRowPosition(ps5, 27) == 3 && ui::settingsRowPosition(ps5, 1) == 8 && ui::settingsRowPosition(ps5, 3) == 15);
+    CHECK(ui::settingsRowPosition(ps5, 16) == 21);
+    CHECK(ui::settingsRowPosition(ps5, 5) == 19 && ui::settingsRowPosition(ps5, 6) == 20);
+    CHECK(ui::settingsRowPosition(ps5, 12) == 14 && ui::settingsRowPosition(ps5, 14) == 13);
+    CHECK(ui::settingsRowPosition(ps5, 22) == 22);
+    CHECK(ui::settingsRowPosition(ps5, 7) == 24 && ui::settingsRowPosition(ps5, 19) == 23 && ui::settingsRowPosition(ps5, 2) == 1);
+    CHECK(ui::settingsRowPosition(ps5, 21) == 18);
+    CHECK(ui::settingsRowPosition(pc, 5) == 14 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
 }
 
 // The controller's glyphs by pad kind (ui/pad_glyphs.h).
@@ -9210,7 +9398,8 @@ static void testTrophySystem() {
             }
             return false;
         }
-        bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) override {
+        bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
+                               const std::set<std::string>* = nullptr) override {
             removedCount = static_cast<int>(unlocked.size() > 0 ? 1 : 0);
             unlocked.clear();
             return true;
@@ -9235,7 +9424,9 @@ static void testTrophySystem() {
 
     std::string baseDir = platform::dataDir();
     if (baseDir.empty()) baseDir = ".";
-    std::string cacheFile = baseDir + "/trophies/267695549.json";
+    // Each console user has their own records: this one's, not the shared folder.
+    std::string cacheFile = engine.trophyCachePath("267695549");
+    CHECK(cacheFile == baseDir + "/trophies/users/1ea2f4da/267695549.json");
     ::unlink(cacheFile.c_str());
 
     // Mock network transport for achievements
@@ -10325,6 +10516,68 @@ static void testTrophyNetworkAndLifecycleResilienceStress() {
         }
     }
 
+    // Sub-test 7b: each console user has their own records; removing one user's
+    // trophies leaves the other's records alone, and what the console shares for
+    // a title both have stays in place.
+    {
+        cleanCache();
+        class UserBackend : public trophy::ITrophyBackend {
+        public:
+            uint32_t user = 0;
+            std::vector<std::string> removed, kept;
+            bool init(uint32_t u) override { user = u; return true; }
+            bool registerTitle(const trophy::TitleTrophySet&) override { return true; }
+            bool unlockTrophy(const std::string&, int, trophy::TrophyGrade, const std::string&) override { return true; }
+            bool isTrophyUnlocked(const std::string&, int) override { return false; }
+            bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string&,
+                                   const std::set<std::string>* inUse = nullptr) override {
+                for (const auto& t : titles) {
+                    removed.push_back(t.first);
+                    if (inUse && inUse->count(t.first)) kept.push_back(t.first);
+                }
+                removedCount = static_cast<int>(titles.size());
+                return true;
+            }
+            std::string name() const override { return "UserBackend"; }
+        };
+        auto backend = std::make_unique<UserBackend>();
+        auto* raw = backend.get();
+        auto& eng = trophy::syncEngine();
+        eng.setBackend(std::move(backend));
+        const std::string shared = eng.trophySharedDir();
+        // Records from before users had their own: they go to the first user, once.
+        platform::writeFileAtomic(shared + "/OLDTITLE.json", R"({"npCommId":"NPWR80001_00","sonyTitleId":"PPSA80001"})");
+        platform::writeFileAtomic(shared + "/id_map.json", R"({"seed":80001})");
+        ::unlink((shared + "/users/.moved").c_str());
+        eng.setUser(0x11111111);
+        const std::string dirA = eng.trophyCacheDir();
+        std::string text;
+        CHECK(dirA != shared && platform::readFile(dirA + "/OLDTITLE.json", text));
+        CHECK(!platform::readFile(shared + "/OLDTITLE.json", text));
+        CHECK(platform::readFile(shared + "/id_map.json", text));  // the slot map stays the console's
+        // A second user: an empty folder of their own, then a title both have and one of their own.
+        eng.setUser(0x22222222);
+        const std::string dirB = eng.trophyCacheDir();
+        CHECK(dirB != dirA && !platform::readFile(dirB + "/OLDTITLE.json", text));
+        platform::writeFileAtomic(dirB + "/OLDTITLE.json", R"({"npCommId":"NPWR80001_00","sonyTitleId":"PPSA80001"})");
+        platform::writeFileAtomic(dirB + "/ONLYB.json", R"({"npCommId":"NPWR80002_00","sonyTitleId":"PPSA80002"})");
+        int removedCount = 0;
+        std::string err;
+        CHECK(eng.removeAllTrophies(removedCount, err));
+        CHECK(raw->user == 0x22222222);
+        CHECK(std::count(raw->removed.begin(), raw->removed.end(), "NPWR80001_00") == 1);
+        CHECK(std::count(raw->removed.begin(), raw->removed.end(), "NPWR80002_00") == 1);
+        // User A still has the first: its shared part stays. Nobody else has the second.
+        CHECK(std::count(raw->kept.begin(), raw->kept.end(), "NPWR80001_00") == 1);
+        CHECK(std::count(raw->kept.begin(), raw->kept.end(), "NPWR80002_00") == 0);
+        CHECK(!platform::readFile(dirB + "/OLDTITLE.json", text) && !platform::readFile(dirB + "/ONLYB.json", text));
+        CHECK(platform::readFile(dirA + "/OLDTITLE.json", text));  // the other user's record untouched
+        CHECK(platform::readFile(shared + "/id_map.json", text));
+        ::unlink((dirA + "/OLDTITLE.json").c_str());
+        ::unlink((shared + "/id_map.json").c_str());
+        eng.setUser(0);
+    }
+
     // Sub-test 8: requestRemoveTrophies() Preemption & Execution during Active Sync
     {
         cleanCache();
@@ -10336,7 +10589,7 @@ static void testTrophyNetworkAndLifecycleResilienceStress() {
             bool unlockTrophy(const std::string&, int, trophy::TrophyGrade, const std::string&) override { return true; }
             bool isTrophyUnlocked(const std::string&, int) override { return false; }
             bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles,
-                                   int& removedCount, std::string& err) override {
+                                   int& removedCount, std::string& err, const std::set<std::string>* = nullptr) override {
                 removeCalls++;
                 removedCount = static_cast<int>(titles.size());
                 return true;
@@ -11097,6 +11350,8 @@ int main() {
     testLoginRetry();
     testTokenRefresh();
     testGyro();
+    testGyroCalibration();
+    testAccountSeal();
     testGyroProZeroDriftAndDecoupledSensitivity();
     testGyroClosedLoopPostureTrackingAndZeroDrift();
     testReport();

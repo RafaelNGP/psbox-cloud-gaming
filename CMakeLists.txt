@@ -37,6 +37,7 @@ add_library(xcloud_core STATIC
     src/auth/msa.cpp
     src/auth/xbox_live.cpp
     src/auth/auth_manager.cpp
+    src/auth/account_seal.cpp
     src/xcloud/gssv.cpp
     src/xcloud/catalog.cpp
     src/xcloud/titlehub.cpp
@@ -135,6 +136,7 @@ add_library(xcloud_ui STATIC
     src/app/crash_guard.cpp
     src/app/updater.cpp
     src/app/auto_deband.cpp
+    src/app/gyro_calibration.cpp
     src/app/web_server.cpp
     src/app/web_server_html.cpp
     src/app/generative_ui_html.cpp

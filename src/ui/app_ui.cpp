@@ -160,6 +160,13 @@ void AppUi::setSubscription(const std::string& plan) {
     dirty_ = true;
 }
 
+void AppUi::setFreeTierSession(int seconds) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (freeTierSessionSeconds_ == seconds) return;
+    freeTierSessionSeconds_ = seconds;
+    dirty_ = true;
+}
+
 void AppUi::setMembership(bool member) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!subscription_.empty() && subscription_ != "GamePass") return;  // the plan is known
@@ -264,6 +271,10 @@ void AppUi::setCatalogState(std::vector<GameRow> rows, std::vector<GameTile> own
     rebuild(true);
 }
 
+bool AppUi::storeUnavailableLocked(const GameTile& t) const {
+    return pricesNone_.count(t.productId) && !t.playable && !isAcquired(t);
+}
+
 void AppUi::rebuild(bool keepPosition) {
     // Caller holds mutex_.
     libLayoutValid_ = false;
@@ -280,7 +291,7 @@ void AppUi::rebuild(bool keepPosition) {
         std::vector<GameTile> out;
         out.reserve(in.size());
         for (const auto& t : in)
-            if (!hidden_.count(t.productId)) out.push_back(t);
+            if (!hidden_.count(t.productId) && !storeUnavailableLocked(t)) out.push_back(t);
         return out;
     };
     auto sortByName = [](std::vector<GameTile>& v) {
@@ -353,7 +364,7 @@ void AppUi::rebuild(bool keepPosition) {
     // (a few rows away, not past ~2000 games to buy). Once each, A-Z.
     std::set<std::string> seen;
     auto collect = [&](std::vector<GameTile>& into, const GameTile& t) {
-        if (hidden_.count(t.productId) && seen.insert(t.productId).second) into.push_back(t);
+        if (!storeUnavailableLocked(t) && hidden_.count(t.productId) && seen.insert(t.productId).second) into.push_back(t);
     };
     hiddenTiles_.clear();
     for (const auto* list : {&allOwned_, &allPurchasable_})
@@ -575,12 +586,35 @@ void AppUi::setRegionLatency(std::map<std::string, int> ms) {
 
 void AppUi::setPrices(const std::map<std::string, PriceInfo>& prices) {
     std::lock_guard<std::mutex> lock(mutex_);
-    for (const auto& [id, p] : prices) prices_[id] = p;
+    bool restored = false;
+    for (const auto& [id, p] : prices) {
+        prices_[id] = p;
+        restored |= pricesNone_.erase(id) > 0;
+    }
+    if (restored) rebuild(true);
     // A list ordered or filtered by price fills in as prices arrive (not
     // while the user moves through it).
     if (searching_ && tab_ == Tab::Library && (filterCheapest_ || filterFree_ || filterWishlist_))
         runSearch(true);
     dirty_ = true;
+}
+
+void AppUi::resetStorePrices() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    prices_.clear();
+    pricesAsked_.clear();
+    pricesNone_.clear();
+    unclaimable_.clear();
+    rebuild(true);
+}
+
+void AppUi::pricesNone(const std::vector<std::string>& productIds) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    for (const auto& id : productIds) {
+        pricesNone_.insert(id);
+        prices_.erase(id);
+    }
+    if (!productIds.empty()) rebuild(true);
 }
 
 void AppUi::pricesFailed(const std::vector<std::string>& productIds) {

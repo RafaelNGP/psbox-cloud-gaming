@@ -360,9 +360,15 @@ bool GssvClient::listTitles(std::vector<Title>& out, std::string& err, bool rece
                 if (input.str() == "MKB") title.mouseKeyboard = true;
             }
             // What lets this account play it: a subscription's program
-            // (CALLISTO for Game Pass in the cloud) or F2P; none when bought.
-            for (const auto& program : t["details"]["userPrograms"].items())
-                if (program.str() != "F2P") title.viaSubscription = true;
+            // (CALLISTO for Game Pass in the cloud), F2P, or FERDINAND, the
+            // free tier with ads (an account with no subscription has it:
+            // counting it as one showed the whole Game Pass catalog as
+            // playable to a free account); none when bought.
+            for (const auto& program : t["details"]["userPrograms"].items()) {
+                if (program.str() == "FERDINAND") title.freeTier = true;
+                else if (program.str() != "F2P") title.viaSubscription = true;
+            }
+            title.maxSessionSeconds = static_cast<int>(t["details"]["maxSessionLengthInSeconds"].asInt(0));
             if (!title.titleId.empty() && !isNonGameAddon(title.titleId)) out.push_back(std::move(title));
         }
         // The next page; a token that repeats, an empty page or too many

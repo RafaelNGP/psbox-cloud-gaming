@@ -58,6 +58,12 @@ void AppUi::drawCloudTime(Canvas& c, int x, int y) {
     constexpr int kPx = 15, kLineH = 20;
     const int ty = fonts_.semibold.centeredY(y, kLineH, kPx);
     const float iconY = y + kLineH / 2.0f;
+    // A free account plays in sessions of a fixed length: "unlimited" would be wrong for it.
+    if (freeTierSessionSeconds_ > 0 && isFreeAccountLocked()) {
+        drawClockIcon(c, x + 7.0f, iconY, 7.0f, kGray);
+        fonts_.semibold.draw(c, trf(Str::CloudTimeFreeTier, std::to_string(freeTierSessionSeconds_ / 60)), x + 20, ty, kPx, kGray);
+        return;
+    }
     if (playtimeUnlimited_) {
         drawClockIcon(c, x + 7.0f, iconY, 7.0f, kGray);
         fonts_.semibold.draw(c, tr(Str::CloudTimeUnlimited), x + 20, ty, kPx, kGray);
@@ -127,13 +133,17 @@ void AppUi::drawTopBar(Canvas& c) {
             fonts_.semibold.draw(c, gp, left - gw, fonts_.semibold.centeredY(kLineY, kLineH, 14), 14, kGray);
             right = left - gw - 16;
         } else if (isFree) {
+            // "XBOX GAME PASS" and FREE in its box, as a plan's name is shown.
             const char* freeLabel = "FREE";
             int fw = fonts_.bold.measure(freeLabel, 11);
             Rect box{right - fw - 12, static_cast<int>(midY) - 8, fw + 12, 16};
             c.fillRect(box, rgba(255, 255, 255, 20), 4);
             c.strokeRect(box, rgba(160, 160, 175, 180), 1, 4);
             fonts_.bold.draw(c, freeLabel, box.x + 6, fonts_.bold.centeredY(box.y, box.h, 11), 11, rgba(220, 225, 235, 255));
-            right = box.x - 12;
+            const char* gp = "XBOX GAME PASS";
+            int gw = fonts_.semibold.measure(gp, 14);
+            fonts_.semibold.draw(c, gp, box.x - 6 - gw, fonts_.semibold.centeredY(kLineY, kLineH, 14), 14, kGray);
+            right = box.x - 6 - gw - 16;
         }
         if (!gamerscore_.empty()) {
             std::string n;
@@ -346,6 +356,10 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
     // QR code for the sign-in page. Not "?otc=<code>": that prefilled link
     // goes through a consent flow that rejects this client id ("first party
     // application ... pre-authorization"), so the code is typed on the phone.
+    // The plain link, the code typed by hand. With the code in it (microsoft.com/link?otc=CODE,
+    // tried 2026-11-12) Microsoft answers "the application is a first party application... users
+    // are not permitted to consent": the pre-filled path asks for a consent this app's client
+    // id (a Microsoft one) cannot be given. It works for apps with a client id of their own.
     std::string target = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
     uint8_t qr[qrcodegen_BUFFER_LEN_MAX], tmp[qrcodegen_BUFFER_LEN_MAX];
     if (qrcodegen_encodeText(target.c_str(), tmp, qr, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN,
@@ -470,9 +484,10 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
         c.fillRect({x, y, kCard, kCard}, rgba(0, 0, 0, 70), 10);
         auto price = prices_.find(t.productId);
         bool free = isFreeGame(t);
-        std::string label = free                     ? tr(Str::Free)
-                            : price != prices_.end() ? price->second.now
-                                                     : tr(Str::BuyBadge);
+        std::string label = free                               ? tr(Str::Free)
+                            : price != prices_.end()           ? price->second.now
+                            : pricesNone_.count(t.productId)   ? tr(Str::NotSoldAloneBadge)
+                                                               : tr(Str::BuyBadge);
         int tw = fonts_.bold.measure(label, 11);
         int w = std::min(maxLeftW, 20 + tw + 8);
         if (w < 20 + tw + 8) {
@@ -1225,7 +1240,14 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
                 fonts_.regular.draw(c, line, kMargin, ty, 24, kGray);
                 ty += 34;
             }
-            Rect box = drawQr(c, "https://www.xbox.com/games/store/p/" + g->productId, kW - kMargin, 190, 440);
+            std::string storeLocale;
+            if (settings_.storeCountry == "br") storeLocale = "pt-BR/";
+            else if (settings_.storeCountry == "jp") storeLocale = "ja-JP/";
+            else if (settings_.storeCountry == "kr") storeLocale = "ko-KR/";
+            else if (settings_.storeCountry == "pl") storeLocale = "pl-PL/";
+            else if (settings_.storeCountry == "us") storeLocale = "en-US/";
+            Rect box = drawQr(c, "https://www.xbox.com/" + storeLocale + "games/store/p/" + g->productId,
+                              kW - kMargin, 190, 440);
             if (box.w > 0) {
                 const char* scan = tr(Str::ScanToBuy);
                 int w = fonts_.semibold.measure(scan, 26);

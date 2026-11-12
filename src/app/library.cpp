@@ -348,14 +348,6 @@ ui::GameTile Library::tile(const std::string& productId, const std::string& titl
     uint8_t myPlan = xcloud::planTier(subscription_);
     if (ownershipKnown_) {
         t.playable = ownedTitles_.count(t.titleId) || ownedProducts_.count(t.productId);
-        if (!t.playable && (t.titleId == "CALLOFDUTYHQ" || t.titleId.find("CALLOFDUTY") != std::string::npos)) {
-            for (const auto& ot : ownedTitles_) {
-                if (ot.find("CALLOFDUTY") != std::string::npos) {
-                    t.playable = true;
-                    break;
-                }
-            }
-        }
         if (!t.playable && (gamePassMember_ || myPlan >= xcloud::kPlanEssential) && gamePass_.count(productId)) {
             if (myPlan == 0 || xcloud::planIncludes(myPlan, t.plan, t.freeInStore)) {
                 t.playable = true;
@@ -657,8 +649,11 @@ bool Library::loadCache(bool withLayout) {
         std::string fallback;
         if (!cachePath_.empty()) {
             auto pos = cachePath_.rfind('/');
-            if (pos != std::string::npos) {
+            // A console user's own cache (library_cache_<id>.json) never falls back to the shared file.
+            if (pos != std::string::npos && cachePath_.find("library_cache_") == std::string::npos) {
                 fallback = cachePath_.substr(0, pos + 1) + "library.json";
+            } else if (pos != std::string::npos) {
+                return false;
             }
         }
         if (fallback.empty() || !platform::readFile(fallback, text)) {
@@ -700,7 +695,10 @@ bool Library::loadCache(bool withLayout) {
     for (const auto& id : (*j)["freeInStore"].items()) freeInStore_.insert(id.str());
     for (const auto& id : (*j)["mouseKeyboard"].items()) mouseKeyboard_.insert(id.str());
     for (const auto& t : (*j)["ownedTitles"].items()) ownedTitles_.insert(t.str());
-    gamePassMember_ = (*j)["gamePassMember"].asBool();
+    // Written since the free tier with ads stopped counting as a subscription (the
+    // "freeTierSession" field came with that): an older cache's membership is not trusted.
+    gamePassMember_ = j->has("freeTierSession") && (*j)["gamePassMember"].asBool();
+    freeTierSessionSeconds_ = static_cast<int>((*j)["freeTierSession"].asInt(0));
     if (subscription_.empty()) subscription_ = (*j)["subscription"].str();
     for (const auto& p : (*j)["ownedProducts"].items()) ownedProducts_.insert(p.str());
     for (const auto& p : (*j)["acquiredProducts"].items()) acquiredProducts_.insert(p.str());
@@ -886,6 +884,7 @@ void Library::saveCache() const {
     for (const auto& r : recent_) recentArr.push(r);
     root.set("recent", recentArr);
     root.set("gamePassMember", gamePassMember_);
+    root.set("freeTierSession", freeTierSessionSeconds_);
     if (!subscription_.empty()) root.set("subscription", subscription_);
     root.set("ownedProducts", prods);
     root.set("owned", itemsToJson(owned_));

@@ -104,7 +104,7 @@ void AppUi::runSearch(bool keepPosition) {
     };
     std::vector<Hit> hits;
     for (const auto& t : tab_ == Tab::GamePass ? gamePassPool_ : libraryPool_) {
-        if (hidden_.count(t.productId)) continue;
+        if (hidden_.count(t.productId) || storeUnavailableLocked(t)) continue;
         if (tab_ == Tab::GamePass && filterPlan_ != 4) {
             if (filterPlan_ == 0) {
                 uint8_t myPlan = xcloud::planTier(subscription_);

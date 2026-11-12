@@ -222,6 +222,16 @@ int32_t padUserId(int index) {
     if (sceUserServiceGetInitialUser(&uid) == 0 && uid >= 0) {
         return uid;
     }
+    // Asked before the pads were opened (the settings, the sign-in and the trophies are
+    // each console user's own, and are loaded first): the user service is started here
+    // then. Without this the answer was "nobody", the files of before they were per user
+    // were loaded, and their content was later saved into this user's.
+    SceUserServiceInitializeParams param{0x2FF};  // FIFO lowest, as init() starts it
+    sceUserServiceInitialize(&param);
+    uid = -1;
+    if (sceUserServiceGetInitialUser(&uid) == 0 && uid >= 0) {
+        return uid;
+    }
     return -1;
 }
 

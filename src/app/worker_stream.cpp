@@ -110,7 +110,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         GameProfile prof = g_settings.profileForGame(g_stageProduct, g_stageTitle, &hasCustom);
         bool preferHw = true;
         if (g_autoplay.gyroLevel > 0) g_settings.gyroLevel = std::clamp(g_autoplay.gyroLevel, 1, 10);  // the settings are guarded under autoplay
-        if (g_autoplay.gyroCurve == "fortnite") g_settings.gyroCurveStart = 13, g_settings.gyroCurveExp = 29;
+        if (g_autoplay.gyroCurve == "fortnite") g_settings.gyroCurveStart = 15, g_settings.gyroCurveExp = 24;
         if (g_autoplay.swDecode) {
             preferHw = false;
             // The in-game menu shows the decoder forced here (not the saved
@@ -384,8 +384,11 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 // sweep.req: the right stick swept level by level with L2 down
                 // (sweepStick), the picture's motion recorded meanwhile.
                 const std::string sweepReq = platform::dataDir() + "/sweep.req";
-                if (g_autoplay.bench && platform::readFile(sweepReq, unused)) {
+                std::string sweepOpts;
+                if (g_autoplay.bench && platform::readFile(sweepReq, sweepOpts)) {
                     std::remove(sweepReq.c_str());
+                    g_sweepL2 = sweepOpts.find("nol2") == std::string::npos;
+                    player.setMotionRawDump(sweepOpts.find("raw") != std::string::npos);
                     player.setMotionStick(sweepStick);
                     player.startMotionRecording(64);
                     input::startGyroRecording(64);
@@ -398,6 +401,11 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                     const bool ok = platform::writeFileAtomic(platform::dataDir() + "/motion.rec", data);
                     XC_LOGI("BENCH motion recording: %zu frames of %zu bytes %s", motionRec.size(),
                             sizeof(app::StreamPlayer::MotionSample), ok ? "saved" : "not saved");
+                }
+                std::string motionRaw;
+                if (g_autoplay.bench && player.motionRawTake(motionRaw)) {
+                    const bool ok = platform::writeFileAtomic(platform::dataDir() + "/motion_raw.rec", motionRaw);
+                    XC_LOGI("BENCH motion raw dump: %zu bytes %s", motionRaw.size(), ok ? "saved" : "not saved");
                 }
                 std::vector<input::GyroSample> gyroRec;
                 if (g_autoplay.bench && input::gyroRecordingTake(gyroRec)) {
@@ -776,7 +784,12 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
         // art for the loading screen while the session queues.
         std::map<std::string, xcloud::Product> full;
         std::string e;
-        if (xcloud::fetchProducts({game.productId}, gssv.session().market.empty() ? "US" : gssv.session().market,
+        std::string storeMarket;
+        {
+            std::lock_guard<std::mutex> lock(g_settingsMutex);
+            storeMarket = g_settings.storeMarket(gssv.session().market);
+        }
+        if (xcloud::fetchProducts({game.productId}, storeMarket,
                                   ui::catalogLanguage(), full, e, true) &&
             full.count(game.productId)) {
             ui::GameTile withArt = game;
@@ -877,5 +890,8 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
     gssv.stopSession();
     return result;
 }
+
+// The name of the game being played (the stream screen's dialogs show it).
+std::string stageGameName() { return g_stageGameName; }
 
 }  // namespace xc::app

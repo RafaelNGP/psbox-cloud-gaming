@@ -16,8 +16,8 @@
 
 namespace xc::app {
 
-size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std::string& err, const std::string& language) {
-    market_ = gssv.session().market.empty() ? "US" : gssv.session().market;
+size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std::string& err, const std::string& language, const std::string& storeMarket) {
+    market_ = storeMarket.empty() ? (gssv.session().market.empty() ? "US" : gssv.session().market) : storeMarket;
     if (!language.empty()) language_ = language;
     std::vector<xcloud::Title> titles;
     std::string listErr;
@@ -270,8 +270,8 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
 }
 
 bool Library::load(xcloud::GssvClient& gssv, const std::string& language, const Changed& changed, std::string& err,
-                   bool forceRefresh) {
-    market_ = gssv.session().market.empty() ? "US" : gssv.session().market;
+                   bool forceRefresh, const std::string& storeMarket) {
+    market_ = storeMarket.empty() ? (gssv.session().market.empty() ? "US" : gssv.session().market) : storeMarket;
     language_ = language;
     layout_.clear();
     products_.clear();
@@ -488,6 +488,7 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
     std::set<std::string> seenMine;
     std::map<std::string, std::string> toBuy;  // productId -> titleId
     bool member = false;
+    int freeTierSession = 0;  // the shortest session among the titles played through the free tier
     auto registerCloudTitle = [&](const std::string& pid, const std::string& tid, const std::string& xboxId, bool freeStore, bool mkb) {
         if (pid.empty()) return;
         if (!tid.empty() && tid != "None") {
@@ -510,6 +511,8 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
         }
         bool entitled = t.hasEntitlement || isAcquired;
         member |= entitled && t.viaSubscription;
+        if (entitled && t.freeTier && t.maxSessionSeconds > 0 && (freeTierSession == 0 || t.maxSessionSeconds < freeTierSession))
+            freeTierSession = t.maxSessionSeconds;
         if (xcloud::isNonGameAddon(t.titleId)) continue;
         if (entitled) ownedTitles.insert(t.titleId);
 
@@ -645,6 +648,7 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
     }
     ownershipKnown_ = true;
     gamePassMember_ = member;
+    freeTierSessionSeconds_ = member ? 0 : freeTierSession;
     sortOwned();
     saveCache();
     XC_LOGI("library: account can stream %zu titles; %zu outside Game Pass; %zu more to buy", ownedTitles_.size(),

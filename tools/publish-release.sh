@@ -9,7 +9,7 @@
 #   2. Verifies notes.md is bilingual and up to date.
 #   3. Tags the commit and pushes to origin.
 #   4. Creates GitHub release with PS5 (PPSA99810.zip*) and PS4 (PSBoxCloudGaming[PS4]-vX.Y.Z.pkg*).
-#   5. Monitors GitHub Actions until the Linux AppImage is built on Ubuntu 24.04 and attached.
+#   5. Monitors GitHub Actions until the Linux AppImage is built on Ubuntu 22.04 and attached.
 #   6. Automatically signs the Linux AppImage using tools/desktop/sign-linux-release.sh.
 #   7. Executes tools/release-verify.sh --verify-sigs to enforce 100% compliance.
 #

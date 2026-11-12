@@ -33,6 +33,16 @@ void markProductUnclaimable(const std::string& productId) {
     if (!path.empty()) saveUnclaimableProducts(path);
 }
 
+void resetUnclaimableProducts() {
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(s_unclaimableMutex);
+        s_unclaimable = {"9PMFDKG5F9R7", "9N872NBW5XG5"};
+        path = s_unclaimablePath;
+    }
+    if (!path.empty()) saveUnclaimableProducts(path);
+}
+
 bool isProductUnclaimable(const std::string& productId) {
     if (productId.empty()) return false;
     std::lock_guard<std::mutex> lock(s_unclaimableMutex);
@@ -103,6 +113,8 @@ bool fetchPurchaseOffer(const std::string& productId, const std::string& market,
 
     for (const auto& dsa : p["DisplaySkuAvailabilities"].items()) {
         std::string skuId = dsa["Sku"]["SkuId"].str();
+        // A trial is not the game: its licence does not let the cloud play it.
+        if (dsa["Sku"]["SkuType"].str() == "trial" || dsa["Sku"]["Properties"]["IsTrial"].asBool()) continue;
         for (const auto& av : dsa["Availabilities"].items()) {
             bool purchase = false;
             for (const auto& a : av["Actions"].items()) {

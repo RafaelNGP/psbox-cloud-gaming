@@ -310,6 +310,12 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
         existingLib = s_library;
     }
 
+    std::string storeMarket;
+    {
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        storeMarket = g_settings.storeMarket(gssv.session().market);
+    }
+    if (existingLib && existingLib->market() != storeMarket) forceRefresh = true;
     if (!forceRefresh && existingLib && (existingLib->ownedKnown() || !existingLib->rows().empty())) {
         stopHydration();
         existingLib->setSubscription(g_subscription);
@@ -317,7 +323,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
             std::lock_guard<std::mutex> lock(g_settingsMutex);
             existingLib->setPlaytime(g_settings.titlePlaytime);
         }
-        setPriceMarket(gssv.session().market.empty() ? "US" : gssv.session().market, ui::catalogLanguage());
+        setPriceMarket(storeMarket, ui::catalogLanguage());
         setQueueClient(&gssv);
         XC_LOGI("library: delta-sync against active library (forceRefresh=%d)", forceRefresh);
         if (g_ui->screen() == ui::Screen::Splash || g_ui->screen() == ui::Screen::SignIn) {
@@ -329,8 +335,9 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
             g_ui->setCatalogState(lib.rows(), lib.owned(), lib.purchasable(), lib.ownedKnown(),
                                   lib.gamePassMember(), lib.gamePassSearchPool(), lib.librarySearchPool(),
                                   p.active, p.done, p.total);
+            g_ui->setFreeTierSession(lib.freeTierSessionSeconds());
         };
-        size_t newCount = existingLib->syncDelta(gssv, [&] { publish(*existingLib); }, err, ui::catalogLanguage());
+        size_t newCount = existingLib->syncDelta(gssv, [&] { publish(*existingLib); }, err, ui::catalogLanguage(), storeMarket);
         g_ui->setLoading(false, 0, 0);
         publish(*existingLib);
 
@@ -406,7 +413,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
         }
         s_library = library;
     }
-    library->setCachePath(platform::dataDir() + "/library_cache.json");
+    library->setCachePath(libraryCachePath());
     library->setSubscription(g_subscription);
     {
         std::lock_guard<std::mutex> lock(g_settingsMutex);
@@ -414,7 +421,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
         library->setWishlist(g_settings.wishlist);
         library->setPlaytime(g_settings.titlePlaytime);
     }
-    setPriceMarket(gssv.session().market.empty() ? "US" : gssv.session().market, ui::catalogLanguage());
+    setPriceMarket(storeMarket, ui::catalogLanguage());
     setQueueClient(&gssv);
     bool shown = !onSplash;
     // Hands the library's current state to the UI (coalesced into a single rebuild).
@@ -423,6 +430,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
         g_ui->setCatalogState(lib.rows(), lib.owned(), lib.purchasable(), lib.ownedKnown(),
                               lib.gamePassMember(), lib.gamePassSearchPool(), lib.librarySearchPool(),
                               p.active, p.done, p.total);
+        g_ui->setFreeTierSession(lib.freeTierSessionSeconds());
     };
     bool ok = library->load(gssv, ui::catalogLanguage(),
                             [&] {
@@ -435,7 +443,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
                                 }
                             },
                             err,
-                            forceRefresh);
+                            forceRefresh, storeMarket);
     if (!ok) {
         ui::GameTile dummy;
         if (g_ui->screen() == ui::Screen::Home || g_ui->firstTile(dummy)) {
@@ -604,7 +612,7 @@ void worker() {
         XC_LOGI("AUTOPLAY END: tls check (date %s)", net::todayText().c_str());
         return;
     }
-    auth::AuthManager am(platform::dataDir() + "/account.json");
+    auth::AuthManager am(accountPath());  // this console user's own sign-in
     xcloud::GssvClient gssv, home("xhome");
     for (;;) {
         int cmd = g_command.exchange(kNone);
@@ -643,7 +651,7 @@ void worker() {
                 setQueueClient(nullptr);
                 am.signOut();
                 ::unlink((platform::dataDir() + "/library.json").c_str());
-                ::unlink((platform::dataDir() + "/library_cache.json").c_str());
+                ::unlink(libraryCachePath().c_str());
                 {
                     std::lock_guard<std::mutex> lock(s_libraryMutex);
                     s_library.reset();
@@ -667,6 +675,7 @@ void worker() {
                 if (!g_quit && am.signedIn()) loadConsoles(am, home);
                 break;
             case kPlay: {
+                g_playPending = false;  // taken: a cancel from here on stops the launch itself
                 stopHydration();
                 ui::GameTile tile;
                 {
@@ -783,6 +792,16 @@ void worker() {
                         } else {
                             g_ui->showPlayError(ui::tr(ui::Str::F2pPreviewAccountNeededDesc), tile, "https://www.xbox.com/play");
                         }
+                    } else if (static std::string claimedFor; tile.freeInStore && !tile.productId.empty() && claimedFor != tile.productId) {
+                        // Free in the store and not on the account yet: got here and now (once per
+                        // game; a second refusal is shown as it is).
+                        claimedFor = tile.productId;
+                        XC_LOGI("play: %s is free and not on the account yet; getting it", tile.titleId.c_str());
+                        {
+                            std::lock_guard<std::mutex> lock(g_argMutex);
+                            g_playTile = tile;
+                        }
+                        g_command = kClaimFree;
                     } else {
                         g_ui->showPlayError(ui::trf(tile.freeInStore ? ui::Str::NoEntitlementFree : ui::Str::NoEntitlement,
                                                     tile.name),
@@ -841,7 +860,11 @@ void worker() {
                     err.clear();
                 }
                 xcloud::PurchaseOffer offer;
-                std::string market = gssv.session().market.empty() ? "US" : gssv.session().market;
+                std::string market;
+                {
+                    std::lock_guard<std::mutex> lock(g_settingsMutex);
+                    market = g_settings.storeMarket(gssv.session().market);
+                }
                 std::string lang = ui::catalogLanguage();
                 if (!xcloud::fetchPurchaseOffer(tile.productId, market, lang, offer, err)) {
                     XC_LOGW("claim: fetch offer failed: %s", err.c_str());
@@ -894,13 +917,17 @@ void worker() {
                     }
                     platform::notify(ui::tr(ui::Str::ClaimSuccess));
 
-                    // Re-sync owned titles in background
-                    lib->loadOwned(gssv, [lib]() {
+                    // The game is on the account's list already (markAsOwned): the screen is told now.
+                    // The whole title list is not asked for again here: that took about 10 s with
+                    // the worker unable to start the game meanwhile; the next refresh brings the
+                    // service's own word.
+                    {
                         auto p = lib->progress();
                         g_ui->setCatalogState(lib->rows(), lib->owned(), lib->purchasable(), lib->ownedKnown(),
                                               lib->gamePassMember(), lib->gamePassSearchPool(), lib->librarySearchPool(),
                                               p.active, p.done, p.total);
-                    });
+                        g_ui->setFreeTierSession(lib->freeTierSessionSeconds());
+                    }
                     g_ui->setLoading(false, 0, 0);
                 }
                 tile.playable = true;

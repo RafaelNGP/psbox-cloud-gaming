@@ -31,6 +31,7 @@ Autoplay g_autoplay;
 std::atomic<bool> g_syntheticA{false};
 std::atomic<float> g_syntheticRightX{0.0f}, g_syntheticLeftY{0.0f};
 std::atomic<uint64_t> g_sweepStartUs{0};
+std::atomic<bool> g_sweepL2{true};
 
 bool sweepStick(uint64_t nowUs, float& x, float& y) {
     x = y = 0.0f;
@@ -85,6 +86,7 @@ std::optional<GameProfile> gameSettingsBefore;  // its profile before (none: it 
 std::optional<Settings> globalSettingsBefore;   // global settings before
 std::optional<input::KeyMap> keysBefore;        // "keystest": the keys before, put back at the end
 std::optional<input::PadMap> padMapBefore;      // "padmaptest": the controller buttons before, put back at the end
+const char* storeCountryShot = nullptr;
 const char* regionShot = nullptr;  // "regiontest": save this screen next
 bool acceptUpdate = false;  // "updatetest": Cross on the pop-up, next pass ("updateskip": Circle)
 std::optional<ui::SettingsChoice> confirmBefore;  // "confirmtest": the settings before, put back at the end
@@ -216,6 +218,7 @@ void loadAutoplay() {
         if (opt.rfind("locktitle=", 0) == 0) g_autoplay.lockTitle = opt.substr(10);
         if (opt == "gridtest") g_autoplay.gridTest = true;
         if (opt == "gamesettingstest") g_autoplay.gameSettingsTest = true;
+        if (opt == "gamegyrotest") g_autoplay.gameSettingsTest = g_autoplay.gameGyroTest = true;
         if (opt == "publishertest") g_autoplay.publisherTest = true;
         if (opt == "friendstest") g_autoplay.friendsTest = true;
         if (opt == "mw4test") g_autoplay.mw4Test = true;
@@ -223,6 +226,7 @@ void loadAutoplay() {
         if (opt == "claimtest") g_autoplay.claimTest = true;
         if (opt == "gyrosettingstest") g_autoplay.gyroSettingsTest = true;
         if (opt == "streammenutest") g_autoplay.streamMenuTest = true;
+        if (opt == "storecountrytest") g_autoplay.storeCountryTest = true;
         if (opt == "regiontest") g_autoplay.regionTest = true;
         if (opt == "tlscheck") g_autoplay.tlsCheck = true;
         if (opt == "donationtest") g_autoplay.donationTest = true;
@@ -422,6 +426,22 @@ void autoplayPad(input::ControllerState& pad) {
             gameSettingsShot = "game_settings.ppm";
             step = 4;
         }
+        // Gyro variant of step 4: the gyro row chosen, its dialog opened, a
+        // response picked, captured, closed.
+        if (step == 4 && g_autoplay.gameGyroTest) {
+            static bool chosen = false;
+            if (!chosen && t >= 5200) {
+                chosen = true;
+                XC_LOGI("autoplay: gyro row %s", g_ui->selectGameSettingsRow(12) ? "chosen" : "not on screen");
+            }
+            if (t >= 5800 && t < 6000) pad.btnA = true;                 // opens Gyro aiming
+            if (t >= 7800 && t < 7900) pad.dpadLeft = true;             // Linear -> Fortnite
+            static bool shot = false;
+            if (!shot && t >= 8600) shot = true, gameSettingsShot = "game_gyro_dialog.ppm";
+            if (t >= 9300 && t < 9500) pad.btnB = true;                 // closes the dialog
+            if (t >= 10200) step = 5, since += 1200;                    // the common steps run 1.2 s later
+            t = 0;  // none of the plain variant's presses below
+        }
         // Step 4: D-pad navigation and changes
         if (step == 4 && t >= 5200 && t < 5400) {
             pad.dpadDown = true;
@@ -593,6 +613,46 @@ void autoplayPad(input::ControllerState& pad) {
 }
 
 void autoplayNav(ui::NavInput& nav, bool& menuCombo, uint64_t now) {
+    if (g_autoplay.storeCountryTest && uiSaved) {
+        static uint64_t since = 0;
+        static int step = 0;
+        static SettingsWalk walk;
+        if (!since) since = now;
+        nav = ui::NavInput{};
+        if (step == 0) {
+            nav.options = true;
+            step = 1;
+        } else if (step == 1 && now - since > 500) {
+            const int downs = ui::settingsRowPosition(g_ui->caps(), 27);
+            if (downs < 0) {
+                XC_LOGE("AUTOPLAY FAIL: store country row not visible");
+                g_autoplay.storeCountryTest = false;
+            } else if (walk.step(nav, downs)) {
+                step = 2;
+                since = now;
+            }
+        } else if (step == 2 && now - since > 500) {
+            if (!onSettingsRow(27, "store country")) {
+                g_autoplay.storeCountryTest = false;
+            } else {
+                storeCountryShot = "store_country_settings.ppm";
+                step = 3;
+                since = now;
+            }
+        } else if (step == 3 && now - since > 500) {
+            nav.accept = true;
+            step = 4;
+            since = now;
+        } else if (step == 4 && now - since > 500) {
+            storeCountryShot = "store_country_picker.ppm";
+            step = 5;
+            since = now;
+        } else if (step == 5 && now - since > 500) {
+            nav.back = true;  // cancel the picker; no choice is applied
+            g_autoplay.storeCountryTest = false;
+            XC_LOGI("AUTOPLAY END: store country test (unchanged)");
+        }
+    }
     if (g_autoplay.regionTest && uiSaved) {
         // The refused sign-in's screens, as the user goes through them; Circle
         // leaves each, so the sign-in country stays as it was.
@@ -1621,6 +1681,10 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
     if (gridShot) {
         saveCanvas(gridShot);
         gridShot = nullptr;
+    }
+    if (storeCountryShot) {
+        saveCanvas(storeCountryShot);
+        storeCountryShot = nullptr;
     }
     if (regionShot) {
         saveCanvas(regionShot);

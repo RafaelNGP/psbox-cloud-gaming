@@ -33,6 +33,23 @@ std::string SettingsManager::path() const {
     return path_;
 }
 
+void SettingsManager::adoptUser(const std::string& path, const Settings& s) {
+    std::unique_lock<std::shared_mutex> lock(mutex_);
+    path_ = path;
+    settings_ = s;
+    version_.fetch_add(1, std::memory_order_acq_rel);
+}
+
+void SettingsManager::noteSaved(const Settings& s, const std::string& path) {
+    SettingsManager& m = instance();
+    if (&s == &m.settings_) return;  // the manager's own save
+    // Not waited for: the manager's save takes its lock and then g_settingsMutex, which the caller may hold.
+    std::unique_lock<std::shared_mutex> lock(m.mutex_, std::try_to_lock);
+    if (!lock.owns_lock() || path != m.path_) return;
+    m.settings_ = s;
+    m.version_.fetch_add(1, std::memory_order_acq_rel);
+}
+
 void SettingsManager::setPath(const std::string& path) {
     std::unique_lock<std::shared_mutex> lock(mutex_);
     path_ = path;
@@ -143,6 +160,14 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
     {
         std::unique_lock<std::shared_mutex> lock(mutex_);
 
+        if (root.has("storeCountry") && root["storeCountry"].isString()) {
+            const auto raw = root["storeCountry"].str();
+            const auto country = normalizeStoreCountry(raw);
+            if ((raw.empty() || !country.empty()) && country != settings_.storeCountry) {
+                settings_.storeCountry = country;
+                changed = true;
+            }
+        }
         if (root.has("voiceRouting")) {
             int v = static_cast<int>(std::clamp<int64_t>(root["voiceRouting"].asInt(settings_.voiceRouting), 0, 1));
             if (v != settings_.voiceRouting) {
@@ -640,7 +665,7 @@ bool SettingsManager::updateGameProfileFromJson(const std::string& gameKey, cons
         }
         if (root.has("syncTrophies")) {
             bool v = root["syncTrophies"].asBool(prof.syncTrophies);
-            if (v != prof.syncTrophies) { prof.syncTrophies = v; changed = true; }
+            if (v != prof.syncTrophies || !prof.syncTrophiesChosen) { prof.syncTrophies = v; prof.syncTrophiesChosen = true; changed = true; }  // chosen for this game
         }
         if (root.has("soloInputRedirect") || root.has("solo_input_redirect")) {
             bool v = root.has("soloInputRedirect") ? root["soloInputRedirect"].asBool(prof.soloInputRedirect)

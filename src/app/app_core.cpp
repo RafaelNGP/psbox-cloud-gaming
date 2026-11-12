@@ -121,16 +121,19 @@ void applyControllerSettings() {
 // the language changed.
 bool saveSettings(const ui::SettingsChoice& choice) {
     bool languageChanged, fullscreenChanged;
+    bool storeChanged = false;
     bool queueAlertToggledOn = false;
     Settings snapshot;
     {
         std::lock_guard<std::mutex> lock(g_settingsMutex);
         std::string language = g_settings.language;
+        std::string storeCountry = g_settings.storeCountry;
         bool fullscreen = g_settings.desktopFullscreen;
         bool prevQueue = g_settings.queueReadyAlert;
         ui::applyChoice(choice, g_settings);
         queueAlertToggledOn = !prevQueue && g_settings.queueReadyAlert;
         languageChanged = g_settings.language != language;
+        storeChanged = g_settings.storeCountry != storeCountry;
         fullscreenChanged = g_settings.desktopFullscreen != fullscreen;
         g_settings.save(settingsPath());  // warns itself
         snapshot = g_settings;
@@ -145,7 +148,7 @@ bool saveSettings(const ui::SettingsChoice& choice) {
     }
     if (g_ui) g_ui->setGyroDefaults(choice.gyroMode, choice.gyroLevel);
     if (fullscreenChanged) shell::setFullscreen(choice.fullscreen);  // a desktop's window (main thread)
-    return languageChanged;
+    return languageChanged || storeChanged;
 }
 
 
@@ -293,6 +296,10 @@ bool coreStartup() {
     loadAutoplay();
     shell::beforeSettings();  // the PS5: an update cut short rolled back, a store update's files brought back
     guardSettingsForAutoplay(settingsPath());  // the tests never leave the user's settings changed
+    // The manager first: made now, it reads the old shared settings.json into g_settings;
+    // made later (by the first dialog or WebUI request) it would do that over the user's own.
+    SettingsManager& settingsManager = SettingsManager::instance();
+    g_settings = Settings{};  // nothing of the shared file left under the user's own
     struct stat settingsStat;
     if (!g_settings.load(settingsPath()) && ::stat(settingsPath().c_str(), &settingsStat) == 0) {
         // Unreadable (cut short?): kept aside, not overwritten by the defaults.
@@ -300,6 +307,7 @@ bool coreStartup() {
         std::rename(settingsPath().c_str(), bad.c_str());
         XC_LOGW("settings: %s could not be read; defaults used, the file kept as %s", settingsPath().c_str(), bad.c_str());
     }
+    settingsManager.adoptUser(settingsPath(), g_settings);  // this console user's file and settings from here on
     // The handheld profile (the Steam Deck), once: 720p, which its 1280x800
     // screen shows nearly 1:1 (1080p is 2.25 times the pixels to decode, only
     // to be shrunk), and FSR without Anime4K Restore (its passes run at the
@@ -348,6 +356,11 @@ bool coreStartup() {
     g_ui = std::make_unique<ui::AppUi>(fonts, *g_images);
     g_ui->showSplash(ui::tr(ui::Str::SigningIn));
     startPriceLoop();
+    // The trophies are the console user's who opened the app: their own records, their own home.
+    trophy::setTrophyUserProvider([]() -> uint32_t {
+        const int32_t consoleUser = input::padUserId(0);
+        return consoleUser > 0 ? static_cast<uint32_t>(consoleUser) : 0u;
+    });
     trophy::setTrophyContextProvider([](trophy::TrophySyncContext& ctx) -> bool {
         {
             std::lock_guard<std::mutex> lock(g_argMutex);
@@ -355,7 +368,7 @@ bool coreStartup() {
             ctx.xuid = g_xuid;
         }
         if (ctx.xblAuth.empty()) {
-            auth::AuthManager am(platform::dataDir() + "/account.json");
+            auth::AuthManager am(accountPath());
             if (am.signedIn()) {
                 ctx.xblAuth = am.profile().xblAuthorization;
                 ctx.xuid = am.profile().xuid;
@@ -385,7 +398,7 @@ bool coreStartup() {
         {
             std::lock_guard<std::mutex> lock(g_settingsMutex);
             for (const auto& [key, prof] : g_settings.perGame) {
-                if (!prof.syncTrophies) {
+                if (prof.syncTrophiesChosen && !prof.syncTrophies) {  // turned off for this game by the player
                     if (!key.empty()) disabledXboxIds.insert(key);
                     if (!prof.xboxTitleId.empty()) disabledXboxIds.insert(prof.xboxTitleId);
                     if (!prof.gameName.empty()) disabledNames.insert(trophy::normalizeTrophyName(prof.gameName));
@@ -459,6 +472,7 @@ bool coreStartup() {
             root.set("isPS5", platform::isPS5());
             root.set("settingsVersion", static_cast<int64_t>(g_settingsVersion.load()));
             root.set("language", g_settings.language);
+            root.set("storeCountry", g_settings.storeCountry);
             root.set("resolution", g_settings.resolution);
             root.set("maxBitrateMbps", g_settings.maxBitrateMbps);
             root.set("fpsLimit", g_settings.fpsLimit);
@@ -491,10 +505,19 @@ bool coreStartup() {
         },
         /*updateSettings=*/[](const json::Value& root) -> bool {
             bool changed = false;
+            bool storeChanged = false;
             int padSpeakerVol = -1;
             Settings snapshot;
             {
                 std::lock_guard<std::mutex> lock(g_settingsMutex);
+                if (root.has("storeCountry") && root["storeCountry"].isString()) {
+                    const auto raw = root["storeCountry"].str();
+                    const auto country = normalizeStoreCountry(raw);
+                    if ((raw.empty() || !country.empty()) && country != g_settings.storeCountry) {
+                        g_settings.storeCountry = country;
+                        storeChanged = changed = true;
+                    }
+                }
                 if (root.has("voiceRouting")) {
                     int val = static_cast<int>(std::clamp<int64_t>(root["voiceRouting"].asInt(g_settings.voiceRouting), 0, 1));
                     if (val != g_settings.voiceRouting) {
@@ -700,6 +723,7 @@ bool coreStartup() {
             }
             if (changed) {
                 SettingsManager::instance().syncFrom(snapshot);
+                if (storeChanged) g_command = kReloadLibrary;
                 applyControllerSettings();
                 if (padSpeakerVol >= 0) {
                     media::setPadSpeakerVolume(padSpeakerVol);
@@ -922,11 +946,8 @@ bool coreStartup() {
                        g_settings.favorites, g_settings.wishlist);
 
         // Offline Cache / Instant-Resume: immediately load cached library before network
-        std::string cacheFile = platform::dataDir() + "/library_cache.json";
-        struct stat st;
-        if (::stat(cacheFile.c_str(), &st) != 0) {
-            cacheFile = platform::dataDir() + "/library.json";
-        }
+        // This console user's own cache (the one from before per-user files went to the first to open the app).
+        std::string cacheFile = libraryCachePath();
         auto initialLib = std::make_shared<Library>();
         initialLib->setCachePath(cacheFile);
         initialLib->setPlaytime(g_settings.titlePlaytime);
@@ -937,6 +958,7 @@ bool coreStartup() {
             g_ui->setCatalogState(initialLib->rows(), initialLib->owned(), initialLib->purchasable(),
                                   initialLib->ownedKnown(), initialLib->gamePassMember(),
                                   initialLib->gamePassSearchPool(), initialLib->librarySearchPool());
+            g_ui->setFreeTierSession(initialLib->freeTierSessionSeconds());
             XC_LOGI("instant-resume: loaded offline cache (%zu rows, %zu owned) in 0.01s",
                     initialLib->rows().size(), initialLib->owned().size());
         }
@@ -979,9 +1001,16 @@ bool coreStartup() {
 void Core::dispatchUiAction(const ui::UiEvent& ev) {
     switch (ev.action) {
         case ui::Action::Play: {
-            std::lock_guard<std::mutex> lock(g_argMutex);
-            g_playTile = ev.game;
-            g_command = kPlay;
+            {
+                std::lock_guard<std::mutex> lock(g_argMutex);
+                g_playTile = ev.game;
+                g_playPending = true;
+                g_command = kPlay;
+            }
+            // The launch screen at once: the worker may take seconds to get to the command
+            // (a library refresh after a game was got), and a button that does nothing gets
+            // pressed again and again.
+            g_ui->showLaunching(ev.game, ui::tr(ui::Str::Connecting));
             break;
         }
         case ui::Action::ClaimFreeGame: {
@@ -1000,7 +1029,21 @@ void Core::dispatchUiAction(const ui::UiEvent& ev) {
             g_command.compare_exchange_strong(idle, kConsoles);  // not over a pending command
             break;
         }
-        case ui::Action::CancelLaunch: g_cancel = true; break;
+        case ui::Action::CancelLaunch: {
+            // Not started yet: the command withdrawn, back to the game's page.
+            int play = kPlay;
+            if (g_playPending.exchange(false) && g_command.compare_exchange_strong(play, kNone)) {
+                ui::GameTile tile;
+                {
+                    std::lock_guard<std::mutex> lock(g_argMutex);
+                    tile = g_playTile;
+                }
+                g_ui->showDetails(tile);
+                break;
+            }
+            g_cancel = true;
+            break;
+        }
         case ui::Action::PrefsChanged: {
             std::lock_guard<std::mutex> lock(g_settingsMutex);
             g_settings.hidden = ev.hidden;
@@ -1041,6 +1084,10 @@ void Core::dispatchUiAction(const ui::UiEvent& ev) {
             break;
         }
         case ui::Action::UpdateLater: skipOfferedUpdate(); break;
+        case ui::Action::StoreCountry:
+            saveSettings(ev.settings);
+            g_command = kReloadLibrary;
+            break;
         case ui::Action::LoginCountry:
             // A new sign-in, as the country chosen (or the console's own).
             saveSettings(ev.settings);
@@ -1191,7 +1238,7 @@ bool Core::frame() {
     // After an update: the new version, started in place of this one.
     if (g_restartWanted) shell::restartOrExit();
     // Gyro aiming moves the aim in a game, not the app's menu.
-    input::setGyroActive(g_ui->screen() == ui::Screen::Streaming && !streamScreen->menuOpen());
+    input::setGyroActive(g_ui->screen() == ui::Screen::Streaming && (!streamScreen->menuOpen() || streamScreen->gyroLiveTest()));
     input::poll(pad);
     autoplayPad(pad);
     input::ControllerState vpad0;

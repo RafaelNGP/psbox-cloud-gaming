@@ -120,7 +120,7 @@ constexpr Column kFrench = {
     "Gratuit",
     "Obtenez-le une fois, gratuitement, sur xbox.com ou dans l'app Xbox (scannez le code avec votre téléphone), puis appuyez sur Jouer.",
     "Scannez pour l'obtenir gratuitement",
-    "%s n'est pas encore sur votre compte. Il est gratuit : scannez le code sur sa page, choisissez Obtenir, puis réessayez (cela peut prendre une minute).",
+    "%s n'est pas encore sur votre compte. Il est gratuit : ouvrez sa page, choisissez Obtenir, puis réessayez (cela peut prendre une minute).",
     "Votre compte ne peut pas jouer à %s : il n'est pas dans votre abonnement ou n'a pas été acheté.",
     "Mes consoles",
     "Allumée",
@@ -433,6 +433,8 @@ constexpr Column kFrench = {
     "%s restantes", // CloudTimeLeft
     "sur %s", // CloudTimeOf
     "Temps cloud illimité", // CloudTimeUnlimited
+    "Sessions de %s min (gratuit avec pubs)", // CloudTimeFreeTier
+    "PAS VENDU SEUL", // NotSoldAloneBadge
     "Il vous reste %s de temps de jeu dans le cloud Xbox ce mois-ci", // CloudTimeWarn
     "Synchroniser les trophées",                      // SyncTrophies
     "Synchronise tous les succès Xbox de votre compte et attribue les trophées correspondants à votre profil PlayStation.", // SettingDescSyncTrophies
@@ -476,15 +478,15 @@ constexpr Column kFrench = {
     "La manette a bougé pendant la lecture.",         // GyroCalibratedFailedDesc
     "Gardez la manette immobile et réessayez.",       // GyroCalibratedRetry
     "Calibrer le gyroscope",                          // GyroCalibrateAction
-    "Sensibilité horizontale : %s%%",                 // GyroYawSens
-    "Sensibilité verticale : %s%%",                   // GyroPitchSens
+    "Sensibilité horizontale : %s%",                 // GyroYawSens
+    "Sensibilité verticale : %s%",                   // GyroPitchSens
     "Position du gyroscope",                          // GyroSensorPos
     "Entrée reçue par le jeu",                        // GyroGameOutput
     "Sensibilité globale",                            // GyroSensitivityIntensity
     "Sensibilité horizontale",                        // GyroYawSensitivity
     "Sensibilité verticale",                          // GyroPitchSensitivity
     "Calibrage du gyroscope",                         // GyroCalibration
-    "Calibrage... %s%%",                              // GyroCalibratingPct
+    "Calibrage... %s%",                              // GyroCalibratingPct
     "Calibré avec succès !",                          // GyroCalibratedSuccessShort
     "Échec : Gardez immobile",                        // GyroCalibratedFailedShort
     "Mode Démo (Automatique)",                        // GyroDemoMode
@@ -499,6 +501,39 @@ constexpr Column kFrench = {
     "Exponentielle",                                // GyroPresetExponential
     "Personnalisée",                                // GyroPresetCustom
     "Vos valeurs",                                  // GyroYourNumbers
+    "Calibrer la réponse du jeu", // GyroAutoCal
+    "Démarrer", // GyroAutoCalStart
+    "Calibrage de la réponse du jeu", // GyroAutoCalTitle
+    "L'app fait tourner la caméra toute seule pendant environ 40 secondes et lit comment ce jeu répond au stick. La visée gyroscopique suit ensuite votre main à toutes les vitesses.", // GyroAutoCalIntro
+    "1. Soyez comme quand vous utilisez le gyroscope : arme en main, dans un endroit sûr.", // GyroAutoCalStep1
+    "2. Regardez un décor détaillé (bâtiments, arbres). Évitez le ciel, les murs unis et l'obscurité.", // GyroAutoCalStep2
+    "3. Fermez les menus du jeu, choisissez Démarrer et lâchez la manette.", // GyroAutoCalStep3
+    "4. N'importe quel bouton annule. Rien ne change avant que vous acceptiez le résultat.", // GyroAutoCalStep4
+    "Ouvrez la visée gyroscopique depuis le menu du jeu, en jouant, pour calibrer.", // GyroAutoCalOnlyInGame
+    "Calibrage de la réponse du jeu... %s%  -  n'importe quel bouton annule", // GyroAutoCalRunning
+    "Résultat", // GyroAutoCalResult
+    "Mesuré", // GyroAutoCalMeasured
+    "Actuel", // GyroAutoCalCurrent
+    "Vitesse verticale du jeu, par rapport à l'horizontale", // GyroAutoCalVertical
+    "Appliquer", // GyroAutoCalApply
+    "Réessayer", // GyroAutoCalRetry
+    "La caméra n'a pas bougé. Fermez les menus du jeu et réessayez.", // GyroAutoCalFailNoMotion
+    "L'image n'a pas pu être lue. Regardez un décor détaillé et bien éclairé, puis réessayez.", // GyroAutoCalFailUnreadable
+    "Les mesures ne suivent pas une seule courbe. Restez immobile, loin des autres joueurs, et réessayez.", // GyroAutoCalFailNoFit
+    "Calibrage annulé.", // GyroAutoCalCancelled
+    "Comment ce jeu transforme le stick en rotation de caméra. Choisissez-en une, calibrez ce jeu ou réglez les valeurs. \"Personnalisée\" ne vaut que pour ce jeu.", // GyroHelpPreset
+    "Lit la dérive du capteur, manette posée immobile sur une table. À utiliser si la visée bouge toute seule manette au repos.", // GyroHelpCalibrate
+    "Mesure la réponse de ce jeu en faisant tourner la caméra toute seule pendant environ 40 secondes. Le meilleur point de départ.", // GyroHelpAutoCal
+    "Tourne la visée à l'opposé de la manette, à gauche et à droite.", // GyroHelpInvertX
+    "Monte la visée quand la manette s'incline vers le bas, et inversement.", // GyroHelpInvertY
+    "De combien la visée tourne pour une même rotation de la manette, à toutes les vitesses. Trop rapide ou trop lente en général : changez ici.", // GyroHelpIntensity
+    "Gauche et droite seulement, en plus de la sensibilité générale.", // GyroHelpYaw
+    "Haut et bas seulement. Beaucoup de jeux tournent moins vite à la verticale.", // GyroHelpPitch
+    "La part du stick que le jeu ignore avant de bouger la caméra. Visée qui tremble ou dérive au repos : baissez. Petites corrections sans effet : augmentez.", // GyroHelpCurveStart
+    "À quel point les rotations lentes sont renforcées par rapport aux rapides. Visée nerveuse sur les corrections fines : baissez. Rotations lentes lourdes et rapides qui s'emballent : augmentez.", // GyroHelpCurveExp
+    "Tester en jeu", // GyroLiveTest
+    "Plein écran", // GyroLiveTestOff
+    "Maintenez L2 et visez : le jeu suit le gyroscope pendant vos réglages. (expérimental)", // GyroLiveHint
     "Qualité vidéo",                                  // StatVideoQuality
     "Ouvre le menu Xbox Guide ou envoie la commande Xbox au jeu.", // MenuDescXboxButton
     "Configure et affiche les statistiques de performance, réseau et latence à l'écran.", // MenuDescStats
@@ -512,4 +547,7 @@ constexpr Column kFrench = {
     "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
     "Volant (Stick Gauche)",                           // GyroSteering
     "Volant (Accélérer R2)",                           // GyroSteeringDrive
+    "Pays de la boutique", // StoreCountry
+    "Automatique (pays de connexion)", // StoreCountryAuto
+    "Choisit le pays des prix et des offres gratuites de la boutique. Le serveur de streaming reste inchangé.", // SettingDescStoreCountry
 };

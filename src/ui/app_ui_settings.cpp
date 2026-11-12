@@ -145,7 +145,16 @@ void AppUi::openTester(Tester t) {
         };
     } else if (t == Tester::Gyro) {
         if (!gyroDialog_) gyroDialog_ = std::make_unique<GyroWheelDialog>();
-        gyroDialog_->open(0, gameSettingsOpen_ ? app::gameProfileKey(detail_.productId, detail_.titleId) : "");
+        if (gameSettingsOpen_) {
+            // The game's profile lives in this screen until it is saved: the dialog edits a copy.
+            const auto& p = activeGameProfile_;
+            gyroDialog_->setGameName(detail_.name);
+            gyroDialog_->openDetached(0, p.gyroLevel, p.gyroYawScale, p.gyroPitchScale, p.gyroBias, p.gyroCurveStart,
+                                      p.gyroCurveExp, p.gyroInvertX, p.gyroInvertY);
+        } else {
+            gyroDialog_->setGameName("");
+            gyroDialog_->open(0, "");
+        }
     } else if (t == Tester::NetworkTest) {
         networkTest_.running = true;
         networkTest_.natStatus = "Probing UDP STUN...";
@@ -394,23 +403,22 @@ void AppUi::handleTester(const NavInput& in) {
             gyroDialog_->handleInput(in);
             dirty_ = true;
             if (!gyroDialog_->isOpen()) {
-                settings_.gyroLevel = gyroDialog_->level();
-                settings_.gyroYawScale = gyroDialog_->yawScale();
-                settings_.gyroPitchScale = gyroDialog_->pitchScale();
                 const float* b = gyroDialog_->bias();
-                if (b) {
-                    settings_.gyroBias[0] = b[0];
-                    settings_.gyroBias[1] = b[1];
-                    settings_.gyroBias[2] = b[2];
-                }
                 if (gameSettingsOpen_) {
-                    activeGameProfile_.gyroLevel = settings_.gyroLevel;
-                    activeGameProfile_.gyroYawScale = settings_.gyroYawScale;
-                    activeGameProfile_.gyroPitchScale = settings_.gyroPitchScale;
-                    activeGameProfile_.gyroBias[0] = settings_.gyroBias[0];
-                    activeGameProfile_.gyroBias[1] = settings_.gyroBias[1];
-                    activeGameProfile_.gyroBias[2] = settings_.gyroBias[2];
+                    activeGameProfile_.gyroLevel = gyroDialog_->level();
+                    activeGameProfile_.gyroYawScale = gyroDialog_->yawScale();
+                    activeGameProfile_.gyroPitchScale = gyroDialog_->pitchScale();
+                    for (int i = 0; b && i < 3; ++i) activeGameProfile_.gyroBias[i] = b[i];
+                    activeGameProfile_.gyroCurveStart = gyroDialog_->curveStart();
+                    activeGameProfile_.gyroCurveExp = gyroDialog_->curveExp();
+                    activeGameProfile_.gyroInvertX = gyroDialog_->invertX();
+                    activeGameProfile_.gyroInvertY = gyroDialog_->invertY();
                     activeGameHasCustom_ = true;
+                } else {
+                    settings_.gyroLevel = gyroDialog_->level();
+                    settings_.gyroYawScale = gyroDialog_->yawScale();
+                    settings_.gyroPitchScale = gyroDialog_->pitchScale();
+                    for (int i = 0; b && i < 3; ++i) settings_.gyroBias[i] = b[i];
                 }
                 tester_ = Tester::None;
                 dirty_ = true;
@@ -553,6 +561,7 @@ void AppUi::openGameSettings() {
     if (it != perGameSettings_.end()) {
         activeGameHasCustom_ = true;
         activeGameProfile_ = it->second;
+        if (!activeGameProfile_.syncTrophiesChosen) activeGameProfile_.syncTrophies = settings_.syncTrophies;  // follows the general setting
     } else {
         activeGameHasCustom_ = false;
         activeGameProfile_.sharpness = settings_.sharpness;
@@ -582,7 +591,8 @@ void AppUi::openGameSettings() {
         activeGameProfile_.touchpadMouse = settings_.touchpadMouse;
         activeGameProfile_.touchpadShortcuts = settings_.touchpadShortcuts;
         activeGameProfile_.locale.clear();
-        activeGameProfile_.syncTrophies = false;
+        activeGameProfile_.syncTrophies = settings_.syncTrophies;  // as the general setting until changed here
+        activeGameProfile_.syncTrophiesChosen = false;
     }
     if (!detail_.xboxTitleId.empty()) activeGameProfile_.xboxTitleId = detail_.xboxTitleId;
     if (!detail_.name.empty()) activeGameProfile_.gameName = detail_.name;
@@ -675,8 +685,8 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
         out = {tr(Str::Deactivated), tr(Str::Activated)};
     } else if (row == 25) {
         out = {tr(Str::RemoveTrophiesConfirm)};
-    } else if (row == 8) {
-        out.push_back(loginCountryOffText());
+    } else if (row == 8 || row == 27) {
+        out.push_back(row == 27 ? tr(Str::StoreCountryAuto) : loginCountryOffText());
         for (const char* country : kLoginCountries) out.push_back(loginCountryName(country));
     } else {
         // Automatic first, then the regions in the login's order.
@@ -733,9 +743,10 @@ int AppUi::settingSelected(int row) const {
             if (kVolumes[i] == settings_.gameVolume) return static_cast<int>(i);
         return 3;  // 100 %
     }
-    if (row == 8) {
+    if (row == 8 || row == 27) {
+        const auto& country = row == 27 ? settings_.storeCountry : settings_.loginCountry;
         for (size_t i = 0; i < std::size(kLoginCountries); ++i)
-            if (settings_.loginCountry == kLoginCountries[i]) return static_cast<int>(i) + 1;
+            if (country == kLoginCountries[i]) return static_cast<int>(i) + 1;
         return 0;
     }
     for (size_t i = 0; i < regions_.size(); ++i)
@@ -830,6 +841,8 @@ void AppUi::applySetting(int row, int index) {
         settings_.audioHaptics = std::clamp(index, 0, 3);
     } else if (row == 22) {
         settings_.previewFeatures = (index == 1);
+    } else if (row == 27) {
+        settings_.storeCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
     } else if (row == 8) {
         settings_.loginCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
     } else {
@@ -855,6 +868,17 @@ void AppUi::changeSetting(int delta) {
         return;
     }
     applySetting(settingsRow_, (settingSelected(settingsRow_) + delta + n) % n);
+}
+
+bool AppUi::selectGameSettingsRow(int rowId) {
+    const auto rows = visibleGameSettingsRows(caps_, activeGameHasCustom_, activeGameMouseSupported_);
+    for (size_t i = 0; i < rows.size(); ++i)
+        if (rows[i].row == rowId) {
+            gameSettingsRow_ = static_cast<int>(i);
+            dirty_ = true;
+            return true;
+        }
+    return false;
 }
 
 void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
@@ -974,6 +998,7 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             break;
         case 18: // Per-game Trophy Synchronization
             activeGameProfile_.syncTrophies = !activeGameProfile_.syncTrophies;
+            activeGameProfile_.syncTrophiesChosen = true;  // the player's own choice for this game
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
@@ -1050,9 +1075,8 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
-        case 12:
-            activeGameProfile_.gyroMode = (activeGameProfile_.gyroMode + 1) % 5;
-            activeGameHasCustom_ = true;
+        case 12:  // Gyro aiming's own dialog, on this game's values (left / right pick the mode)
+            openTester(Tester::Gyro);
             dirty_ = true;
             break;
         case 13:
@@ -1080,6 +1104,7 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
             break;
         case 18:
             activeGameProfile_.syncTrophies = !activeGameProfile_.syncTrophies;
+            activeGameProfile_.syncTrophiesChosen = true;  // the player's own choice for this game
             activeGameHasCustom_ = true;
             dirty_ = true;
             break;
@@ -1096,7 +1121,8 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
         case 10: // Reset to default
             activeGameHasCustom_ = false;
             activeGameProfile_.locale.clear();
-            activeGameProfile_.syncTrophies = false;
+            activeGameProfile_.syncTrophies = settings_.syncTrophies;
+            activeGameProfile_.syncTrophiesChosen = false;
             activeGameProfile_.keyMap = settings_.keyMap;
             activeGameProfile_.padMap = settings_.padMap;
             activeGameProfile_.touchpadShortcuts = settings_.touchpadShortcuts;
@@ -1198,8 +1224,8 @@ void AppUi::drawSettings(Canvas& c) {
                                         tr(Str::CheckSignIn),   tr(Str::NetworkTest),   tr(Str::SupportProject),
                                         tr(Str::VideoDecoder),  tr(Str::AudioHaptics),  tr(Str::PreviewFeatures),
                                         tr(Str::ResetSettings), tr(Str::SyncTrophies),  tr(Str::RemoveTrophies),
-                                        tr(Str::FpsLimit)};
-    constexpr int kRowW = 1140, kRowH = 30, kGap = 2, kGroupGap = 4, kRowPx = 22;
+                                        tr(Str::FpsLimit), tr(Str::StoreCountry)};
+    constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4, kRowPx = 22;
     Rect rows[kSettingRows];  // by row id
     int y = 184;
     for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {  // what caps_ rules out is hidden
@@ -1330,6 +1356,7 @@ void AppUi::drawSettings(Canvas& c) {
         Str::SettingDescSyncTrophies,
         Str::SettingDescRemoveTrophies,
         Str::SettingDescFpsLimit,
+        Str::SettingDescStoreCountry,
     };
     if (settingsRow_ >= 0 && settingsRow_ < kSettingRows) {
         const char* desc = tr(kSettingDescs[settingsRow_]);

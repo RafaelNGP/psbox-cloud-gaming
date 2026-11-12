@@ -442,6 +442,8 @@ enum class Str {
     CloudTimeLeft,      // top bar / game menu: "%s" = the cloud time left ("4 h 10 min")
     CloudTimeOf,        // top bar, after CloudTimeLeft: "%s" = the month's hours
     CloudTimeUnlimited, // top bar: the account has no cloud time limit
+    CloudTimeFreeTier,  // top bar, a free account: "%s" = minutes one session may last
+    NotSoldAloneBadge,  // on a game the store has no price for by itself
     CloudTimeWarn,      // notification while streaming: "%s" = the cloud time left
     SyncTrophies,
     SettingDescSyncTrophies,
@@ -508,6 +510,39 @@ enum class Str {
     GyroPresetExponential,
     GyroPresetCustom,
     GyroYourNumbers,
+    GyroAutoCal,
+    GyroAutoCalStart,
+    GyroAutoCalTitle,
+    GyroAutoCalIntro,
+    GyroAutoCalStep1,
+    GyroAutoCalStep2,
+    GyroAutoCalStep3,
+    GyroAutoCalStep4,
+    GyroAutoCalOnlyInGame,
+    GyroAutoCalRunning,
+    GyroAutoCalResult,
+    GyroAutoCalMeasured,
+    GyroAutoCalCurrent,
+    GyroAutoCalVertical,
+    GyroAutoCalApply,
+    GyroAutoCalRetry,
+    GyroAutoCalFailNoMotion,
+    GyroAutoCalFailUnreadable,
+    GyroAutoCalFailNoFit,
+    GyroAutoCalCancelled,
+    GyroHelpPreset,
+    GyroHelpCalibrate,
+    GyroHelpAutoCal,
+    GyroHelpInvertX,
+    GyroHelpInvertY,
+    GyroHelpIntensity,
+    GyroHelpYaw,
+    GyroHelpPitch,
+    GyroHelpCurveStart,
+    GyroHelpCurveExp,
+    GyroLiveTest,
+    GyroLiveTestOff,
+    GyroLiveHint,
     StatVideoQuality,
     MenuDescXboxButton,
     MenuDescStats,
@@ -521,6 +556,9 @@ enum class Str {
     MenuDescPadSpeakerVolume,
     GyroSteering,
     GyroSteeringDrive,
+    StoreCountry,
+    StoreCountryAuto,
+    SettingDescStoreCountry,
     Count
 };
 
