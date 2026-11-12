@@ -10,6 +10,7 @@
 #include "stream/stream_session.h"
 #include "xcloud/gssv.h"
 
+#include <functional>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -112,6 +113,14 @@ public:
     bool motionTake(std::vector<MotionSample>& out);
     using MotionStick = bool (*)(uint64_t nowUs, float& x, float& y);
     void setMotionStick(MotionStick fn);
+    // Each picture shown, its luma plane, on the video thread (gyro aiming's
+    // calibration keeps small copies). Empty: none. Returns once no call is running.
+    using FrameTap = std::function<void(const uint8_t* luma, int stride, int width, int height, uint64_t us)>;
+    void setFrameTap(FrameTap tap);
+    // Measurements: with the samples, each frame's column averages (576 floats)
+    // and a 128x72 luma thumbnail, to study the meter itself. Taken once.
+    void setMotionRawDump(bool on);
+    bool motionRawTake(std::string& out);
     void setMicEnabled(bool enabled);
     bool micEnabled() const;
     void setMicMuted(bool muted);

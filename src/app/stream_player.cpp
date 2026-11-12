@@ -970,6 +970,10 @@ struct StreamPlayer::Impl {
             benchAdd(&BenchWindow::draw, t3 - t2);
             if (decodedFrames == 1) XC_LOGI("first frame presented");
             motionMeasure(pic, t3);
+            if (hasFrameTap.load(std::memory_order_relaxed)) {
+                std::lock_guard<std::mutex> tapLock(frameTapMutex);
+                if (frameTap && pic.y) frameTap(pic.y, pic.strideY, pic.width, pic.height, t3);
+            }
             if (imageTestWanted.exchange(false)) imageTest(pic, drawPic);
         }
     }
@@ -1252,6 +1256,11 @@ struct StreamPlayer::Impl {
     uint64_t motionUntilUs = 0;
     std::atomic<int> motionState{0};  // 0 idle, 1 recording, 2 done
     StreamPlayer::MotionStick motionStick = nullptr;
+    std::mutex frameTapMutex;
+    StreamPlayer::FrameTap frameTap;
+    std::atomic<bool> hasFrameTap{false};
+    bool motionRawDump = false;
+    std::string motionRaw;
     static float profileShift(const std::vector<float>& prev, const std::vector<float>& cur, int range, float& fit) {
         const int n = static_cast<int>(cur.size());
         std::vector<float> cost(static_cast<size_t>(2 * range + 1));
@@ -1296,6 +1305,17 @@ struct StreamPlayer::Impl {
         if (nowUs >= motionUntilUs || motionRec.size() >= motionRec.capacity()) {
             motionState = 2;
             return;
+        }
+        if (motionRawDump && motionRaw.size() + 12000 < motionRaw.capacity() && motionPrevCols.size() == cols.size()) {
+            motionRaw.append(reinterpret_cast<const char*>(cols.data()), cols.size() * sizeof(float));
+            const int bw = pic.width / 128, bh = pic.height / 72;
+            for (int ty = 0; ty < 72; ++ty)
+                for (int tx = 0; tx < 128; ++tx) {
+                    uint32_t sum = 0;
+                    for (int yy = 0; yy < bh; yy += 3)
+                        for (int xx = 0; xx < bw; xx += 3) sum += pic.y[static_cast<size_t>(ty * bh + yy) * pic.strideY + tx * bw + xx];
+                    motionRaw.push_back(static_cast<char>(sum / static_cast<uint32_t>(((bh + 2) / 3) * ((bw + 2) / 3))));
+                }
         }
         if (motionPrevCols.size() == cols.size() && motionPrevRows.size() == rows.size()) {
             StreamPlayer::MotionSample s{};
@@ -1657,6 +1677,25 @@ void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
 
 void StreamPlayer::setTierSequence(const std::string& seq) { impl_->tierSequence = seq; }
 void StreamPlayer::setMotionStick(MotionStick fn) { impl_->motionStick = fn; }
+void StreamPlayer::setFrameTap(FrameTap tap) {
+    std::lock_guard<std::mutex> lock(impl_->frameTapMutex);
+    impl_->frameTap = std::move(tap);
+    impl_->hasFrameTap = static_cast<bool>(impl_->frameTap);
+}
+void StreamPlayer::setMotionRawDump(bool on) {
+    std::lock_guard<std::mutex> lock(impl_->motionMutex);
+    impl_->motionRawDump = on;
+    impl_->motionRaw.clear();
+    if (on) impl_->motionRaw.reserve(48u * 1024 * 1024);
+}
+bool StreamPlayer::motionRawTake(std::string& out) {
+    std::lock_guard<std::mutex> lock(impl_->motionMutex);
+    if (!impl_->motionRawDump || impl_->motionState == 1 || impl_->motionRaw.empty()) return false;
+    out.swap(impl_->motionRaw);
+    impl_->motionRaw = std::string();
+    impl_->motionRawDump = false;
+    return true;
+}
 void StreamPlayer::startMotionRecording(int seconds) {
     std::lock_guard<std::mutex> lock(impl_->motionMutex);
     seconds = std::clamp(seconds, 1, 180);

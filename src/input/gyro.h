@@ -134,7 +134,7 @@ float gyroToSteering(const float rawW[3], const float* accel, int level, GyroSta
 // Gyro aiming sends the stick level that gives the camera speed the hand's
 // turn calls for. The default (12 %, a straight line) is what it assumed
 // before this could be set. Measured in Fortnite aiming down sights
-// (2026-11-11): 13 %, exponent 2.9. `invertX` / `invertY` turn the aim the
+// (2026-11-11, per tile of the picture): 15 %, exponent 2.4. `invertX` / `invertY` turn the aim the
 // other way on that axis.
 struct GyroResponse {
     float start = 0.12f;
@@ -148,7 +148,7 @@ struct GyroPreset {
     const char* id;  // "linear", "smooth", "exponential", "fortnite"
     int startPct, exponentTenths;
 };
-constexpr GyroPreset kGyroPresets[] = {{"linear", 12, 10}, {"smooth", 15, 15}, {"exponential", 20, 20}, {"fortnite", 13, 29}};
+constexpr GyroPreset kGyroPresets[] = {{"linear", 12, 10}, {"smooth", 15, 15}, {"exponential", 20, 20}, {"fortnite", 15, 24}};
 constexpr int kGyroCurveStartMin = 0, kGyroCurveStartMax = 40, kGyroCurveExpMin = 10, kGyroCurveExpMax = 40;
 
 // Global gyro calibration & hardware probing

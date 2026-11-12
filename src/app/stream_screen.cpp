@@ -27,6 +27,7 @@
 #include <cmath>
 
 namespace xc::app {
+std::string stageGameName();  // worker_stream.cpp: the game being played
 namespace {
 
 // How much CAS each sharpness level mixes in (display::setSharpness).
@@ -430,6 +431,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             menu_.open(streamResolution_, showStats_, sharpness_, deband_, upscaler_, g_playingHome, allow1440,
                        hasCustomProfile_, triggerStrength_, deadzone_, circleConfirms_, micLvl, micMuted, padVol);
             menu_.setGameKey(gameKey_);
+            menu_.setGameName(stageGameName());
             menu_.setDeadzones(deadzone_, deadzoneRight_);
             menu_.setTriggerConfig(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
             overlaySeq_ = 0;
@@ -468,7 +470,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     }
                 }
             }
-            switch (menu_.handle(nav)) {
+            switch (gyroCalRunning_ ? ui::MenuAction::None : menu_.handle(nav)) {
+            case ui::MenuAction::GyroCalibrate: startGyroCalibration_(); break;
             case ui::MenuAction::Leave: g_cancel = true; break;
             case ui::MenuAction::ReloadStream:
                 XC_LOGI("menu: user requested stream reload / reconnect");
@@ -611,7 +614,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                         p.keyMap = had != g_settings.perGame.end() ? had->second.keyMap : g_settings.keyMap;
                         p.padMap = had != g_settings.perGame.end() ? had->second.padMap : g_settings.padMap;
                         p.locale = had != g_settings.perGame.end() ? had->second.locale : std::string();
-                        p.syncTrophies = had != g_settings.perGame.end() ? had->second.syncTrophies : false;
+                        p.syncTrophiesChosen = had != g_settings.perGame.end() && had->second.syncTrophiesChosen;
+                        p.syncTrophies = p.syncTrophiesChosen ? had->second.syncTrophies : g_settings.syncTrophies;
                         p.xboxTitleId = had != g_settings.perGame.end() ? had->second.xboxTitleId : std::string();
                         p.gameName = had != g_settings.perGame.end() ? had->second.gameName : std::string();
                         p.touchpadShortcuts = touchpadShortcuts_;
@@ -778,6 +782,15 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 break;
             }
             case ui::MenuAction::Gyro: {
+                {
+                    // A response of the player's own made this game a profile (the dialog saved it there).
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    const bool has = g_settings.perGame.count(gameKey_) > 0;
+                    if (has && !hasCustomProfile_) {
+                        hasCustomProfile_ = true;
+                        menu_.setHasCustomProfile(true);
+                    }
+                }
                 gyroMode_ = menu_.gyroMode();
                 gyroLevel_ = menu_.gyroLevel();
                 input::setGyro(gyroMode_, gyroLevel_);
@@ -922,7 +935,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         if (float sx, sy; sweepStick(platform::nowUs(), sx, sy)) {  // measurements: nothing else on the right stick
             sent.rightStickX = sx;
             sent.rightStickY = sy;
-            sent.triggerL2 = 1.0f;
+            if (g_sweepL2) sent.triggerL2 = 1.0f;
         }
         // While another window has the focus on the cloud console (a
         // publisher's page such as NetEase's terms in Marvel Rivals,
@@ -947,6 +960,48 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             }
             if (platform::nowMs() < shortcutPulseUntilMs_) {
                 input::applyTouchpadButtonAction(sent, shortcutPulseAction_);
+            }
+        }
+        // The gyro dialog's live test: under the open menu the game keeps L2 and
+        // the right stick's gyro push (nothing else), with the dialog's values
+        // as they are changed.
+        if (menu_.gyroLiveTest() && !gyroCalRunning_) {
+            const ui::GyroWheelDialog& d = menu_.gyroDialog();
+            if (d.level() != gyroLiveApplied_[0] || d.yawScale() != gyroLiveApplied_[1] || d.pitchScale() != gyroLiveApplied_[2]) {
+                gyroLiveApplied_[0] = d.level(), gyroLiveApplied_[1] = d.yawScale(), gyroLiveApplied_[2] = d.pitchScale();
+                input::setGyro(gyroMode_, d.level());
+                input::setGyroCalibration(d.bias(), d.yawScale() / 100.0f, d.pitchScale() / 100.0f);
+            }
+            sent = input::ControllerState{};
+            sent.triggerL2 = pad.triggerL2;
+            sent.rightStickX = pad.rightStickX;
+            sent.rightStickY = pad.rightStickY;
+        } else {
+            gyroLiveApplied_[0] = -1;
+        }
+        // The game's response being measured: the game gets the sweep's stick
+        // and nothing else (L2 down when the gyro is used while aiming); the
+        // first button, trigger or stick touched after letting go ends it.
+        if (gyroCalRunning_) {
+            const bool touched = held || pad.btnL1 || pad.btnR1 || pad.btnL3 || pad.btnR3 || pad.triggerL2 > 0.3f ||
+                                 pad.triggerR2 > 0.3f || std::hypot(pad.rawLeftX, pad.rawLeftY) > 0.5f ||
+                                 std::hypot(pad.rawRightX, pad.rawRightY) > 0.5f;
+            if (!touched) gyroCalSawRelease_ = true;
+            const uint64_t nowUs = platform::nowUs();
+            float sx = 0, sy = 0;
+            if (!menu_.isOpen() || !menu_.gyroCalibrationRunning() || (touched && gyroCalSawRelease_)) {
+                finishGyroCalibration_(true);
+            } else if (nowUs >= gyroCalStartUs_ && !gyrocal::sweepStickAt((nowUs - gyroCalStartUs_) / 1000, sx, sy)) {
+                finishGyroCalibration_(false);
+            } else {
+                sent = input::ControllerState{};
+                sent.rightStickX = sx;
+                sent.rightStickY = sy;
+                if (gyroMode_ == input::kGyroAiming) sent.triggerL2 = 1.0f;
+                gyroCalStickX_ = sx;
+                gyroCalStickY_ = sy;
+                const int pct = nowUs < gyroCalStartUs_ ? 0 : static_cast<int>((nowUs - gyroCalStartUs_) / 10 / gyrocal::sweepDurationMs());
+                if (pct != gyroCalPercent_) gyroCalPercent_ = pct, overlaySeq_ = 0;
             }
         }
         // Touchpad swipe gestures (once per swipe; the games never see the
@@ -1166,7 +1221,9 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         input::setDeadzone(sd.deadzoneLeft() / 100.0f, sd.deadzoneRight() / 100.0f);
     }
     bool dialogOpen = menu_.isGyroDialogOpen() || menu_.isStickDialogOpen() || menu_.isTriggerDialogOpen();
-    bool menuRedraw = menu_.isOpen() && (nowMs - lastMenuRedrawMs_ >= (dialogOpen ? 16 : 40));
+    // Under a calibration only its progress line changes (overlaySeq_ = 0 then): no steady redraw.
+    bool menuRedraw = menu_.isOpen() && !gyroCalRunning_ &&
+                      (nowMs - lastMenuRedrawMs_ >= (menu_.gyroLiveTest() ? 100 : dialogOpen ? 16 : 40));
     bool statsRedraw = showStats_ && !menu_.isOpen() && (nowMs - lastStatsRedrawMs_ >= 200);
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
@@ -1195,7 +1252,17 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             bool micMuted = g_player ? (g_player->micMuted() || g_player->isMicHardwareMuted()) : false;
             menu_.setMicLevel(micLvl);
             menu_.setMicMuted(micMuted);
-            if (menu_.isGyroDialogOpen()) {
+            if (gyroCalRunning_) {
+                // The picture must stay clear for the measurement: a line at the top only.
+                ui::Canvas c = ui::renderToastPanel(
+                    fonts_, {ui::trf(ui::Str::GyroAutoCalRunning, std::to_string(std::clamp(gyroCalPercent_, 0, 100)))});
+                display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
+            } else if (menu_.gyroLiveTest()) {
+                ui::Canvas c(ui::GyroWheelDialog::kCompactW, ui::GyroWheelDialog::kCompactH);
+                c.clear(0);
+                menu_.drawGyroCompact(c);
+                display::setOverlay(c.data(), static_cast<int>(display::kWidth) - c.width() - 40, 150, c.width(), c.height(), 225);
+            } else if (menu_.isGyroDialogOpen()) {
                 ui::Canvas c(display::kWidth, display::kHeight);
                 c.clear(0);
                 menu_.drawGyroDialog(c);
@@ -1231,6 +1298,42 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
     }
 }
 
+void StreamScreen::startGyroCalibration_() {
+    if (!g_player || gyroCalRunning_) return;
+    gyroCalRecording_.clear();
+    gyroCalRecording_.reserve(static_cast<size_t>(gyrocal::sweepDurationMs()) * 62 / 1000 + 64);
+    gyroCalStickX_ = gyroCalStickY_ = 0.0f;
+    gyroCalStartUs_ = platform::nowUs() + 400000;  // the button that started it let go first
+    gyroCalSawRelease_ = false;
+    gyroCalPercent_ = -1;
+    gyroCalRunning_ = true;
+    g_player->setFrameTap([this](const uint8_t* luma, int stride, int width, int height, uint64_t us) {
+        if (us < gyroCalStartUs_) return;
+        gyroCalRecording_.add(luma, stride, width, height, us, gyroCalStickX_.load(std::memory_order_relaxed),
+                              gyroCalStickY_.load(std::memory_order_relaxed));
+    });
+    overlaySeq_ = 0;
+    XC_LOGI("gyro calibration: sweep started (%u ms, L2 %s)", gyrocal::sweepDurationMs(),
+            gyroMode_ == input::kGyroAiming ? "held" : "not held");
+}
+
+void StreamScreen::finishGyroCalibration_(bool cancelled) {
+    if (!gyroCalRunning_) return;
+    gyroCalRunning_ = false;
+    if (g_player) g_player->setFrameTap(nullptr);  // returns once the video thread is out of it
+    gyrocal::Result result;
+    if (!cancelled) result = gyrocal::analyze(gyroCalRecording_);
+    XC_LOGI("gyro calibration: %s; %zu pictures, start %d %%, exponent %d.%d, fit error %.3f, top %.0f px/s, vertical %.2f",
+            cancelled ? "cancelled" : result.ok() ? "ok" : "failed", gyroCalRecording_.size(), result.startPct,
+            result.exponentTenths / 10, result.exponentTenths % 10, static_cast<double>(result.fitError),
+            static_cast<double>(result.topSpeed), static_cast<double>(result.verticalRatio));
+    for (const gyrocal::Point& p : result.horizontal)
+        XC_LOGD("gyro calibration: stick %.2f -> %.0f px/s", static_cast<double>(p.level), static_cast<double>(p.speed));
+    gyroCalRecording_.clear();
+    menu_.showGyroCalibrationResult(result, cancelled);
+    overlaySeq_ = 0;
+}
+
 bool StreamScreen::menuOpen() const { return menu_.isOpen(); }
 void StreamScreen::redrawMenu() { overlaySeq_ = 0; }
 
@@ -1255,6 +1358,11 @@ void StreamScreen::idle() {
     }
     if (!g_keyboardFor.empty()) updateTextInput(nullptr);
     touchEnabled_ = false;  // each stream starts with touch off
+    if (gyroCalRunning_) {  // the stream ended under a calibration
+        gyroCalRunning_ = false;
+        if (g_player) g_player->setFrameTap(nullptr);
+        gyroCalRecording_.clear();
+    }
     if (overlayShown_) {
         display::setOverlay(nullptr, 0, 0, 0, 0, 0);
         overlayShown_ = false;

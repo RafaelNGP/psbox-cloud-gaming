@@ -141,6 +141,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
 
     if (gyroDialog_.isOpen()) {
         gyroDialog_.handleInput(in);
+        if (gyroDialog_.takeCalibrationRequest()) return MenuAction::GyroCalibrate;
         if (!gyroDialog_.isOpen()) {
             gyroLevel_ = gyroDialog_.level();
             gyroYawScale_ = gyroDialog_.yawScale();
@@ -355,6 +356,7 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         return MenuAction::Gyro;
     }
     if (selected_ == GyroItem && in.accept) {
+        gyroDialog_.setInGame(true);
         gyroDialog_.open(0, gameKey_);
         return MenuAction::None;
     }

@@ -52,7 +52,7 @@ enum StatsIndicator : uint32_t {
 // Close: the menu went away (Circle, OPTIONS, or the Xbox button): a fresh key frame is asked for.
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
-    ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, PadSpeakerVolume,
+    ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, GyroCalibrate, PadSpeakerVolume,
     TouchpadShortcuts, Player, AudioHaptics, ReloadStream,
     VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
 };
@@ -129,6 +129,7 @@ public:
     void setDeadzone(int deadzone) { deadzone_ = deadzoneRight_ = deadzone; }
     void setDeadzones(int left, int right) { deadzone_ = left; deadzoneRight_ = right; }
     void setGameKey(const std::string& key) { gameKey_ = key; }
+    void setGameName(const std::string& name) { gyroDialog_.setGameName(name); }
     int audioHaptics() const { return audioHaptics_; }
     void setAudioHaptics(int lvl) { audioHaptics_ = std::clamp(lvl, 0, 3); }
     bool circleConfirms() const { return circleConfirms_; }
@@ -165,6 +166,14 @@ public:
 
     // GyroWheelDialog integration
     bool isGyroDialogOpen() const { return gyroDialog_.isOpen(); }
+    // The game's response being measured (GyroWheelDialog): asked for with
+    // MenuAction::GyroCalibrate; the result goes back into the dialog.
+    bool gyroCalibrationRunning() const { return gyroDialog_.calibrationRunning(); }
+    // The live test (experimental): the dialog as a side panel, the game keeping L2 and the gyro.
+    bool gyroLiveTest() const { return open_ && gyroDialog_.liveTest(); }
+    void drawGyroCompact(Canvas& c) { gyroDialog_.drawCompact(c, fonts_); }
+    const GyroWheelDialog& gyroDialog() const { return gyroDialog_; }
+    void showGyroCalibrationResult(const app::gyrocal::Result& r, bool cancelled) { gyroDialog_.showCalibrationResult(r, cancelled); }
     void openGyroDialog(const std::string& gameKey = "") { gyroDialog_.open(0, gameKey); }
     void closeGyroDialog() { gyroDialog_.close(); }
     void drawGyroDialog(Canvas& c) { gyroDialog_.draw(c, fonts_, 0, 0, c.width(), c.height()); }

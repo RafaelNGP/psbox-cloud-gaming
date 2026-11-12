@@ -7,6 +7,7 @@
 // the picture (the menu or the statistics line, and a desktop's toasts).
 #pragma once
 
+#include "app/gyro_calibration.h"
 #include "app/auto_deband.h"
 #include "input/controller.h"
 #include "input/kbm.h"
@@ -15,6 +16,7 @@
 #include "ui/app_ui.h"
 #include "ui/stream_menu.h"
 
+#include <atomic>
 #include <cstdint>
 
 namespace xc::app {
@@ -38,6 +40,8 @@ public:
     // is closed (update() sends them).
     void setKbm(input::KbmInput kbm) { kbm_ = std::move(kbm); }
     bool menuOpen() const;
+    // The gyro dialog's live test: the game keeps L2 and the gyro under the open menu.
+    bool gyroLiveTest() const { return menu_.gyroLiveTest(); }
     // A USB controller's Xbox / Home button (input/pad_usb.h): the in-game
     // menu for that controller, or closed again by it. While it is up, that
     // controller alone moves in it (menuUsbOwner(): its slot, -1 when the
@@ -104,6 +108,18 @@ private:
     input::TouchpadAction shortcutPulseAction_ = input::TouchpadAction::None;
     uint64_t shortcutPulseUntilMs_ = 0;
     int gyroMode_ = 0, gyroLevel_ = 5;  // gyro aiming (input/gyro.h), this game's
+    // The game's stick response being measured (app/gyro_calibration.h): the
+    // menu stays up (its dialog shows the progress), the game gets the sweep's
+    // stick, the pictures shown are kept small; any button ends it.
+    bool gyroCalRunning_ = false;
+    bool gyroCalSawRelease_ = false;
+    uint64_t gyroCalStartUs_ = 0;
+    int gyroCalPercent_ = -1;
+    std::atomic<float> gyroCalStickX_{0.0f}, gyroCalStickY_{0.0f};
+    gyrocal::Recording gyroCalRecording_;
+    int gyroLiveApplied_[3] = {-1, -1, -1};  // level, yaw, pitch last given to the pad in the live test
+    void startGyroCalibration_();
+    void finishGyroCalibration_(bool cancelled);
     bool highRefresh_ = false;  // 120 Hz turned on for this stream
     bool mouseKeyboard_ = false;  // the game takes native mouse and keyboard
     bool touchpadMouse_ = false;  // touchpad acts as a mouse (only when enabled in game's profile)
