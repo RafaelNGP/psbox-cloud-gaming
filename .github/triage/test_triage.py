@@ -310,6 +310,46 @@ class Triage(unittest.TestCase):
         self.assertIn("https://www.reddit.com/r/PSBoxCloudGaming/", comment_es)
         self.assertIn("Únete a nuestra comunidad en Reddit", comment_es)
 
+    def issue(self, number, minute, what="Sign-in failed: XSTS authorize 401", title=None, second=0):
+        return {"number": number, "title": title if title is not None else what, "body": form(what, "1.7.0", "13.00", LOG),
+                "created_at": f"2026-11-12T10:{minute:02d}:{second:02d}Z", "user": {"login": "someone"}}
+
+    def test_repeat_within_the_hour_points_at_the_first(self):
+        first, second, third = self.issue(10, 0), self.issue(11, 0, second=20), self.issue(12, 2)
+        self.assertIsNone(triage.duplicate_of(first, [third, second, first]))
+        self.assertEqual(triage.duplicate_of(second, [third, second, first]), 10)
+        self.assertEqual(triage.duplicate_of(third, [third, second, first]), 10)
+
+    def test_repeat_with_another_title_is_still_a_repeat(self):
+        self.assertEqual(triage.duplicate_of(self.issue(11, 3, title="PS4"), [self.issue(10, 0)]), 10)
+
+    def test_another_problem_or_a_later_day_is_not_a_repeat(self):
+        first = self.issue(10, 0)
+        self.assertIsNone(triage.duplicate_of(self.issue(11, 1, what="Fortnite is not on your account"), [first]))
+        late = self.issue(11, 0)
+        late["created_at"] = "2026-11-12T11:01:00Z"
+        self.assertIsNone(triage.duplicate_of(late, [first]))
+
+    def test_placeholder_text_compares_the_titles(self):
+        first = self.issue(10, 0, what="Reported from Settings", title="Keyboard stopped")
+        self.assertIsNone(triage.duplicate_of(self.issue(11, 1, what="Reported from Settings", title="No sound"), [first]))
+        self.assertEqual(triage.duplicate_of(self.issue(12, 2, what="Reported from Settings", title="keyboard  stopped"), [first]), 10)
+
+    def test_repeat_comment_in_the_reporter_language(self):
+        comment = triage.duplicate_comment(self.issue(11, 1, what="Não consigo iniciar o jogo"), 10)
+        self.assertIn(triage.MARKER, comment)
+        self.assertIn("@someone", comment)
+        self.assertIn("mesmo relato da #10", comment)
+
+    def test_repeat_with_the_text_left_out_matches_by_title(self):
+        first = self.issue(10, 0, what="", title="Aniimo is not on your account yet.")
+        again = self.issue(11, 2, what="Aniimo is not on your account yet. It is free to claim.", title="Aniimo is not on your account yet.")
+        self.assertEqual(triage.duplicate_of(again, [first]), 10)
+
+    def test_two_reports_that_say_nothing_are_not_repeats(self):
+        first = self.issue(10, 0, what="Reported from Settings", title="Problem report")
+        self.assertIsNone(triage.duplicate_of(self.issue(11, 1, what="Reported from Settings", title="Problem report"), [first]))
+
     def test_rules_are_valid(self):
         import re
         for rule in RULES:
