@@ -48,7 +48,9 @@ public:
         return it->second.count(trophyId) > 0;
     }
 
-    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) override {
+    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
+                           const std::set<std::string>* sharedInUse = nullptr) override {
+        (void)sharedInUse;
         std::lock_guard<std::mutex> lock(mutex_);
         removedCount = static_cast<int>(registeredTitles_.size() > 0 ? registeredTitles_.size() : titles.size());
         registeredTitles_.clear();

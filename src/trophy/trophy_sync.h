@@ -6,6 +6,8 @@
 #include "trophy/trophy_types.h"
 #include "ui/app_ui.h"
 
+#include <utility>
+#include <set>
 #include <atomic>
 #include <functional>
 #include <memory>
@@ -37,6 +39,15 @@ public:
 
     // Initializes engine with user ID (default 0 detects active user)
     bool init(uint32_t userId = 0);
+    // The console user the trophies are for (0: not known, as on the desktop).
+    // Each user has their own record of what was synced (trophyCacheDir());
+    // what the console keeps once per title for everyone (the slot map, the
+    // icons) stays in trophySharedDir().
+    void setUser(uint32_t userId);
+    uint32_t user() const { return userId_; }
+    // This user's trophies of these titles removed; what the console shares
+    // between its users goes only for titles no other user has synced.
+    bool removeTitles(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err);
 
     // Sync achievements for a single title against Xbox Live and PlayStation backend
     bool syncTitleAchievements(const std::string& xblAuth, const std::string& xuid,
@@ -71,6 +82,7 @@ public:
     bool isSyncing() const;
 
     std::string trophyCacheDir() const;
+    std::string trophySharedDir() const;
     std::string trophyCachePath(const std::string& xboxTitleId) const;
 
     // Fast Delta Sync Cache Index (ultra-low overhead memory-backed cache summary)
@@ -84,6 +96,8 @@ private:
     std::atomic<bool> pollInFlight_{false};
     std::atomic<int> syncingDepth_{0};
     bool initialized_ = false;
+    uint32_t userId_ = 0;
+    std::set<std::string> titlesOfOtherUsers() const;  // npCommIds in the other users' records
     std::unordered_map<std::string, TitleCacheSummary> fastCacheIndex_;
 };
 
@@ -127,5 +141,8 @@ struct TrophySyncContext {
 
 using TrophyContextProvider = std::function<bool(TrophySyncContext& ctx)>;
 void setTrophyContextProvider(TrophyContextProvider provider);
+// The console user the trophies are for, asked before each task (0: not known
+// yet; the engine keeps the one it has).
+void setTrophyUserProvider(std::function<uint32_t()> provider);
 
 }  // namespace xc::trophy

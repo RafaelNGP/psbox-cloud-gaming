@@ -3,6 +3,7 @@
 #pragma once
 
 #include "trophy/trophy_types.h"
+#include <set>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -34,10 +35,19 @@ public:
     // Flushes pending trophy commits to the system profile/database
     virtual void flush() {}
 
-    // Removes local trophy data and packages for provisioned titles
-    virtual bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) {
-        (void)titles; (void)err; removedCount = 0; return true;
+    // Removes the current user's trophy data for these titles (npCommId, title id),
+    // and what the console keeps once per title for all its users (the trophy pack,
+    // the app's metadata, the database rows), except for the npCommIds in
+    // `sharedInUse`: titles another console user still has trophies in.
+    virtual bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
+                                   const std::set<std::string>* sharedInUse = nullptr) {
+        (void)titles; (void)err; (void)sharedInUse; removedCount = 0; return true;
     }
+
+    // The titles this app made trophies for that the current user has data of on
+    // the console (npCommId, title id), whatever the app's own records say: a
+    // user's trophies must be removable even when their records are gone.
+    virtual void listUserTitles(std::vector<std::pair<std::string, std::string>>& out) { (void)out; }
 
     // Backend identifier name
     virtual std::string name() const = 0;

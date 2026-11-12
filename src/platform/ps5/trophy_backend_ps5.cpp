@@ -162,6 +162,13 @@ public:
 
     bool init(uint32_t userId) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        return initLocked(userId);
+    }
+
+    // With mutex_ held. The other entry points call this one when they come
+    // first: init() itself would take the mutex again on the same thread,
+    // which ends the app ("mutex lock failed: Resource deadlock avoided").
+    bool initLocked(uint32_t userId) {
         if (initialized_) return true;
 
         if (userId != 0) {
@@ -176,13 +183,15 @@ public:
             if (rc == 0 && uid > 0) {
                 userId_ = static_cast<uint32_t>(uid);
             } else {
-                userId_ = 0x1ea2f4da; // Default to devRafaelNGP
+                // No user known: nothing is written under some other user's home.
+                XC_LOGE("trophy ps5: the console's user could not be read (rc=0x%08x); trophies stay off", rc);
+                return false;
             }
         }
 
         char userName[64] = {0};
         sceUserServiceGetUserName(static_cast<int32_t>(userId_), userName, sizeof(userName));
-        XC_LOGI("trophy ps5: initialized for user 0x%08x (%s)", userId_, userName[0] ? userName : "devRafaelNGP");
+        XC_LOGI("trophy ps5: initialized for user 0x%08x (%s)", userId_, userName[0] ? userName : "?");
 
         // Ensure unjail eboot so /system_data and /user are writable
         triggerSceShellCorePatch();
@@ -194,7 +203,7 @@ public:
 
     bool registerTitle(const TitleTrophySet& set) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!initialized_) init(0);
+        if (!initialized_ && !initLocked(0)) return false;
 
         if (currentNpCommId_ != set.npCommId) {
             cleanupContext();
@@ -290,7 +299,7 @@ public:
     bool isTitlePackageDeployed(const std::string& npCommId, const std::string& sonyTitleId) override {
         if (npCommId.empty()) return false;
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!initialized_) const_cast<TrophyBackendPS5*>(this)->init(0);
+        if (!initialized_ && !const_cast<TrophyBackendPS5*>(this)->initLocked(0)) return false;
 
         // Verify TROPHY.UCP exists and has valid header size
         std::string ucpPath = "/user/trophy2/nobackup/conf/" + npCommId + "/TROPHY.UCP";
@@ -319,11 +328,14 @@ public:
         return true;
     }
 
-    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) override {
+    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
+                           const std::set<std::string>* sharedInUse = nullptr) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        (void)err;
-        if (!initialized_) init(0);
         removedCount = 0;
+        if (!initialized_ && !initLocked(0)) {
+            err = "the console's user is not known";
+            return false;
+        }
 
         triggerSceShellCorePatch();
         waitForUnjail(8000);
@@ -341,6 +353,9 @@ public:
                 continue;
             }
 
+            // Another console user still has trophies in this title: only this user's
+            // own data goes; the pack, the metadata and the database rows stay.
+            const bool keepShared = (sharedInUse && sharedInUse->count(npComm) > 0) || otherUserHasData(npComm);
             bool foundAny = false;
             if (!npComm.empty()) {
                 char dataDir[256];
@@ -353,14 +368,14 @@ public:
                 }
 
                 std::string confDir = "/user/trophy2/nobackup/conf/" + npComm;
-                if (::stat(confDir.c_str(), &st) == 0) {
+                if (!keepShared && ::stat(confDir.c_str(), &st) == 0) {
                     rmTree(confDir);
                     foundAny = true;
                     XC_LOGI("trophy ps5 remove: purged %s", confDir.c_str());
                 }
             }
 
-            if (!sonyTitle.empty()) {
+            if (!sonyTitle.empty() && !keepShared) {
                 if (sonyTitle == "PPSA99810") {
                     const std::string appMetaDirs[] = {
                         "/system_data/priv/appmeta/PPSA99810/trophy2",
@@ -408,11 +423,61 @@ public:
         return true;
     }
 
+    // The app's own slots (NPWR80000..99799, title PPSA of the same number) in this user's trophy data.
+    void listUserTitles(std::vector<std::pair<std::string, std::string>>& out) override {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!initialized_ && !initLocked(0)) return;
+        char dir[128];
+        snprintf(dir, sizeof(dir), "/user/home/%08x/trophy2/nobackup/data", userId_);
+        DIR* d = ::opendir(dir);
+        if (!d) return;
+        while (struct dirent* de = ::readdir(d)) {
+            unsigned slot = 0;
+            if (appSlotOf(de->d_name, slot)) {
+                char sony[16];
+                snprintf(sony, sizeof(sony), "PPSA%05u", slot);
+                out.emplace_back(de->d_name, sony);
+            }
+        }
+        ::closedir(d);
+    }
+
     std::string name() const override {
         return "PlayStation 5 Native (RecompTrophy/Triad Engine)";
     }
 
 private:
+    // "NPWRnnnnn_00" with nnnnn among the slots this app hands out.
+    static bool appSlotOf(const char* name, unsigned& slot) {
+        if (std::strlen(name) != 12 || std::strncmp(name, "NPWR", 4) != 0 || std::strcmp(name + 9, "_00") != 0) return false;
+        for (int i = 4; i < 9; ++i)
+            if (name[i] < '0' || name[i] > '9') return false;
+        slot = static_cast<unsigned>(std::strtoul(name + 4, nullptr, 10));
+        return slot >= 80000 && slot <= 99799;
+    }
+
+    // Another user of the console has trophy data of this title: what the
+    // console keeps once for all of them must stay.
+    bool otherUserHasData(const std::string& npComm) const {
+        if (npComm.empty()) return false;
+        char mine[16];
+        snprintf(mine, sizeof(mine), "%08x", userId_);
+        DIR* d = ::opendir("/user/home");
+        if (!d) return false;
+        bool found = false;
+        while (struct dirent* de = ::readdir(d)) {
+            const std::string user = de->d_name;
+            if (user.empty() || user[0] == '.' || user == mine) continue;
+            struct stat st{};
+            if (::stat(("/user/home/" + user + "/trophy2/nobackup/data/" + npComm).c_str(), &st) == 0) {
+                found = true;
+                break;
+            }
+        }
+        ::closedir(d);
+        return found;
+    }
+
     void cleanupContext() {
         context_ = -1;
         handle_ = -1;
@@ -420,7 +485,7 @@ private:
     }
 
     bool initialized_ = false;
-    uint32_t userId_ = 0x1ea2f4da;
+    uint32_t userId_ = 0;
     int32_t context_ = -1;
     int32_t handle_ = -1;
     std::string currentNpCommId_;

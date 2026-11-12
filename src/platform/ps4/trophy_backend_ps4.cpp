@@ -35,6 +35,13 @@ public:
 
     bool init(uint32_t userId) override {
         std::lock_guard<std::mutex> lock(mutex_);
+        return initLocked(userId);
+    }
+
+    // With mutex_ held. The other entry points call this one when they come
+    // first: init() itself would take the mutex again on the same thread,
+    // which ends the app ("mutex lock failed: Resource deadlock avoided").
+    bool initLocked(uint32_t userId) {
         if (initialized_) return true;
 
         if (userId != 0) {
@@ -64,7 +71,7 @@ public:
 
     bool registerTitle(const TitleTrophySet& set) override {
         std::lock_guard<std::mutex> lock(mutex_);
-        if (!initialized_) init(0);
+        if (!initialized_) initLocked(0);
 
         if (currentNpCommId_ != set.npCommId) {
             cleanupContext();
@@ -137,7 +144,9 @@ private:
         }
     }
 
-    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err) override {
+    bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
+                           const std::set<std::string>* sharedInUse = nullptr) override {
+        (void)sharedInUse;
         (void)err;
         std::lock_guard<std::mutex> lock(mutex_);
         cleanupContext();

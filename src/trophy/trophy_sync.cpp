@@ -40,12 +40,90 @@ void TrophySyncEngine::setBackend(std::unique_ptr<ITrophyBackend> backend) {
     initialized_ = false;
 }
 
-std::string TrophySyncEngine::trophyCacheDir() const {
+std::string TrophySyncEngine::trophySharedDir() const {
     std::string base = platform::dataDir();
     if (base.empty()) base = ".";
     std::string dir = base + "/trophies";
     ::mkdir(dir.c_str(), 0777);
     return dir;
+}
+
+std::string TrophySyncEngine::trophyCacheDir() const {
+    const std::string shared = trophySharedDir();
+    if (userId_ == 0) return shared;
+    const std::string users = shared + "/users";
+    ::mkdir(users.c_str(), 0777);
+    char id[16];
+    std::snprintf(id, sizeof(id), "/%08x", userId_);
+    const std::string dir = users + id;
+    ::mkdir(dir.c_str(), 0777);
+    return dir;
+}
+
+void TrophySyncEngine::setUser(uint32_t userId) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    if (userId == userId_) return;
+    userId_ = userId;
+    fastCacheIndex_.clear();
+    initialized_ = false;
+    if (userId_ == 0) return;
+    // The records from before each user had their own (all in the shared
+    // folder) go to the first user to open the app, once.
+    const std::string shared = trophySharedDir(), mine = trophyCacheDir(), marker = shared + "/users/.moved";
+    struct stat st {};
+    if (::stat(marker.c_str(), &st) == 0) return;
+    int moved = 0;
+    if (DIR* d = ::opendir(shared.c_str())) {
+        std::vector<std::string> names;
+        while (struct dirent* de = ::readdir(d)) {
+            std::string f = de->d_name;
+            if (f.size() > 5 && f != "id_map.json" && f.substr(f.size() - 5) == ".json") names.push_back(f);
+        }
+        ::closedir(d);
+        for (const std::string& f : names)
+            if (std::rename((shared + "/" + f).c_str(), (mine + "/" + f).c_str()) == 0) ++moved;
+    }
+    platform::writeFileAtomic(marker, "1");
+    XC_LOGI("trophy sync: %d title records moved to user 0x%08x's own folder", moved, userId_);
+}
+
+std::set<std::string> TrophySyncEngine::titlesOfOtherUsers() const {
+    std::set<std::string> out;
+    const std::string users = trophySharedDir() + "/users";
+    char mine[16];
+    std::snprintf(mine, sizeof(mine), "%08x", userId_);
+    DIR* d = ::opendir(users.c_str());
+    if (!d) return out;
+    while (struct dirent* de = ::readdir(d)) {
+        const std::string user = de->d_name;
+        if (user.empty() || user[0] == '.' || user == mine) continue;
+        DIR* du = ::opendir((users + "/" + user).c_str());
+        if (!du) continue;
+        while (struct dirent* df = ::readdir(du)) {
+            const std::string f = df->d_name;
+            if (f.size() <= 5 || f.substr(f.size() - 5) != ".json") continue;
+            std::string content;
+            if (!platform::readFile(users + "/" + user + "/" + f, content)) continue;
+            if (auto j = json::parse(content); j && j->isObject()) {
+                const std::string np = (*j)["npCommId"].str();
+                if (!np.empty()) out.insert(np);
+            }
+        }
+        ::closedir(du);
+    }
+    ::closedir(d);
+    return out;
+}
+
+bool TrophySyncEngine::removeTitles(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount,
+                                    std::string& err) {
+    std::lock_guard<std::recursive_mutex> lock(mutex_);
+    removedCount = 0;
+    if (!backend_) backend_.reset(createPlatformTrophyBackend());
+    if (!backend_) return false;
+    if (!initialized_) initialized_ = backend_->init(userId_);
+    const std::set<std::string> inUse = titlesOfOtherUsers();
+    return backend_->removeAllTrophies(titles, removedCount, err, &inUse);
 }
 
 std::string TrophySyncEngine::trophyCachePath(const std::string& xboxTitleId) const {
@@ -56,7 +134,8 @@ bool TrophySyncEngine::init(uint32_t userId) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!backend_) backend_.reset(createPlatformTrophyBackend());
     if (backend_) {
-        initialized_ = backend_->init(userId);
+        if (userId != 0) userId_ = userId;
+        initialized_ = backend_->init(userId_);
     }
     return initialized_;
 }
@@ -302,7 +381,7 @@ bool TrophySyncEngine::syncTitleAchievements(const std::string& xblAuth, const s
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     if (!initialized_) {
         if (!backend_) backend_.reset(createPlatformTrophyBackend());
-        if (backend_) initialized_ = backend_->init(0);
+        if (backend_) initialized_ = backend_->init(userId_);
     }
 
     // 0a. Fast Skip for 0% titles: If no achievements earned on Xbox Live, skip package build immediately
@@ -365,7 +444,7 @@ bool TrophySyncEngine::syncTitleAchievements(const std::string& xblAuth, const s
     TitleTrophySet titleSet = resolveTitleSet(xboxTitleId, "", titleName, ach.items);
 
     // 2b. Cache trophy and game icons on disk (and repair any tainted synthetic slot from legacy collisions)
-    std::string iconsBase = trophyCacheDir() + "/icons";
+    std::string iconsBase = trophySharedDir() + "/icons";
     ::mkdir(iconsBase.c_str(), 0777);
     std::string iconsDir = iconsBase + "/" + titleSet.npCommId;
     ::mkdir(iconsDir.c_str(), 0777);
@@ -381,9 +460,11 @@ bool TrophySyncEngine::syncTitleAchievements(const std::string& xblAuth, const s
             bool tainted = (!currentOwner.empty() && currentOwner.rfind(xboxTitleId + ":", 0) != 0) ||
                            (ach.totalCount > 127 || titleSet.items.size() == 127) ||
                            isCollidedLegacySlot(trophyCacheDir(), titleSet.npCommId);
-            std::string datPath = "/user/home/1ea2f4da/trophy2/nobackup/data/" + titleSet.npCommId + "/TRPTITLE.DAT";
+            char homeId[16];
+            std::snprintf(homeId, sizeof(homeId), "%08x", userId_);
+            std::string datPath = std::string("/user/home/") + homeId + "/trophy2/nobackup/data/" + titleSet.npCommId + "/TRPTITLE.DAT";
             std::string datRaw;
-            if (!tainted && platform::readFile(datPath, datRaw) && !datRaw.empty()) {
+            if (!tainted && userId_ != 0 && platform::readFile(datPath, datRaw) && !datRaw.empty()) {
                 std::map<uint32_t, ExistingTrophyRecord> diskRecs;
                 if (parseTrpTitleDat(reinterpret_cast<const uint8_t*>(datRaw.data()), datRaw.size(), diskRecs)) {
                     if (diskRecs.size() != titleSet.items.size() + 1) {
@@ -750,7 +831,7 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
             // If cover icon already exists on disk in cache, TitleHub is not needed
             TitleCacheSummary sum;
             if (loadTitleCacheSummary(h.titleId, sum) && !sum.npCommId.empty()) {
-                std::string icon0 = trophyCacheDir() + "/icons/" + sum.npCommId + "/icon0.png";
+                std::string icon0 = trophySharedDir() + "/icons/" + sum.npCommId + "/icon0.png";
                 struct stat stIcon{};
                 if (::stat(icon0.c_str(), &stIcon) == 0 && stIcon.st_size > 100) {
                     continue;
@@ -861,13 +942,9 @@ bool TrophySyncEngine::syncAllAccountTrophies(const std::string& xblAuth, const 
                     std::string np = (*j)["npCommId"].str();
                     std::string sony = (*j)["sonyTitleId"].str();
                     if (!np.empty() && !isRetailInstalledGame(sony)) {
-                        std::lock_guard<std::recursive_mutex> lock(mutex_);
-                        if (!backend_) backend_.reset(createPlatformTrophyBackend());
-                        if (backend_) {
-                            int rem = 0;
-                            std::string remErr;
-                            backend_->removeAllTrophies({{np, sony}}, rem, remErr);
-                        }
+                        int rem = 0;
+                        std::string remErr;
+                        removeTitles({{np, sony}}, rem, remErr);
                     }
                 }
                 ::unlink(cPath.c_str());
@@ -943,6 +1020,9 @@ bool TrophySyncEngine::removeAllTrophies(int& removedCount, std::string& err) {
     std::lock_guard<std::recursive_mutex> lock(mutex_);
     fastCacheIndex_.clear();
 
+    // The titles this user has a record of, plus the known ones (a record may
+    // be gone while the trophies are still there). Only this user's records
+    // are read and deleted: the other console users keep theirs.
     std::set<std::pair<std::string, std::string>> titleSet;
     titleSet.insert({"NPWR20561_00", "PPSA01922"}); // Fortnite
     titleSet.insert({"NPWR18283_00", "PPSA03350"}); // Minecraft
@@ -951,79 +1031,77 @@ bool TrophySyncEngine::removeAllTrophies(int& removedCount, std::string& err) {
     titleSet.insert({"NPWR17597_00", "PPSA03974"}); // Cyberpunk 2077
     titleSet.insert({"NPWR90210_00", "PPSA99810"}); // Selftest
 
-    std::string cacheDir = trophyCacheDir();
-    DIR* d = ::opendir(cacheDir.c_str());
-    if (d) {
-        struct dirent* de;
-        while ((de = ::readdir(d)) != nullptr) {
+    const std::string cacheDir = trophyCacheDir();
+    std::vector<std::string> records;
+    if (DIR* d = ::opendir(cacheDir.c_str())) {
+        while (struct dirent* de = ::readdir(d)) {
             std::string fname = de->d_name;
-            if (fname == "id_map.json") {
-                std::string content;
-                if (platform::readFile(cacheDir + "/" + fname, content)) {
-                    if (auto j = json::parse(content); j && j->isObject()) {
-                        for (const auto& [seed, val] : j->members()) {
-                            uint32_t slot = static_cast<uint32_t>(val.asInt(0));
-                            if (slot >= 80000 && slot <= 99799) {
-                                char npBuf[16], sonyBuf[16];
-                                snprintf(npBuf, sizeof(npBuf), "NPWR%05u_00", slot);
-                                snprintf(sonyBuf, sizeof(sonyBuf), "PPSA%05u", slot);
-                                titleSet.insert({npBuf, sonyBuf});
-                            }
-                        }
-                    }
-                }
-                continue;
-            }
-            if (fname.size() > 5 && fname.substr(fname.size() - 5) == ".json") {
-                std::string content;
-                if (platform::readFile(cacheDir + "/" + fname, content)) {
-                    if (auto j = json::parse(content); j && j->isObject()) {
-                        std::string np = (*j)["npCommId"].str();
-                        std::string sony = (*j)["sonyTitleId"].str();
-                        if (!np.empty()) titleSet.insert({np, sony});
-                    }
-                }
-                ::unlink((cacheDir + "/" + fname).c_str());
-            }
+            if (fname == "id_map.json") continue;  // the console's slot map (only in the shared folder): never a user's to delete
+            if (fname.size() > 5 && fname.substr(fname.size() - 5) == ".json") records.push_back(fname);
         }
         ::closedir(d);
     }
+    for (const std::string& fname : records) {
+        std::string content;
+        if (platform::readFile(cacheDir + "/" + fname, content)) {
+            if (auto j = json::parse(content); j && j->isObject()) {
+                std::string np = (*j)["npCommId"].str();
+                std::string sony = (*j)["sonyTitleId"].str();
+                if (!np.empty()) titleSet.insert({np, sony});
+            }
+        }
+    }
 
-    // Clean up cached icons
-    std::string iconsDir = trophyCacheDir() + "/icons";
-    DIR* dIcons = ::opendir(iconsDir.c_str());
-    if (dIcons) {
-        struct dirent* de;
-        while ((de = ::readdir(dIcons)) != nullptr) {
-            std::string sub = de->d_name;
-            if (sub == "." || sub == "..") continue;
-            std::string subPath = iconsDir + "/" + sub;
-            struct stat st{};
-            if (::lstat(subPath.c_str(), &st) == 0 && S_ISDIR(st.st_mode)) {
-                DIR* dSub = ::opendir(subPath.c_str());
-                if (dSub) {
-                    struct dirent* deSub;
-                    while ((deSub = ::readdir(dSub)) != nullptr) {
+    // And what the console itself has for this user (trophies synced before each
+    // user had their own records, or whose records were lost).
+    if (!backend_) backend_.reset(createPlatformTrophyBackend());
+    if (backend_) {
+        if (!initialized_) initialized_ = backend_->init(userId_);
+        std::vector<std::pair<std::string, std::string>> onConsole;
+        backend_->listUserTitles(onConsole);
+        for (const auto& t : onConsole) titleSet.insert(t);
+    }
+
+    // The trophies first: if that fails, the records stay, and the next try
+    // still knows what to remove.
+    std::vector<std::pair<std::string, std::string>> titles(titleSet.begin(), titleSet.end());
+    const bool ok = removeTitles(titles, removedCount, err);
+    if (!ok) {
+        XC_LOGW("trophy sync engine: removeAllTrophies failed (%s); the records are kept", err.c_str());
+        return false;
+    }
+    for (const std::string& fname : records) ::unlink((cacheDir + "/" + fname).c_str());
+
+    // The icons are shared: they go only when no other user has trophies left.
+    if (titlesOfOtherUsers().empty()) {
+        const std::string iconsDir = trophySharedDir() + "/icons";
+        if (DIR* dIcons = ::opendir(iconsDir.c_str())) {
+            std::vector<std::string> subs;
+            while (struct dirent* de = ::readdir(dIcons)) {
+                std::string sub = de->d_name;
+                if (sub != "." && sub != "..") subs.push_back(sub);
+            }
+            ::closedir(dIcons);
+            for (const std::string& sub : subs) {
+                const std::string subPath = iconsDir + "/" + sub;
+                struct stat st{};
+                if (::lstat(subPath.c_str(), &st) != 0 || !S_ISDIR(st.st_mode)) continue;
+                if (DIR* dSub = ::opendir(subPath.c_str())) {
+                    std::vector<std::string> files;
+                    while (struct dirent* deSub = ::readdir(dSub)) {
                         std::string f = deSub->d_name;
-                        if (f == "." || f == "..") continue;
-                        ::unlink((subPath + "/" + f).c_str());
+                        if (f != "." && f != "..") files.push_back(f);
                     }
                     ::closedir(dSub);
+                    for (const std::string& f : files) ::unlink((subPath + "/" + f).c_str());
                 }
                 ::rmdir(subPath.c_str());
             }
         }
-        ::closedir(dIcons);
     }
 
-    std::vector<std::pair<std::string, std::string>> titles(titleSet.begin(), titleSet.end());
-
-    if (!backend_) backend_.reset(createPlatformTrophyBackend());
-    if (backend_) {
-        backend_->removeAllTrophies(titles, removedCount, err);
-    }
-
-    XC_LOGI("trophy sync engine: removeAllTrophies removed %d titles", removedCount);
+    XC_LOGI("trophy sync engine: removeAllTrophies removed %d titles of user 0x%08x (%zu records)", removedCount, userId_,
+            records.size());
     return true;
 }
 
@@ -1082,12 +1160,26 @@ bool g_hasExplicitParams = false;
 std::mutex g_providerMutex;
 TrophyContextProvider g_contextProvider;
 
+std::function<uint32_t()> g_userProvider;  // setTrophyUserProvider()
+
+// The console user the trophies are for, before a task reads or writes anything.
+void applyTrophyUserFromProvider() {
+    std::function<uint32_t()> provider;
+    {
+        std::lock_guard<std::mutex> lock(g_providerMutex);
+        provider = g_userProvider;
+    }
+    if (!provider) return;
+    if (const uint32_t user = provider(); user != 0) syncEngine().setUser(user);
+}
+
 bool processUrgentTasksLocked(std::unique_lock<std::mutex>& lock, TrophySyncContext* ctx = nullptr) {
     bool hadRemoveAll = false;
     while (!g_trophyUrgentQueue.empty() && !g_trophyStopRequested.load()) {
         TrophyTask urgent = std::move(g_trophyUrgentQueue.front());
         g_trophyUrgentQueue.pop_front();
         lock.unlock();
+        applyTrophyUserFromProvider();  // this console user's records and home, before anything is read or removed
 
         if (urgent.type == TaskType::RemoveAll) {
             hadRemoveAll = true;
@@ -1174,6 +1266,7 @@ void trophyThreadMain() {
         }
 
         if (g_trophyStopRequested.load()) break;
+        applyTrophyUserFromProvider();  // this console user's records and home, before anything is read or written
 
         // Handle batch discovery when a new batch sync is initiated
         if (hasBatchPending) {
@@ -1259,7 +1352,7 @@ void trophyThreadMain() {
                     // If cover icon already exists on disk in cache, TitleHub is not needed
                     TitleCacheSummary sum;
                     if (syncEngine().loadTitleCacheSummary(h.titleId, sum) && !sum.npCommId.empty()) {
-                        std::string icon0 = syncEngine().trophyCacheDir() + "/icons/" + sum.npCommId + "/icon0.png";
+                        std::string icon0 = syncEngine().trophySharedDir() + "/icons/" + sum.npCommId + "/icon0.png";
                         struct stat stIcon{};
                         if (::stat(icon0.c_str(), &stIcon) == 0 && stIcon.st_size > 100) {
                             continue;
@@ -1460,9 +1553,7 @@ void trophyThreadMain() {
                         if (!np.empty() && !isRetailInstalledGame(sony)) {
                             int rem = 0;
                             std::string remErr;
-                            if (syncEngine().backend()) {
-                                syncEngine().backend()->removeAllTrophies({{np, sony}}, rem, remErr);
-                            }
+                            syncEngine().removeTitles({{np, sony}}, rem, remErr);
                         }
                     }
                     ::unlink(cPath.c_str());
@@ -1773,6 +1864,11 @@ int titlesDone() {
 
 int titlesTotal() {
     return g_trophyTitlesTotal.load();
+}
+
+void setTrophyUserProvider(std::function<uint32_t()> provider) {
+    std::lock_guard<std::mutex> lock(g_providerMutex);
+    g_userProvider = std::move(provider);
 }
 
 void setTrophyContextProvider(TrophyContextProvider provider) {
