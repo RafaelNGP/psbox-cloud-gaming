@@ -11236,9 +11236,13 @@ static void testM3PlatformAndBitrateUi() {
         CHECK(htmlRes.status == 200);
         CHECK(htmlRes.body.find("id=\"rowUsbControllers\" style=\"display:none;\"") != std::string::npos);
         CHECK(htmlRes.body.find("rowUsb.style.display = s.isPS4 ? 'flex' : 'none'") != std::string::npos);
-        CHECK(htmlRes.body.find("Math.round(fpsN)") != std::string::npos);
-        CHECK(htmlRes.body.find("Math.round(qpN)") != std::string::npos);
-        CHECK(htmlRes.body.find("Mbps (experimental)") != std::string::npos);
+        CHECK(htmlRes.body.find("Math.round(fps)") != std::string::npos);
+        CHECK(htmlRes.body.find("Math.round(qp)") != std::string::npos);
+        // The controller's settings and the gyro live under Mapeamento; the current game's tab only reads.
+        CHECK(htmlRes.body.find("id=\"subRemapGyro\"") != std::string::npos);
+        CHECK(htmlRes.body.find("onclick=\"saveControllerSettings()\"") != std::string::npos);
+        CHECK(htmlRes.body.find("sendStreamParam('") == std::string::npos);
+        CHECK(htmlRes.body.find("' Mbps*'") != std::string::npos);
         CHECK(htmlRes.body.find("Automático:") != std::string::npos);
         CHECK(htmlRes.body.find("Sem Limite:") != std::string::npos);
     }

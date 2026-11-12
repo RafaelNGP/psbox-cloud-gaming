@@ -83,6 +83,7 @@ std::mutex g_playerMutex;
 StreamPlayer* g_player = nullptr;
 std::mutex g_infoMutex;
 ui::StreamInfo g_streamInfo;
+StreamTelemetry g_streamTelemetry;
 std::atomic<uint32_t> g_infoSeq{0};
 std::atomic<bool> g_playingHome{false};
 std::atomic<bool> g_tierPicked{false};

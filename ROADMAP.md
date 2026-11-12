@@ -57,6 +57,15 @@ Status: **Em andamento (in progress / next)**, **Planejado (planned)**, **Futuro
 - **Riscos**: os pacotes são criptografados, e rodá-los fora do Windows pode configurar contorno de DRM; viola os termos da Microsoft, com risco de banimento da conta não quantificado; expectativa errada de online/anti-cheat; depender de uma pilha alpha de terceiros.
 - **Primeiros passos**: acompanhar XoDen e Xodus; testar o XoDen com conta secundária (nunca a principal); só então decidir entre integrar, abrir por atalho ou descartar.
 
+### 7. Seletor de Versão e Downgrade dentro do App (PS5 + PS4) — *possível melhoria (later)*
+- **Ideia**: uma tela em Configurações > Atualizações para escolher uma release anterior quando uma atualização der problema.
+- **PS5** (mudança pequena): o atualizador hoje só consulta a release mais recente e recusa versão mais antiga. Falta listar as releases, aceitar a versão escolhida e manter a verificação de assinatura (`PPSA99810.zip.sig`) e de `contentVersion`.
+- **Limites já levantados (2026-11-12)**:
+  - Versão mínima sugerida: v1.6.9. A v1.6.3 e anteriores consultam o endereço antigo do repositório e deixariam de receber atualizações.
+  - Voltar da v1.7.0 para uma anterior perde o login salvo (o arquivo da conta passou a ser por perfil e selado): a tela precisa avisar que será preciso entrar de novo.
+  - Abaixo da v1.6.9 o app volta a ler o `settings.json` antigo, anterior aos arquivos por perfil.
+- **PS4**: depende do item 3 (auto-update). Só há pacote de PS4 da v1.5.5 em diante, os `.pkg` não têm assinatura `.sig`, e falta testar em console se o sistema instala uma versão menor por cima da atual.
+
 ---
 
 ## 🚫 Decisões Técnicas e Recursos Descartados (Dropped)

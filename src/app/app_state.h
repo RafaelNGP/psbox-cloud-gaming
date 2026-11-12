@@ -80,6 +80,16 @@ extern StreamPlayer* g_player;
 extern std::mutex g_infoMutex;
 extern ui::StreamInfo g_streamInfo;
 extern std::atomic<uint32_t> g_infoSeq;
+// More of the stream's numbers, for the WebUI's read-only telemetry (same mutex, same second).
+struct StreamTelemetry {
+    double decodePeakMs = 0, drawMs = 0, drawPeakMs = 0, onScreenPeakMs = 0, glassMs = 0, glassPeakMs = 0;
+    uint64_t skippedNow = 0, skippedTotal = 0, lateFrames = 0, decodeFailures = 0, keyframeRequests = 0;
+    uint64_t rtpLost = 0, rtpRecovered = 0, rtpNacks = 0, rtpDroppedFrames = 0;
+    uint64_t gapMs = 0, burst = 0, frameLateMs = 0, rembKbps = 0;  // gap, burst, late: of the last second
+    int bestRttMs = -1, reconnects = 0;
+    uint64_t seconds = 0, badSeconds = 0;  // of this session, once the picture runs
+};
+extern StreamTelemetry g_streamTelemetry;
 extern std::atomic<bool> g_playingHome;          // the stream is the user's own Xbox
 extern std::atomic<bool> g_tierPicked;           // the game menu chose a tier: the probe leaves it
 extern std::atomic<uint64_t> g_xboxButtonUntil;  // the Xbox button, held until then (ms)

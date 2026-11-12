@@ -475,6 +475,7 @@ bool coreStartup() {
             root.set("language", g_settings.language);
             root.set("storeCountry", g_settings.storeCountry);
             root.set("resolution", g_settings.resolution);
+            root.set("allow1440", allow1440Locked());
             root.set("maxBitrateMbps", g_settings.maxBitrateMbps);
             root.set("fpsLimit", g_settings.fpsLimit);
             root.set("highRefresh", g_settings.highRefresh);
@@ -499,6 +500,10 @@ bool coreStartup() {
             root.set("triggerProfile", g_settings.triggerProfile);
             root.set("gyroMode", g_settings.gyroMode);
             root.set("gyroLevel", g_settings.gyroLevel);
+            root.set("gyroCurveStart", g_settings.gyroCurveStart);
+            root.set("gyroCurveExp", g_settings.gyroCurveExp);
+            root.set("gyroInvertX", g_settings.gyroInvertX);
+            root.set("gyroInvertY", g_settings.gyroInvertY);
             root.set("touchpadMouse", g_settings.touchpadMouse);
             root.set("padMap", input::padMapJson(g_settings.padMap));
             root.set("keyMap", keyMapToJson(g_settings.keyMap));
@@ -517,6 +522,14 @@ bool coreStartup() {
                     if ((raw.empty() || !country.empty()) && country != g_settings.storeCountry) {
                         g_settings.storeCountry = country;
                         storeChanged = changed = true;
+                    }
+                }
+                if (root.has("resolution") && root["resolution"].isString()) {
+                    const std::string res = root["resolution"].str();
+                    const bool known = res == "best" || res == "1080p" || res == "720p" || (res == "1440p" && allow1440Locked());
+                    if (known && res != g_settings.resolution) {
+                        g_settings.resolution = res;
+                        changed = true;
                     }
                 }
                 if (root.has("voiceRouting")) {
@@ -709,6 +722,34 @@ bool coreStartup() {
                         changed = true;
                     }
                 }
+                if (root.has("gyroCurveStart")) {
+                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroCurveStart"].asInt(g_settings.gyroCurveStart), 0, 40));
+                    if (val != g_settings.gyroCurveStart) {
+                        g_settings.gyroCurveStart = val;
+                        changed = true;
+                    }
+                }
+                if (root.has("gyroCurveExp")) {
+                    int val = static_cast<int>(std::clamp<int64_t>(root["gyroCurveExp"].asInt(g_settings.gyroCurveExp), 10, 40));
+                    if (val != g_settings.gyroCurveExp) {
+                        g_settings.gyroCurveExp = val;
+                        changed = true;
+                    }
+                }
+                if (root.has("gyroInvertX")) {
+                    bool val = root["gyroInvertX"].asBool(g_settings.gyroInvertX);
+                    if (val != g_settings.gyroInvertX) {
+                        g_settings.gyroInvertX = val;
+                        changed = true;
+                    }
+                }
+                if (root.has("gyroInvertY")) {
+                    bool val = root["gyroInvertY"].asBool(g_settings.gyroInvertY);
+                    if (val != g_settings.gyroInvertY) {
+                        g_settings.gyroInvertY = val;
+                        changed = true;
+                    }
+                }
                 if (root.has("touchpadMouse")) {
                     bool val = root["touchpadMouse"].asBool(g_settings.touchpadMouse);
                     if (val != g_settings.touchpadMouse) {
@@ -818,6 +859,36 @@ bool coreStartup() {
             stats.set("isHwDecode", g_streamInfo.isHwDecode);
             stats.set("width", g_streamInfo.width);
             stats.set("height", g_streamInfo.height);
+            // Read-only extras for the WebUI's telemetry tab.
+            const StreamTelemetry& t = g_streamTelemetry;
+            auto ms = [](double v) { return std::round(v * 10.0) / 10.0; };
+            auto n = [](uint64_t v) { return static_cast<int64_t>(v); };
+            stats.set("region", g_streamInfo.region);
+            stats.set("degraded", g_streamInfo.degraded);
+            stats.set("onScreenMs", ms(g_streamInfo.onScreenMs));
+            stats.set("onScreenPeakMs", ms(t.onScreenPeakMs));
+            stats.set("decodePeakMs", ms(t.decodePeakMs));
+            stats.set("drawMs", ms(t.drawMs));
+            stats.set("drawPeakMs", ms(t.drawPeakMs));
+            stats.set("glassMs", ms(t.glassMs));
+            stats.set("glassPeakMs", ms(t.glassPeakMs));
+            stats.set("skippedNow", n(t.skippedNow));
+            stats.set("skippedTotal", n(t.skippedTotal));
+            stats.set("lateFrames", n(t.lateFrames));
+            stats.set("decodeFailures", n(t.decodeFailures));
+            stats.set("keyframeRequests", n(t.keyframeRequests));
+            stats.set("rtpLost", n(t.rtpLost));
+            stats.set("rtpRecovered", n(t.rtpRecovered));
+            stats.set("rtpNacks", n(t.rtpNacks));
+            stats.set("rtpDroppedFrames", n(t.rtpDroppedFrames));
+            stats.set("gapMs", n(t.gapMs));
+            stats.set("burst", n(t.burst));
+            stats.set("frameLateMs", n(t.frameLateMs));
+            stats.set("rembKbps", n(t.rembKbps));
+            stats.set("bestRttMs", t.bestRttMs);
+            stats.set("reconnects", t.reconnects);
+            stats.set("sessionSeconds", n(t.seconds));
+            stats.set("badSeconds", n(t.badSeconds));
         },
         /*getStreamMenuState=*/[](json::Value& menu) {
             ui::GameTile tile;

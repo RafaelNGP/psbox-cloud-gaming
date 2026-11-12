@@ -59,6 +59,7 @@ header .badge { background: var(--primary); color: #fff; font-size: 0.70rem; pad
 .content { max-width: 680px; width: 100%; margin: 12px auto 0 auto; padding: 0 12px 20px 12px; overflow-x: hidden; }
 .subnav { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; width: 100%; max-width: 100%; }
 .subnav .btn { flex: 1 1 120px; }
+.subnav.subnav-grid2 { display: grid; grid-template-columns: 1fr 1fr; }
 .subnav .btn.active { background: var(--primary); border-color: var(--primary); }
 .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 14px; margin-bottom: 14px; width: 100%; max-width: 100%; overflow-x: hidden; }
 .card:last-child { margin-bottom: 0 !important; }
@@ -110,8 +111,24 @@ pre { background: #07080b; border: 1px solid var(--border); border-radius: 10px;
 .telemetry-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 14px; width: 100%; }
 .tel-item { background: var(--surface-alt); border: 1px solid var(--border); border-radius: 10px; padding: 9px 6px; text-align: center; }
 .tel-val { font-size: 1.10rem; font-weight: 700; color: #4ade80; }
+.tel-title { font-size: 0.82rem; margin: 12px 0 6px 0; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; }
+.tel-state { font-weight: 700; }
+.tel-state.ok { color: #4ade80; }
+.tel-state.bad { color: #f87171; }
+.tel-val.warn { color: #fbbf24; }
+.tel-val.bad { color: #f87171; }
 .tel-lbl { font-size: 0.70rem; color: var(--text-dim); text-transform: uppercase; margin-top: 3px; }
 .slider-group { display: flex; flex-direction: column; gap: 4px; margin-bottom: 12px; width: 100%; }
+/* Settings rows on one line: the name on the left half, the value on the right half. */
+.rows-half .map-item { flex-wrap: nowrap; }
+.rows-half .map-item label { flex: 1 1 50%; }
+.rows-half .map-item > select { flex: 1 1 50%; width: 50%; text-overflow: ellipsis; }
+.rows-half .map-item > input[type=color] { flex: 0 0 44px; }
+.rows-half .slider-group { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; column-gap: 10px; }
+.rows-half .slider-group > .slider-header { gap: 8px; align-items: center; }
+.rows-half .slider-group > .slider-header > .slider-val { white-space: nowrap; }
+.rows-half .slider-group > p { grid-column: 1 / -1; }
+.rows-half .slider-group > input[type=range] { min-width: 0; width: 100%; }
 .slider-header { display: flex; justify-content: space-between; font-size: 0.84rem; font-weight: 600; }
 .slider-val { color: #4ade80; }
 input[type="range"] { width: 100%; accent-color: var(--primary); margin: 6px 0; }
@@ -748,20 +765,49 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 <div class="content">
   <!-- TAB: SETTINGS -->
   <div id="tab-settings" class="tab-pane" style="display:none;">
-    <div class="card">
+    <div class="card rows-half">
       <h2>⚙️ Configurações Gerais</h2>
-      <p>Ajuste opções gráficas, de controle e comportamento do aplicativo.</p>
-      
-      <div class="slider-group">
-        <div class="slider-header">
-          <span>Bitrate Máximo</span>
-          <span class="slider-val" id="valBitrate">Automático</span>
-        </div>
-        <input type="range" id="inputBitrate" min="0" max="55" step="5" value="0" oninput="onBitrateInput(this.value)">
-        <p style="font-size:0.76rem; color:var(--text-dim); margin:4px 0 0 0;"><strong>Automático:</strong> usa o teto nativo do perfil Xbox (720p ~12 Mbps, 1080p ~25–30 Mbps, 1440p ~40 Mbps). <strong>Sem Limite:</strong> remove a trava do app até o limite real do servidor Xbox. Valores acima de 15 Mbps são experimentais.</p>
+      <p>Ajuste a imagem, a transmissão e o comportamento do aplicativo. Os ajustes do controle ficam em Mapeamento.</p>
+
+      <div class="map-item" style="margin-bottom: 10px;">
+        <label>Decodificador de Vídeo</label>
+        <select id="selectVideoDecoder" onchange="markSettingsChanged()">
+          <option value="0" id="optVideoHw">GPU (Hardware)</option>
+          <option value="1">CPU (Software)</option>
+        </select>
       </div>
 
-      <div class="map-item" style="margin-top: 10px; margin-bottom: 12px;">
+      <div class="map-item" style="margin-bottom: 10px;">
+        <label>Resolução</label>
+        <select id="selectResolution" onchange="markSettingsChanged()">
+          <option value="best">Auto (melhor)</option>
+          <option value="1080p">1080p</option>
+          <option value="720p">720p</option>
+          <option value="1440p" id="optRes1440">1440p (experimental)</option>
+        </select>
+      </div>
+
+      <div class="map-item" style="margin-bottom: 10px;">
+        <label>Upscaler de Imagem</label>
+        <select id="selectUpscaler" onchange="markSettingsChanged()">
+          <option value="0">FSR 1.0</option>
+          <option value="1">Anime4K</option>
+          <option value="2">FSR 1.0 + Clean-up</option>
+          <option value="3">Anime4K + Clean-up</option>
+        </select>
+      </div>
+
+      <div class="map-item" style="margin-bottom: 10px;">
+        <label>Suavização (Deband)</label>
+        <select id="selectDeband" onchange="markSettingsChanged()">
+          <option value="0">Off</option>
+          <option value="1">Baixa</option>
+          <option value="2">Alta</option>
+          <option value="3">Auto</option>
+        </select>
+      </div>
+
+      <div class="map-item" style="margin-bottom: 10px;">
         <label>Limitador de FPS</label>
         <select id="selectFpsLimit" onchange="markSettingsChanged()">
           <option value="0">Ilimitado</option>
@@ -771,94 +817,67 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
         </select>
       </div>
 
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Nitidez CAS</span>
+          <span class="slider-val" id="valCas">Média</span>
+        </div>
+        <input type="range" id="inputCas" min="0" max="3" step="1" value="2" oninput="updateCasLabel(this.value); markSettingsChanged()">
+      </div>
+
+      <div class="slider-group">
+        <div class="slider-header">
+          <span>Bitrate Máximo</span>
+          <span class="slider-val" id="valBitrate">Auto</span>
+        </div>
+        <input type="range" id="inputBitrate" min="0" max="55" step="5" value="0" oninput="onBitrateInput(this.value)">
+        <p style="font-size:0.76rem; color:var(--text-dim); margin:4px 0 0 0;"><strong>Automático:</strong> usa o teto nativo do perfil Xbox (720p ~12 Mbps, 1080p ~25–30 Mbps, 1440p ~40 Mbps). <strong>Sem Limite:</strong> remove a trava do app até o limite real do servidor Xbox. *Valores acima de 15 Mbps são experimentais.</p>
+      </div>
+
       <div class="toggle-row">
-        <span class="toggle-label">Modo 120 Hz (High Refresh / VRR)</span>
+        <span class="toggle-label">Modo 120 Hz (VRR)</span>
         <label class="switch">
           <input type="checkbox" id="check120Hz" onchange="markSettingsChanged()">
           <span class="slider-sw"></span>
         </label>
       </div>
 
-      <div class="slider-group" style="margin-top: 10px;">
-        <div class="slider-header">
-          <span>Zona Morta - Analógico Esquerdo (L)</span>
-          <span class="slider-val" id="valDeadzoneL">15%</span>
-        </div>
-        <input type="range" id="inputDeadzoneL" min="0" max="50" step="1" value="15" oninput="document.getElementById('valDeadzoneL').textContent=this.value+'%'; markSettingsChanged()">
-      </div>
-
-      <div class="slider-group">
-        <div class="slider-header">
-          <span>Zona Morta - Analógico Direito (R)</span>
-          <span class="slider-val" id="valDeadzoneR">15%</span>
-        </div>
-        <input type="range" id="inputDeadzoneR" min="0" max="50" step="1" value="15" oninput="document.getElementById('valDeadzoneR').textContent=this.value+'%'; markSettingsChanged()">
-      </div>
-
-      <div class="slider-group">
-        <div class="slider-header">
-          <span>Vibração dos Gatilhos</span>
-          <span class="slider-val" id="valTriggerStrength">2</span>
-        </div>
-        <input type="range" id="inputTriggerStrength" min="0" max="4" step="1" value="2" oninput="document.getElementById('valTriggerStrength').textContent=this.value; markSettingsChanged()">
-      </div>
-
-      <div class="map-item" style="margin-bottom: 10px;">
-        <label id="lblLightBar">Barra de Luz DualSense</label>
-        <select id="selectLightBarMode" onchange="onLightBarModeChange()">
-          <option value="0">Cor do Jogo</option>
-          <option value="1">Cor Personalizada</option>
-          <option value="2">Desativada</option>
-        </select>
-        <input type="color" id="inputLightBarColor" value="#0070dc" style="margin-left: 8px; height: 32px; width: 44px; border: none; border-radius: 6px; cursor: pointer; display: none;" onchange="markSettingsChanged()">
-      </div>
-
-      <div class="toggle-row">
-        <span class="toggle-label">Aviso Sonoro de Fila (Queue Chime)</span>
+      <div class="toggle-row" style="margin-bottom: 10px;">
+        <span class="toggle-label">Aviso Sonoro de Fila</span>
         <label class="switch">
           <input type="checkbox" id="checkQueueAlert" onchange="markSettingsChanged()">
           <span class="slider-sw"></span>
         </label>
       </div>
 
-      <div class="toggle-row" id="rowUsbControllers" style="display:none;">
-        <span class="toggle-label">Controles USB (Driver OneFamily integrado)</span>
-        <label class="switch">
-          <input type="checkbox" id="checkUsbControllers" onchange="markSettingsChanged()">
-          <span class="slider-sw"></span>
-        </label>
-      </div>
-
-      <div class="map-item" style="margin-top: 10px;">
-        <label>Decodificador de Vídeo</label>
-        <select id="selectVideoDecoder" onchange="markSettingsChanged()">
-          <option value="0" id="optVideoHw">Hardware (libSceVideodec2 / HWAccel)</option>
-          <option value="1">Software (FFmpeg CPU)</option>
-        </select>
-      </div>
-
-      <div class="map-item" style="margin-top: 10px;">
+      <div class="map-item" style="margin-bottom: 10px;">
         <label>Saída do Chat de Voz</label>
         <select id="selectVoiceRouting" onchange="markSettingsChanged()">
-          <option value="0" id="optVoiceAuto">Automático (Alto-falante DualSense se disponível)</option>
-          <option value="1">Sempre TV / Headset Principal</option>
+          <option value="0" id="optVoiceAuto">Auto (DualSense)</option>
+          <option value="1">TV / Headset</option>
         </select>
       </div>
 
-      <div class="btn-row" style="margin-top: 16px;">
-        <div class="map-item" style="margin-bottom: 14px;">
-          <label for="selectStoreCountry">País da loja</label>
-          <select id="selectStoreCountry" onchange="markSettingsChanged()">
-            <option value="">Automático (país da conta)</option>
-            <option value="br">Brasil</option>
-            <option value="jp">Japão</option>
-            <option value="kr">Coreia do Sul</option>
-            <option value="pl">Polônia</option>
-            <option value="us">Estados Unidos</option>
-          </select>
-          <p>Define o catálogo, os preços e as ofertas. Não altera a região de streaming.</p>
-        </div>
+      <div class="map-item" style="margin-bottom: 4px;">
+        <label for="selectStoreCountry">País da loja</label>
+        <select id="selectStoreCountry" onchange="markSettingsChanged()">
+          <option value="">Auto (conta)</option>
+          <option value="br">Brasil</option>
+          <option value="jp">Japão</option>
+          <option value="kr">Coreia do Sul</option>
+          <option value="pl">Polônia</option>
+          <option value="us">Estados Unidos</option>
+        </select>
+      </div>
+      <p style="font-size:0.76rem; color:var(--text-dim); margin:0 0 14px 0;">Define o catálogo, os preços e as ofertas. Não altera a região de streaming.</p>
+
+      <div class="btn-row">
         <button class="btn btn-primary" onclick="saveGeneralSettings()">Salvar Configurações</button>
+      </div>
+
+      <div class="btn-row" style="margin-top: 10px;">
+        <button class="btn" onclick="sendStreamAction('xbox_guide')">Abrir Guia Xbox</button>
+        <button class="btn btn-danger" onclick="sendStreamAction('end_session')">Encerrar Transmissão</button>
       </div>
     </div>
   </div>
@@ -867,66 +886,44 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
   <div id="tab-stream" class="tab-pane" style="display:none;">
     <div class="card">
       <h2>📺 Jogo Atual & Telemetria</h2>
-      <p>Métricas de transmissão em tempo real e ajustes do menu de jogo (StreamMenu).</p>
+      <p>Métricas da transmissão em tempo real, atualizadas a cada segundo. Somente leitura. <span id="telState" class="tel-state">--</span></p>
 
+      <h3 class="tel-title">Imagem</h3>
       <div class="telemetry-grid">
+        <div class="tel-item"><div class="tel-val" id="telRes">--</div><div class="tel-lbl">Resolução</div></div>
         <div class="tel-item"><div class="tel-val" id="telFps">--</div><div class="tel-lbl">FPS</div></div>
-        <div class="tel-item"><div class="tel-val" id="telRtt">-- ms</div><div class="tel-lbl">RTT (Ping)</div></div>
         <div class="tel-item"><div class="tel-val" id="telMbps">-- Mbps</div><div class="tel-lbl">Bitrate</div></div>
-        <div class="tel-item"><div class="tel-val" id="telLoss">0.0%</div><div class="tel-lbl">Perda Pkts</div></div>
         <div class="tel-item"><div class="tel-val" id="telQp">--</div><div class="tel-lbl">QP (Qualidade)</div></div>
-        <div class="tel-item"><div class="tel-val" id="telDec">-- ms</div><div class="tel-lbl">Decodificação</div></div>
+        <div class="tel-item"><div class="tel-val" id="telDec">-- ms</div><div class="tel-lbl">Decodificação (média / pico)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telDraw">-- ms</div><div class="tel-lbl">Desenho GPU (média / pico)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telOnScreen">-- ms</div><div class="tel-lbl">Chegada até a tela (média / pico)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telGlass">-- ms</div><div class="tel-lbl">1º pacote até a tela (média / pico)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telSkipped">--</div><div class="tel-lbl">Quadros pulados (agora / total)</div></div>
       </div>
 
-      <div class="slider-group" style="margin-top: 10px;">
-        <div class="slider-header">
-          <span>Nitidez CAS (FidelityFX RCAS)</span>
-          <span class="slider-val" id="valCas">Média</span>
-        </div>
-        <input type="range" id="inputCas" min="0" max="3" step="1" value="2" oninput="sendStreamParam('sharpness', parseInt(this.value)); updateCasLabel(this.value);">
+      <h3 class="tel-title">Rede</h3>
+      <div class="telemetry-grid">
+        <div class="tel-item"><div class="tel-val" id="telRegion">--</div><div class="tel-lbl">Região</div></div>
+        <div class="tel-item"><div class="tel-val" id="telRtt">-- ms</div><div class="tel-lbl">RTT (atual / melhor)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telLoss">0.0%</div><div class="tel-lbl">Perda de pacotes</div></div>
+        <div class="tel-item"><div class="tel-val" id="telGap">-- ms</div><div class="tel-lbl">Maior pausa entre pacotes</div></div>
+        <div class="tel-item"><div class="tel-val" id="telBurst">--</div><div class="tel-lbl">Quadros chegando juntos</div></div>
+        <div class="tel-item"><div class="tel-val" id="telFrameLate">-- ms</div><div class="tel-lbl">Atraso do quadro na rede</div></div>
+        <div class="tel-item"><div class="tel-val" id="telLost">--</div><div class="tel-lbl">Pacotes perdidos / recuperados</div></div>
+        <div class="tel-item"><div class="tel-val" id="telNacks">--</div><div class="tel-lbl">Reenvios pedidos (NACK)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telNetDropped">--</div><div class="tel-lbl">Quadros perdidos na rede</div></div>
+        <div class="tel-item"><div class="tel-val" id="telKf">--</div><div class="tel-lbl">Pedidos de keyframe</div></div>
+        <div class="tel-item"><div class="tel-val" id="telRemb">-- Mbps</div><div class="tel-lbl">Banda estimada (REMB)</div></div>
+        <div class="tel-item"><div class="tel-val" id="telReconnects">--</div><div class="tel-lbl">Reconexões</div></div>
       </div>
 
-      <div class="map-item" style="margin-bottom: 10px;">
-        <label>Upscaler de Imagem</label>
-        <select id="selectUpscaler" onchange="sendStreamParam('upscaler', parseInt(this.value))">
-          <option value="0">FSR 1.0</option>
-          <option value="1">Anime4K</option>
-          <option value="2">FSR 1.0 + Clean-up</option>
-          <option value="3">Anime4K + Clean-up</option>
-        </select>
+      <h3 class="tel-title">Sessão</h3>
+      <div class="telemetry-grid">
+        <div class="tel-item"><div class="tel-val" id="telTime">--</div><div class="tel-lbl">Tempo de jogo</div></div>
+        <div class="tel-item"><div class="tel-val" id="telBad">--</div><div class="tel-lbl">Segundos com problema</div></div>
+        <div class="tel-item"><div class="tel-val" id="telLate">--</div><div class="tel-lbl">Quadros atrasados / falhas</div></div>
       </div>
-
-      <div class="map-item" style="margin-bottom: 10px;">
-        <label>Suavização de Blocos (Deband)</label>
-        <select id="selectDeband" onchange="sendStreamParam('deband', parseInt(this.value))">
-          <option value="0">Desativada</option>
-          <option value="1">Baixa</option>
-          <option value="2">Alta</option>
-          <option value="3">Automática (Bitrate-adaptive)</option>
-        </select>
-      </div>
-
-      <div class="slider-group">
-        <div class="slider-header">
-          <span id="lblPadSpeaker">Volume Alto-falante DualSense</span>
-          <span class="slider-val" id="valPadSpeaker">100%</span>
-        </div>
-        <input type="range" id="inputPadSpeaker" min="0" max="100" step="5" value="100" oninput="document.getElementById('valPadSpeaker').textContent=this.value+'%'; sendStreamParam('padSpeakerVolume', parseInt(this.value));">
-      </div>
-
-      <div class="map-item" style="margin-bottom: 14px;">
-        <label>Perfis de Gatilho Inteligente</label>
-        <select id="selectSmartTriggers" onchange="sendStreamParam('triggerProfile', parseInt(this.value))">
-          <option value="0">Padrão (Standard Haptics)</option>
-          <option value="1">Tiro (Shooter - Hair Trigger)</option>
-          <option value="2">Corrida (Racing - Progressive Resistance)</option>
-        </select>
-      </div>
-
-      <div class="btn-row">
-        <button class="btn btn-primary" onclick="sendStreamAction('xbox_guide')">Abrir Guia Xbox</button>
-        <button class="btn btn-danger" onclick="sendStreamAction('end_session')">Encerrar Sessão</button>
-      </div>
+      <p style="font-size:0.76rem; color:var(--text-dim); margin:10px 0 0 0;"><strong>Como ler:</strong> pausas entre pacotes acima de ~100 ms com vários quadros chegando juntos indicam engasgo de rede (Wi-Fi ou rota). Decodificação ou desenho com pico alto indicam o console. "Agora" é o último segundo.</p>
     </div>
   </div>
 
@@ -1051,10 +1048,11 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
 
   <!-- TAB: REMAP -->
   <div id="tab-remap" class="tab-pane" style="display:none;">
-    <div class="subnav">
+    <div class="subnav subnav-grid2">
       <button class="btn active" id="btnSubPad" onclick="switchRemapSub('pad')">🎮 DualSense</button>
       <button class="btn" id="btnSubKey" onclick="switchRemapSub('key')">⌨️ Teclado</button>
       <button class="btn" id="btnSubTouch" onclick="switchRemapSub('touch')">👆 Touchpad</button>
+      <button class="btn" id="btnSubGyro" onclick="switchRemapSub('gyro')">🧭 Giroscópio</button>
     </div>
 
     <div id="subRemapPad">
@@ -1065,6 +1063,74 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
         <div class="btn-row">
           <button class="btn btn-primary" onclick="saveSettings()">Salvar no Console</button>
           <button class="btn" onclick="resetPadMap()">Restaurar Controle Padrão</button>
+        </div>
+      </div>
+
+      <div class="card rows-half">
+        <h2 id="h2PadSettings">🎛️ Ajustes do Controle</h2>
+        <p>Zonas mortas, gatilhos, barra de luz e alto-falante do controle.</p>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Zona Morta<br>Esquerda (L)</span>
+            <span class="slider-val" id="valDeadzoneL">15%</span>
+          </div>
+          <input type="range" id="inputDeadzoneL" min="0" max="50" step="1" value="15" oninput="document.getElementById('valDeadzoneL').textContent=this.value+'%'">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Zona Morta<br>Direita (R)</span>
+            <span class="slider-val" id="valDeadzoneR">15%</span>
+          </div>
+          <input type="range" id="inputDeadzoneR" min="0" max="50" step="1" value="15" oninput="document.getElementById('valDeadzoneR').textContent=this.value+'%'">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span id="lblPadSpeaker">Alto-falante DualSense</span>
+            <span class="slider-val" id="valPadSpeaker">100%</span>
+          </div>
+          <input type="range" id="inputPadSpeaker" min="0" max="100" step="5" value="100" oninput="document.getElementById('valPadSpeaker').textContent=this.value+'%'">
+        </div>
+
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Vibração dos Gatilhos</span>
+            <span class="slider-val" id="valTriggerStrength">2</span>
+          </div>
+          <input type="range" id="inputTriggerStrength" min="0" max="4" step="1" value="2" oninput="document.getElementById('valTriggerStrength').textContent=this.value">
+        </div>
+
+        <div class="map-item" style="margin-bottom: 10px;">
+          <label>Gatilho Inteligente</label>
+          <select id="selectSmartTriggers">
+            <option value="0">Padrão</option>
+            <option value="1">Tiro (Shooter)</option>
+            <option value="2">Corrida (Racing)</option>
+          </select>
+        </div>
+
+        <div class="map-item" style="margin-bottom: 10px;">
+          <label id="lblLightBar">Barra de Luz DualSense</label>
+          <select id="selectLightBarMode" onchange="onLightBarModeChange()">
+            <option value="0">Cor do Jogo</option>
+            <option value="1">Cor Personalizada</option>
+            <option value="2">Desativada</option>
+          </select>
+          <input type="color" id="inputLightBarColor" value="#0070dc" style="margin-left: 8px; height: 32px; width: 44px; border: none; border-radius: 6px; cursor: pointer; display: none;">
+        </div>
+
+        <div class="toggle-row" id="rowUsbControllers" style="display:none;">
+          <span class="toggle-label">Controles USB (Driver OneFamily integrado)</span>
+          <label class="switch">
+            <input type="checkbox" id="checkUsbControllers">
+            <span class="slider-sw"></span>
+          </label>
+        </div>
+
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="saveControllerSettings()">Salvar no Console</button>
         </div>
       </div>
     </div>
@@ -1089,6 +1155,44 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
         <div class="btn-row">
           <button class="btn btn-primary" onclick="saveSettings()">Salvar no Console</button>
           <button class="btn" onclick="resetTouchpadShortcuts()">Restaurar Touchpad Padrão</button>
+        </div>
+      </div>
+    </div>
+    <div id="subRemapGyro" style="display:none;">
+      <div class="card rows-half">
+        <h2>🧭 Giroscópio (Resposta do jogo)</h2>
+        <p>Ajuste como a mira por giroscópio compensa a resposta do analógico no jogo. Vale para os jogos sem ajuste próprio.</p>
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Início da resposta</span>
+            <span class="slider-val" id="valGyroCurveStart">12%</span>
+          </div>
+          <input type="range" id="inputGyroCurveStart" min="0" max="40" step="1" value="12" oninput="document.getElementById('valGyroCurveStart').textContent=this.value+'%'">
+        </div>
+        <div class="slider-group">
+          <div class="slider-header">
+            <span>Curva</span>
+            <span class="slider-val" id="valGyroCurveExp">1.0</span>
+          </div>
+          <input type="range" id="inputGyroCurveExp" min="10" max="40" step="1" value="10" oninput="document.getElementById('valGyroCurveExp').textContent=(this.value/10).toFixed(1)">
+        </div>
+        <div class="toggle-row">
+          <span class="toggle-label">Inverter horizontal</span>
+          <label class="switch">
+            <input type="checkbox" id="checkGyroInvertX">
+            <span class="slider-sw"></span>
+          </label>
+        </div>
+        <div class="toggle-row" style="margin-bottom: 14px;">
+          <span class="toggle-label">Inverter vertical</span>
+          <label class="switch">
+            <input type="checkbox" id="checkGyroInvertY">
+            <span class="slider-sw"></span>
+          </label>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="saveGyroSettings()">Salvar no Console</button>
+          <button class="btn" onclick="resetGyroResponse()">Restaurar Giroscópio Padrão</button>
         </div>
       </div>
     </div>
@@ -1442,6 +1546,8 @@ function switchRemapSub(mode) {
   document.getElementById('btnSubKey').classList.toggle('active', mode === 'key');
   const btnTouch = document.getElementById('btnSubTouch');
   if (btnTouch) btnTouch.classList.toggle('active', mode === 'touch');
+  document.getElementById('subRemapGyro').style.display = mode === 'gyro' ? 'block' : 'none';
+  document.getElementById('btnSubGyro').classList.toggle('active', mode === 'gyro');
 }
 
 function showToast(msg) {
@@ -1756,9 +1862,9 @@ function onBitrateInput(val) {
   const v = parseInt(val, 10);
   const el = document.getElementById('valBitrate');
   if (el) {
-    if (v === 0) el.textContent = 'Automático';
+    if (v === 0) el.textContent = 'Auto';
     else if (v === 55 || v === -1 || v >= 100) el.textContent = 'Sem Limite';
-    else if (v > 15) el.textContent = v + ' Mbps (experimental)';
+    else if (v > 15) el.textContent = v + ' Mbps*';
     else el.textContent = v + ' Mbps';
   }
 }
@@ -1775,58 +1881,58 @@ function markSettingsChanged() {
   if (isInitializing) return;
 }
 
-function saveGeneralSettings() {
-  if (isInitializing) return;
-  const rawBitrate = parseInt(document.getElementById('inputBitrate').value, 10);
-  const fpsEl = document.getElementById('selectFpsLimit');
-  const rowUsb = document.getElementById('rowUsbControllers');
-  const payload = {
-    maxBitrateMbps: (rawBitrate === 55) ? -1 : rawBitrate,
-    fpsLimit: fpsEl ? parseInt(fpsEl.value, 10) : 0,
-    highRefresh: document.getElementById('check120Hz').checked,
-    deadzoneLeft: parseInt(document.getElementById('inputDeadzoneL').value, 10),
-    deadzoneRight: parseInt(document.getElementById('inputDeadzoneR').value, 10),
-    triggerStrength: parseInt(document.getElementById('inputTriggerStrength').value, 10),
-    lightBarMode: parseInt(document.getElementById('selectLightBarMode').value, 10),
-    lightBarColour: document.getElementById('inputLightBarColor').value,
-    queueReadyAlert: document.getElementById('checkQueueAlert').checked,
-    videoDecoder: parseInt(document.getElementById('selectVideoDecoder').value, 10),
-    voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10),
-    storeCountry: document.getElementById('selectStoreCountry').value
-  };
-  if (rowUsb && rowUsb.style.display !== 'none') {
-    payload.usbControllers = document.getElementById('checkUsbControllers') ? document.getElementById('checkUsbControllers').checked : true;
-  }
+function postSettings(payload) {
   fetch('/api/settings', {
     method: 'POST',
     headers: {'Content-Type': 'application/json'},
     body: JSON.stringify(payload)
   }).then(r => r.json()).then(res => {
-    if (res.ok) {
-      showToast('Configurações salvas no console!');
-    } else {
-      showToast('Erro ao salvar configurações');
-    }
+    showToast(res.ok ? 'Configurações salvas no console!' : 'Erro ao salvar configurações');
   }).catch(() => showToast('Erro ao salvar configurações'));
+}
+
+function saveGeneralSettings() {
+  if (isInitializing) return;
+  const rawBitrate = parseInt(document.getElementById('inputBitrate').value, 10);
+  const fpsEl = document.getElementById('selectFpsLimit');
+  postSettings({
+    videoDecoder: parseInt(document.getElementById('selectVideoDecoder').value, 10),
+    resolution: document.getElementById('selectResolution').value,
+    upscaler: parseInt(document.getElementById('selectUpscaler').value, 10),
+    sharpness: parseInt(document.getElementById('inputCas').value, 10),
+    deband: parseInt(document.getElementById('selectDeband').value, 10),
+    highRefresh: document.getElementById('check120Hz').checked,
+    fpsLimit: fpsEl ? parseInt(fpsEl.value, 10) : 0,
+    maxBitrateMbps: (rawBitrate === 55) ? -1 : rawBitrate,
+    queueReadyAlert: document.getElementById('checkQueueAlert').checked,
+    voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10),
+    storeCountry: document.getElementById('selectStoreCountry').value
+  });
+}
+
+// Mapeamento > DualSense: the controller's own settings.
+function saveControllerSettings() {
+  if (isInitializing) return;
+  const rowUsb = document.getElementById('rowUsbControllers');
+  const payload = {
+    deadzoneLeft: parseInt(document.getElementById('inputDeadzoneL').value, 10),
+    deadzoneRight: parseInt(document.getElementById('inputDeadzoneR').value, 10),
+    triggerStrength: parseInt(document.getElementById('inputTriggerStrength').value, 10),
+    triggerProfile: parseInt(document.getElementById('selectSmartTriggers').value, 10),
+    lightBarMode: parseInt(document.getElementById('selectLightBarMode').value, 10),
+    lightBarColour: document.getElementById('inputLightBarColor').value,
+    padSpeakerVolume: parseInt(document.getElementById('inputPadSpeaker').value, 10)
+  };
+  if (rowUsb && rowUsb.style.display !== 'none') {
+    payload.usbControllers = document.getElementById('checkUsbControllers').checked;
+  }
+  postSettings(payload);
 }
 
 function updateCasLabel(val) {
   const labels = ['Desativada', 'Baixa', 'Média', 'Alta'];
   const el = document.getElementById('valCas');
   if (el) el.textContent = labels[val] !== undefined ? labels[val] : 'Média';
-}
-
-function sendStreamParam(param, val) {
-  if (isInitializing) return;
-  const body = {};
-  body[param] = val;
-  fetch('/api/stream', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  }).then(r => r.json()).then(res => {
-    if (res && res.ok) showToast('Aplicado na transmissão!');
-  }).catch(() => {});
 }
 
 function sendStreamAction(action) {
@@ -1840,30 +1946,49 @@ function sendStreamAction(action) {
   }).catch(() => {});
 }
 
+// The game's stick response gyro aiming works through (Mapeamento > Giroscópio).
+function applyGyroResponse(s) {
+  if (s.gyroCurveStart !== undefined) {
+    const el = document.getElementById('inputGyroCurveStart');
+    if (el) { el.value = s.gyroCurveStart; document.getElementById('valGyroCurveStart').textContent = s.gyroCurveStart + '%'; }
+  }
+  if (s.gyroCurveExp !== undefined) {
+    const el = document.getElementById('inputGyroCurveExp');
+    if (el) { el.value = s.gyroCurveExp; document.getElementById('valGyroCurveExp').textContent = (s.gyroCurveExp / 10).toFixed(1); }
+  }
+  if (s.gyroInvertX !== undefined) {
+    const el = document.getElementById('checkGyroInvertX');
+    if (el) el.checked = !!s.gyroInvertX;
+  }
+  if (s.gyroInvertY !== undefined) {
+    const el = document.getElementById('checkGyroInvertY');
+    if (el) el.checked = !!s.gyroInvertY;
+  }
+}
+
+function saveGyroSettings() {
+  if (isInitializing) return;
+  fetch('/api/settings', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      gyroCurveStart: parseInt(document.getElementById('inputGyroCurveStart').value, 10),
+      gyroCurveExp: parseInt(document.getElementById('inputGyroCurveExp').value, 10),
+      gyroInvertX: document.getElementById('checkGyroInvertX').checked,
+      gyroInvertY: document.getElementById('checkGyroInvertY').checked
+    })
+  }).then(r => r.json()).then(res => {
+    if (res.ok) showToast('Configurações salvas no console!');
+  }).catch(e => showToast('Erro ao salvar configurações'));
+}
+
+function resetGyroResponse() {
+  applyGyroResponse({gyroCurveStart: 12, gyroCurveExp: 10, gyroInvertX: false, gyroInvertY: false});
+  saveGyroSettings();
+}
+
 function loadStreamMenuState() {
   fetch('/api/stream').then(r => r.json()).then(s => {
-    if (s.sharpness !== undefined) {
-      const el = document.getElementById('inputCas');
-      if (el) { el.value = s.sharpness; updateCasLabel(s.sharpness); }
-    }
-    if (s.upscaler !== undefined) {
-      const el = document.getElementById('selectUpscaler');
-      if (el) el.value = s.upscaler;
-    }
-    if (s.deband !== undefined) {
-      const el = document.getElementById('selectDeband');
-      if (el) el.value = s.deband;
-    }
-    if (s.padSpeakerVolume !== undefined) {
-      const el = document.getElementById('inputPadSpeaker');
-      if (el) el.value = s.padSpeakerVolume;
-      const vlbl = document.getElementById('valPadSpeaker');
-      if (vlbl) vlbl.textContent = s.padSpeakerVolume + '%';
-    }
-    if (s.triggerProfile !== undefined) {
-      const el = document.getElementById('selectSmartTriggers');
-      if (el) el.value = s.triggerProfile;
-    }
     if (s.touchpadShortcuts) {
       renderAllTouchpadGrids(s.touchpadShortcuts);
     }
@@ -1872,24 +1997,52 @@ function loadStreamMenuState() {
 
 function renderTelemetry(data) {
   if (!data) return;
-  if (data.fps !== undefined) {
-    const fpsN = Number(data.fps);
-    document.getElementById('telFps').textContent = Number.isFinite(fpsN) ? Math.round(fpsN) : '--';
+  const num = v => (typeof v === 'number' && Number.isFinite(v)) ? v : null;
+  const put = (id, text, level) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.toggle('warn', level === 1);
+    el.classList.toggle('bad', level === 2);
+  };
+  const lvl = (v, warn, bad) => v === null ? 0 : (v >= bad ? 2 : (v >= warn ? 1 : 0));
+  const pair = (a, b, digits) => (a === null ? '--' : a.toFixed(digits)) + ' / ' + (b === null ? '--' : b.toFixed(digits));
+  const fps = num(data.fps), rtt = num(data.rttMs), best = num(data.bestRttMs), mbps = num(data.mbps), loss = num(data.lossPct), qp = num(data.qp);
+  const live = fps !== null && fps > 0;
+  const state = document.getElementById('telState');
+  if (state) {
+    state.textContent = !live ? 'Sem transmissão.' : (data.degraded ? 'Conexão degradada.' : 'Conexão estável.');
+    state.classList.toggle('ok', live && !data.degraded);
+    state.classList.toggle('bad', live && !!data.degraded);
   }
-  if (data.rttMs !== undefined) {
-    const rttN = Number(data.rttMs);
-    document.getElementById('telRtt').textContent = (Number.isFinite(rttN) ? Math.round(rttN) : '--') + ' ms';
-  }
-  if (data.mbps !== undefined) document.getElementById('telMbps').textContent = (typeof data.mbps === 'number' ? data.mbps.toFixed(1) : data.mbps) + ' Mbps';
-  if (data.lossPct !== undefined) document.getElementById('telLoss').textContent = (typeof data.lossPct === 'number' ? data.lossPct.toFixed(1) : data.lossPct) + '%';
-  if (data.qp !== undefined) {
-    const qpN = Number(data.qp);
-    document.getElementById('telQp').textContent = (!Number.isFinite(qpN) || qpN < 0) ? '--' : Math.round(qpN);
-  }
-  if (data.decodeMs !== undefined) {
-    const hwStr = data.isHwDecode !== undefined ? (data.isHwDecode ? ' (HW)' : ' (SW)') : '';
-    document.getElementById('telDec').textContent = (typeof data.decodeMs === 'number' ? data.decodeMs.toFixed(1) : data.decodeMs) + ' ms' + hwStr;
-  }
+  put('telRes', (num(data.width) && num(data.height)) ? data.width + 'x' + data.height : '--');
+  put('telFps', fps === null ? '--' : String(Math.round(fps)));
+  put('telMbps', (mbps === null ? '--' : mbps.toFixed(1)) + ' Mbps');
+  put('telQp', (qp === null || qp < 0) ? '--' : String(Math.round(qp)), lvl(qp, 32, 38));
+  const hw = data.isHwDecode !== undefined ? (data.isHwDecode ? ' (HW)' : ' (SW)') : '';
+  put('telDec', pair(num(data.decodeMs), num(data.decodePeakMs), 1) + ' ms' + hw, lvl(num(data.decodePeakMs), 12, 16));
+  put('telDraw', pair(num(data.drawMs), num(data.drawPeakMs), 1) + ' ms', lvl(num(data.drawPeakMs), 14, 17));
+  put('telOnScreen', pair(num(data.onScreenMs), num(data.onScreenPeakMs), 1) + ' ms');
+  put('telGlass', pair(num(data.glassMs), num(data.glassPeakMs), 1) + ' ms');
+  const skipNow = num(data.skippedNow);
+  put('telSkipped', (skipNow === null ? '--' : skipNow) + ' / ' + (num(data.skippedTotal) === null ? '--' : data.skippedTotal), lvl(skipNow, 1, 5));
+  put('telRegion', data.region ? String(data.region) : '--');
+  put('telRtt', ((rtt === null || rtt < 0) ? '--' : Math.round(rtt)) + ' / ' + ((best === null || best < 0) ? '--' : Math.round(best)) + ' ms', lvl(rtt, 60, 100));
+  put('telLoss', (loss === null ? '--' : loss.toFixed(1)) + '%', lvl(loss, 0.5, 2));
+  const gap = num(data.gapMs), burst = num(data.burst);
+  put('telGap', (gap === null ? '--' : gap) + ' ms', lvl(gap, 60, 100));
+  put('telBurst', burst === null ? '--' : String(burst), lvl(burst, 3, 6));
+  put('telFrameLate', (num(data.frameLateMs) === null ? '--' : data.frameLateMs) + ' ms', lvl(num(data.frameLateMs), 50, 100));
+  put('telLost', (num(data.rtpLost) === null ? '--' : data.rtpLost) + ' / ' + (num(data.rtpRecovered) === null ? '--' : data.rtpRecovered));
+  put('telNacks', num(data.rtpNacks) === null ? '--' : String(data.rtpNacks));
+  put('telNetDropped', num(data.rtpDroppedFrames) === null ? '--' : String(data.rtpDroppedFrames), lvl(num(data.rtpDroppedFrames), 1, 10));
+  put('telKf', num(data.keyframeRequests) === null ? '--' : String(data.keyframeRequests));
+  put('telRemb', (num(data.rembKbps) === null ? '--' : (data.rembKbps / 1000).toFixed(1)) + ' Mbps');
+  put('telReconnects', num(data.reconnects) === null ? '--' : String(data.reconnects), lvl(num(data.reconnects), 1, 3));
+  const secs = num(data.sessionSeconds);
+  put('telTime', secs === null ? '--' : Math.floor(secs / 60) + ' min ' + (secs % 60) + ' s');
+  put('telBad', num(data.badSeconds) === null ? '--' : String(data.badSeconds), lvl(num(data.badSeconds), 1, 30));
+  put('telLate', (num(data.lateFrames) === null ? '--' : data.lateFrames) + ' / ' + (num(data.decodeFailures) === null ? '--' : data.decodeFailures));
 }
 
 let ws = null;
@@ -2075,19 +2228,13 @@ function applyPlatformAdaptation(s) {
   if (rowUsb && s.isPS4 !== undefined) {
     rowUsb.style.display = s.isPS4 ? 'flex' : 'none';
   }
-  const optVideoHw = document.getElementById('optVideoHw');
-  if (optVideoHw && (s.isPS4 !== undefined || s.isPS5 !== undefined)) {
-    optVideoHw.textContent = (s.isPS4 || s.isPS5) ? 'Hardware (libSceVideodec2)' : 'Hardware (HWAccel)';
-  }
   const padName = (s.isPS4 && !s.isPS5) ? 'DualShock 4' : 'DualSense';
   const lblLightBar = document.getElementById('lblLightBar');
   if (lblLightBar) lblLightBar.textContent = 'Barra de Luz ' + padName;
   const optVoiceAuto = document.getElementById('optVoiceAuto');
-  if (optVoiceAuto) optVoiceAuto.textContent = (s.isPS4 && !s.isPS5)
-    ? 'Automático (Alto-falante DualShock 4 se disponível)'
-    : 'Automático (Alto-falante DualSense se disponível)';
+  if (optVoiceAuto) optVoiceAuto.textContent = 'Auto (' + padName + ')';
   const lblPadSpeaker = document.getElementById('lblPadSpeaker');
-  if (lblPadSpeaker) lblPadSpeaker.textContent = 'Volume Alto-falante ' + padName;
+  if (lblPadSpeaker) lblPadSpeaker.textContent = 'Alto-falante ' + padName;
   const btnSubPad = document.getElementById('btnSubPad');
   if (btnSubPad) btnSubPad.textContent = '\uD83C\uDFAE ' + padName;
   const h2RemapPad = document.getElementById('h2RemapPad');
@@ -2187,6 +2334,33 @@ function applyLoadedSettings(s) {
   if (s.highRefresh !== undefined) {
     const el = document.getElementById('check120Hz');
     if (el) el.checked = !!s.highRefresh;
+  }
+  applyGyroResponse(s);
+  if (s.resolution !== undefined) {
+    const opt1440 = document.getElementById('optRes1440');
+    if (opt1440) opt1440.hidden = opt1440.disabled = (s.allow1440 === false && s.resolution !== '1440p');
+    const el = document.getElementById('selectResolution');
+    if (el) el.value = s.resolution;
+  }
+  if (s.sharpness !== undefined) {
+    const el = document.getElementById('inputCas');
+    if (el) { el.value = s.sharpness; updateCasLabel(s.sharpness); }
+  }
+  if (s.upscaler !== undefined) {
+    const el = document.getElementById('selectUpscaler');
+    if (el) el.value = s.upscaler;
+  }
+  if (s.deband !== undefined) {
+    const el = document.getElementById('selectDeband');
+    if (el) el.value = s.deband;
+  }
+  if (s.padSpeakerVolume !== undefined) {
+    const el = document.getElementById('inputPadSpeaker');
+    if (el) { el.value = s.padSpeakerVolume; document.getElementById('valPadSpeaker').textContent = s.padSpeakerVolume + '%'; }
+  }
+  if (s.triggerProfile !== undefined) {
+    const el = document.getElementById('selectSmartTriggers');
+    if (el) el.value = s.triggerProfile;
   }
   if (s.deadzoneLeft !== undefined) {
     const el = document.getElementById('inputDeadzoneL');

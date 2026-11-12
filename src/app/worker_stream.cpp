@@ -560,8 +560,21 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 info.cloudTimeSeconds = cloud.left(platform::nowMs());
                 info.playtimeSeconds = prevPlaytime + session.seconds;
                 player.getRecentFrametimes(info.frametimes);
+                StreamTelemetry tel;
+                tel.decodePeakMs = st.decodeMaxUs / 1000.0;
+                tel.drawMs = st.drawAvgUs / 1000.0, tel.drawPeakMs = st.drawMaxUs / 1000.0;
+                tel.onScreenPeakMs = st.displayMaxUs / 1000.0;
+                tel.glassMs = st.glassAvgUs / 1000.0, tel.glassPeakMs = st.glassMaxUs / 1000.0;
+                tel.skippedNow = st.droppedFrames - last.droppedFrames, tel.skippedTotal = st.droppedFrames;
+                tel.lateFrames = st.lateFrames, tel.decodeFailures = st.decodeFailures, tel.keyframeRequests = st.keyframeRequests;
+                tel.rtpLost = st.rtpLost, tel.rtpRecovered = st.rtpRecovered, tel.rtpNacks = st.rtpNacks;
+                tel.rtpDroppedFrames = st.rtpDroppedFrames;
+                tel.gapMs = st.rtpGapMs, tel.burst = st.rtpBurst, tel.frameLateMs = st.rtpLateMs, tel.rembKbps = st.rembKbps;
+                tel.bestRttMs = bestRtt, tel.reconnects = static_cast<int>(player.reconnects());
+                tel.seconds = static_cast<uint64_t>(session.seconds), tel.badSeconds = static_cast<uint64_t>(session.badSeconds);
                 std::lock_guard<std::mutex> lock(g_infoMutex);
                 g_streamInfo = info;
+                g_streamTelemetry = tel;
                 ++g_infoSeq;
             }
             last = st;
