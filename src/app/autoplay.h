@@ -42,6 +42,7 @@ struct Autoplay {
     bool consolesTab = false;    // "consolestab": open My consoles, save consoles.ppm
     bool consolesEmpty = false;  // with "consolestab": as if none were found
     bool checkSignInTest = false;// "checksignintest": open sign-in check, verify 6 stages, save signin_check.ppm
+    bool signInTest = false;     // "signintest": with no saved sign-in, save signin.ppm once the code is on the screen
     bool freeTest = false;       // "freetest": simulate free account, verify FREE badge and game locks
     bool settingsTest = false;   // "settingstest": open the resolution list, save settings.ppm
     bool trophyTest = false;     // "trophytest": open settings, focus row 24 (Sync Trophies), test sync, save trophy_settings.ppm

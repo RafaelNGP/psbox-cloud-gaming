@@ -1788,6 +1788,13 @@ static void testPrivacyAndRobustness() {
     status = 500, answer = "Internal Server Error";
     isInvalidGrant = false;
     CHECK(!msa.refresh("r", tokens, err, {}, &networkError, &isInvalidGrant) && !isInvalidGrant);
+    bool rejected = false;
+    status = 400, answer = R"({"error":"unauthorized_client"})";
+    CHECK(!msa.refresh("r", tokens, err, {}, &networkError, &isInvalidGrant, &rejected) && rejected && !isInvalidGrant);
+    status = 403, answer = "<html>Blocked</html>";
+    CHECK(!msa.refresh("r", tokens, err, {}, &networkError, &isInvalidGrant, &rejected) && !rejected);
+    status = 429, answer = R"({"error":"slow_down"})";
+    CHECK(!msa.refresh("r", tokens, err, {}, &networkError, &isInvalidGrant, &rejected) && !rejected);
 
     // XSTS Redirect URL parsing test
     auth::XblToken userToken{"user_token", "uhs"};
@@ -1981,6 +1988,38 @@ static void testTokenRefresh() {
             });
             CHECK(!amTransient.signIn(gssv, {}, err));
             CHECK(storedRefresh() == before && amTransient.hasStoredAccount());
+
+            // A page that isn't the sign-in service's (a proxy, a captive portal) on a 4xx: nothing is concluded.
+            int codeRequests = 0;
+            net::setTestTransport([&](const net::Request& req) {
+                net::Response r;
+                if (req.url.find("oauth20_connect") != std::string::npos) ++codeRequests;
+                r.status = 403;
+                r.body = "<html>Blocked</html>";
+                return r;
+            });
+            CHECK(!amTransient.signIn(gssv, {}, err));
+            CHECK(codeRequests == 0 && storedRefresh() == before);
+
+            // Refused by the sign-in service for a reason other than invalid_grant: the same answer for
+            // ever, so the code is asked for (and the file stays until a new sign-in replaces it).
+            {
+                AuthManager amRefused(store);
+                net::setTestTransport([&](const net::Request& req) {
+                    net::Response r;
+                    if (req.url.find("oauth20_connect") != std::string::npos) {
+                        ++codeRequests;
+                        r.status = 500;
+                        return r;
+                    }
+                    r.status = 400;
+                    r.body = R"({"error":"invalid_request","error_description":"x"})";
+                    return r;
+                });
+                CHECK(!amRefused.signIn(gssv, {}, err));
+                CHECK(codeRequests >= 1);
+                CHECK(storedRefresh() == before);
+            }
 
             net::setTestTransport([&](const net::Request&) {
                 net::Response r;

@@ -103,7 +103,7 @@ PollResult MsaClient::pollDeviceCode(const DeviceCode& dc, MsaTokens& out, std::
 }
 
 bool MsaClient::refresh(const std::string& refreshToken, MsaTokens& out, std::string& err,
-                        const std::string& scope, bool* networkError, bool* invalidGrant) const {
+                        const std::string& scope, bool* networkError, bool* invalidGrant, bool* rejected) const {
     net::Response r;
     constexpr int kTries = 3;
     for (int attempt = 1; attempt <= kTries; ++attempt) {
@@ -119,10 +119,12 @@ bool MsaClient::refresh(const std::string& refreshToken, MsaTokens& out, std::st
     // Throttled or timed out isn't a sign-in gone bad: the stored one stays.
     if (networkError) *networkError = r.status == 0 || r.status >= 500 || r.status == 429 || r.status == 408;
     auto j = json::parse(r.body);
-    if (invalidGrant) {
-        std::string e = j ? (*j)["error"].str() : std::string();
-        *invalidGrant = (e == "invalid_grant");
-    }
+    const std::string oauthError = j && j->isObject() ? (*j)["error"].str() : std::string();
+    if (invalidGrant) *invalidGrant = (oauthError == "invalid_grant");
+    // The sign-in service itself said no (its own JSON error on a 4xx that isn't "slow down"): this
+    // token won't ever be taken. A page from a proxy or a captive portal carries no such error.
+    if (rejected)
+        *rejected = r.status >= 400 && r.status < 500 && r.status != 408 && r.status != 429 && !oauthError.empty();
     if (!r.ok() || !j || !readTokens(*j, out)) {
         err = "token refresh failed: " + describe(r);
         return false;

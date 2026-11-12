@@ -177,6 +177,7 @@ void loadAutoplay() {
         if (opt == "consoles") g_autoplay.consoles = true;
         if (opt == "consolestab") g_autoplay.consolesTab = true;
         if (opt == "checksignintest") g_autoplay.checkSignInTest = true;
+        if (opt == "signintest") g_autoplay.signInTest = true;
         if (opt == "freetest") g_autoplay.freeTest = true;
         if (opt == "settingstest") g_autoplay.settingsTest = true;
         if (opt == "trophytest") g_autoplay.trophyTest = true;
@@ -1576,6 +1577,14 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
         reportShot = false;
         saveCanvas("report.ppm");
         XC_LOGI("AUTOPLAY: report.ppm saved");
+    }
+    // "signintest": the sign-in screen (code and QR), a few frames after the worker switched to it so
+    // that the canvas is one drawn with it.
+    static int signInFrames = 0;
+    if (g_autoplay.signInTest && g_ui && g_ui->screen() == ui::Screen::SignIn && ++signInFrames >= 30) {
+        g_autoplay.signInTest = false;
+        saveCanvas("signin.ppm");
+        XC_LOGI("AUTOPLAY END: sign-in test (saved signin.ppm)");
     }
     if (signInCheckShot) {
         signInCheckShot = false;

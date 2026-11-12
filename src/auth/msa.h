@@ -45,7 +45,7 @@ public:
     // (optional) is true only when Microsoft explicitly returned "invalid_grant".
     bool refresh(const std::string& refreshToken, MsaTokens& out, std::string& err,
                  const std::string& scope = {}, bool* networkError = nullptr,
-                 bool* invalidGrant = nullptr) const;
+                 bool* invalidGrant = nullptr, bool* rejected = nullptr) const;
 
     const MsaConfig& config() const { return cfg_; }
 

@@ -597,12 +597,19 @@ bool AuthManager::signIn(xcloud::GssvClient& gssv, const DeviceCodeCallback& onC
         MsaTokens t;
         bool networkError = false;
         bool invalidGrant = false;
-        if (msa_.refresh(tokens_.refreshToken, t, err, {}, &networkError, &invalidGrant)) {
+        bool rejected = false;
+        if (msa_.refresh(tokens_.refreshToken, t, err, {}, &networkError, &invalidGrant, &rejected)) {
             tokens_ = t;
             // Microsoft hands out a new refresh token each time: saved at
             // once, so an app closed before the Xbox sign-in ends still
             // starts with the newest one.
             if (!save()) XC_LOGW("the renewed sign-in could not be saved");
+        } else if (rejected && !invalidGrant) {
+            // Refused for another reason (invalid_request, unauthorized_client...): trying it again
+            // gives the same answer for ever, so the code is asked for. The file stays until the new
+            // sign-in is saved over it.
+            XC_LOGW("stored sign-in refused (%s); asking again", err.c_str());
+            tokens_ = {};
         } else if (!invalidGrant) {
             // Offline, 5xx, or transient error: keep the stored account.
             XC_LOGW("sign-in refresh failed: %s; keeping stored account", err.c_str());
