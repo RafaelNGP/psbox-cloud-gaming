@@ -75,6 +75,26 @@ void refreshSettingsUiLocked() {
     if (g_ui) g_ui->setSettings(ui::choiceFromSettings(g_settings));
 }
 std::atomic<int> g_command{kSignIn};
+std::atomic<uint64_t> g_libraryRetryAt{0};
+
+void libraryRefreshEnded(bool incomplete) {
+    static std::atomic<int> tries{0};
+    if (!incomplete) {
+        if (tries.exchange(0)) XC_LOGI("library: complete again");
+        g_libraryRetryAt = 0;
+        return;
+    }
+    static const uint64_t kWaitMs[] = {30000, 60000, 120000, 300000};
+    if (g_libraryRetryAt.load()) return;  // already said, already scheduled (the list and the details both report)
+    int n = tries.fetch_add(1);
+    if (n >= static_cast<int>(sizeof kWaitMs / sizeof kWaitMs[0])) {
+        XC_LOGW("library: still incomplete after %d tries; the next one is the user's own refresh", n);
+        return;
+    }
+    g_libraryRetryAt = platform::nowMs() + kWaitMs[n];
+    XC_LOGW("library: incomplete; trying again in %llu s (%d)", static_cast<unsigned long long>(kWaitMs[n] / 1000), n + 1);
+    platform::notify(ui::tr(ui::Str::LibraryIncomplete));
+}
 std::atomic<bool> g_playPending{false};
 std::atomic<bool> g_cancel{false};
 std::mutex g_argMutex;

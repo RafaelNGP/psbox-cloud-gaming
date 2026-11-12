@@ -419,6 +419,7 @@ constexpr Column kFrench = {
     "Maintenir pour réinitialiser",                   // HoldToReset
     "La bibliothèque est déjà à jour",                // LibraryUpToDate
     "Bibliothèque mise à jour (%s nouveaux jeux)",    // LibraryUpdatedCount
+    "Bibliothèque incomplète, nouvel essai",          // LibraryIncomplete
     "Mode hors ligne",                                // OfflineMode
     "Fonctionnalités Preview (xCloud)",               // PreviewFeatures
     "Active les fonctionnalités client preview et le streaming Free-to-Play avec publicités pour les comptes sans Game Pass.", // SettingDescPreviewFeatures

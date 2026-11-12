@@ -909,6 +909,84 @@ static void testPlaytimeLimit() {
     CHECK(!auth::parseContentAccessPlaytime(std::string("\x0a\x05\x01", 3), t));  // length past the end
 }
 
+// A page of the title list that fails for a moment is asked again with the same token; a list that
+// keeps failing leaves the library marked incomplete (the cache stays, another try is scheduled).
+static void testTitleListRetriesAndIncompleteLibrary() {
+    int page1 = 0, page2 = 0, failuresLeft = 1;
+    bool down = false;
+    net::setTestTransport([&](const net::Request& req) {
+        net::Response r;
+        r.status = 200;
+        r.body = "{}";
+        if (req.url.find("/v2/titles") == std::string::npos) return r;
+        if (down) {
+            r.status = 500;
+            r.body = "Internal Server Error";
+            return r;
+        }
+        if (req.url.find("ct=t2") == std::string::npos) {
+            ++page1;
+            r.body = R"({"results":[{"titleId":"GAME1","details":{"productId":"P1"}}],"continuationToken":"t2"})";
+        } else {
+            ++page2;
+            if (failuresLeft > 0) {
+                --failuresLeft;
+                r.status = 500;
+                r.body = "Internal Server Error";
+            } else {
+                r.body = R"({"results":[{"titleId":"GAME2","details":{"productId":"P2"}}]})";
+            }
+        }
+        return r;
+    });
+    xcloud::GssvClient gssv;
+    std::vector<xcloud::Title> titles;
+    std::string err;
+    CHECK(gssv.listTitles(titles, err));
+    CHECK(titles.size() == 2 && page1 == 1 && page2 == 2);  // the second page asked twice, the first not again
+
+    failuresLeft = 99;  // the second page never answers: the list fails, after three tries
+    page1 = page2 = 0;
+    CHECK(!gssv.listTitles(titles, err) && page2 == 3);
+    CHECK(err.find("title list failed") != std::string::npos);
+
+    app::Library lib;
+    CHECK(!lib.incomplete());
+    down = true;
+    CHECK(lib.syncDelta(gssv, [] {}, err) == 0 && lib.incomplete());
+    down = false;
+    failuresLeft = 0;
+    lib.syncDelta(gssv, [] {}, err);
+    CHECK(!lib.incomplete());
+    net::setTestTransport({});
+}
+
+// The fonts' folder out of reach, or a font cut short by a transfer: the copies inside the binary
+// stand in, so the screens always have text.
+static void testFontsFallBackToBuiltin() {
+    ui::Fonts missing;
+    CHECK(missing.load("/nonexistent/psbox/fonts"));
+    CHECK(missing.usedBuiltin);
+    CHECK(missing.regular.loaded() && missing.semibold.loaded() && missing.bold.loaded());
+    CHECK(missing.regular.lineHeight(24) > 0);
+
+    std::string dir = "/tmp/xcloud-test-fonts-" + std::to_string(::getpid());
+    std::system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    std::string whole;
+    CHECK(platform::readFile("assets/fonts/Inter-Regular.ttf", whole) || platform::readFile("../assets/fonts/Inter-Regular.ttf", whole));
+    CHECK(platform::writeFileAtomic(dir + "/Inter-Regular.ttf", whole.substr(0, whole.size() / 2)));  // cut short
+    CHECK(platform::writeFileAtomic(dir + "/Inter-SemiBold.ttf", std::string(4096, 'x')));  // not a font
+    CHECK(platform::writeFileAtomic(dir + "/Inter-Bold.ttf", whole));  // whole: the file is used
+    ui::Fonts damaged;
+    CHECK(damaged.load(dir));
+    CHECK(damaged.usedBuiltin && damaged.regular.loaded() && damaged.semibold.loaded() && damaged.bold.loaded());
+
+    ui::Fonts whole3;
+    std::string assets = platform::readFile("assets/fonts/Inter-Bold.ttf", whole) ? "assets/fonts" : "../assets/fonts";
+    CHECK(whole3.load(assets) && !whole3.usedBuiltin);
+    std::system(("rm -rf " + dir).c_str());
+}
+
 static void testFreeAccountPlayability() {
     ui::Fonts fonts;
     ui::ImageCache images([] {});
@@ -11465,6 +11543,8 @@ int main() {
     testPlayerSwitchAndUnresolvedTiles();
     testWebReportAndGamepadLayout();
     testCodSearchRomanAndSettingsReset();
+    testTitleListRetriesAndIncompleteLibrary();
+    testFontsFallBackToBuiltin();
     testFreeAccountPlayability();
     testDetailsHydrationAndPlaytimeBadge();
     testMilestone5TransmissionQualityAndStreamReload();

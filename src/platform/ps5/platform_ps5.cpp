@@ -347,9 +347,11 @@ std::string assetDir() {
     // and the payload all ask.
     static std::string resolved;
     if (!resolved.empty()) return resolved;
+    // The folder itself, not one of its files: with the fonts gone (they have a copy inside the
+    // binary) the rest of it is still there to be used.
     auto has = [](const std::string& dir) {
         struct stat st{};
-        return !dir.empty() && ::stat((dir + "/fonts/Inter-Regular.ttf").c_str(), &st) == 0;
+        return !dir.empty() && ::stat(dir.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
     };
     const std::string sandbox = sandboxAppDir();
     const std::string candidates[] = {"/app0/assets", sandbox.empty() ? std::string() : sandbox + "/assets",
@@ -450,7 +452,10 @@ bool restartApp() {
     char* argv[] = {nullptr};
     int rc = sceSystemServiceLoadExec("/app0/eboot.bin", argv);
     if (rc != 0) {
-        rc = sceSystemServiceLoadExec("/mnt/sandbox/PPSA99810_000/app0/eboot.bin", argv);
+        // The running title's mount: its number isn't always 000 (001, 002... were seen after relaunches).
+        std::string sandbox = sandboxAppDir();
+        if (sandbox.empty()) sandbox = "/mnt/sandbox/PPSA99810_000/app0";
+        rc = sceSystemServiceLoadExec((sandbox + "/eboot.bin").c_str(), argv);
     }
     if (rc != 0) {
         std::string legacyEboot = std::string(kLegacyDir) + "/eboot.bin";

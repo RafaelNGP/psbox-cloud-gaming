@@ -346,6 +346,8 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
             std::string msg = ui::trf(ui::Str::LibraryUpdatedCount, std::to_string(newCount));
             if (!shell::caps().console) g_ui->showToast(msg);
             platform::notify(msg);
+        } else if (existingLib->incomplete()) {
+            libraryRefreshEnded(true);  // "Library incomplete, trying again", not "already up to date"
         } else if (forceRefresh) {
             std::string msg = ui::tr(ui::Str::LibraryUpToDate);
             if (!shell::caps().console) g_ui->showToast(msg);
@@ -368,6 +370,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
             existingLib->hydrate(changed, &g_stopHydration);
             existingLib->loadFriends(xblAuth, changed, &g_stopHydration);
             g_ui->setLoading(false, 0, 0);
+            if (!g_stopHydration) libraryRefreshEnded(existingLib->incomplete());
         });
         if (!g_autoplay.title.empty() && g_autoplay.title != "BENCH" && g_autoplay.title != "UPDATE" && g_autoplay.title != "AUTOTEST" &&
             !g_autoplay.detailTest && !g_autoplay.libraryTest &&
@@ -507,6 +510,7 @@ void loadLibrary(auth::AuthManager& am, xcloud::GssvClient& gssv, bool forceRefr
         library->hydrate(changed, &g_stopHydration);
         library->loadFriends(xblAuth, changed, &g_stopHydration);
         g_ui->setLoading(false, 0, 0);
+        if (!g_stopHydration) libraryRefreshEnded(library->incomplete());
     });
     if (!g_autoplay.title.empty() && g_autoplay.title != "BENCH" && g_autoplay.title != "UPDATE" && g_autoplay.title != "AUTOTEST" &&
         !g_autoplay.detailTest && !g_autoplay.libraryTest &&

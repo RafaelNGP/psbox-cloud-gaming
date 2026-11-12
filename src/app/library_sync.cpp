@@ -25,8 +25,10 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
     std::string listErr;
     if (!gssv.listTitles(titles, listErr, false)) {
         err = listErr;
+        incomplete_ = true;  // the cache stays on the screen; the caller says so and tries again
         return 0;
     }
+    incomplete_ = false;
     for (const auto& t : titles) {
         if (!t.productId.empty()) {
             if (!t.titleId.empty() && t.titleId != "None") {
@@ -473,10 +475,12 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
     if (!titlesPtr) {
         if (!gssv.listTitles(fetchedTitles, err, false)) {
             XC_LOGW("%s", err.c_str());  // keep what the cache said
+            incomplete_ = true;
             progress_ = {};
             changed();
             return;
         }
+        incomplete_ = false;
         titlesPtr = &fetchedTitles;
     }
     const auto& titles = *titlesPtr;
@@ -792,24 +796,17 @@ bool Library::fetchFull(const std::vector<std::string>& ids, const Changed& chan
     };
     // Batches of 20 (~10 KB per product: bigger ones made the catalog time
     // out, 504, and weren't faster).
-    for (size_t i = 0, n = firstBatch; i < order.size(); i += n, n = 20) {
-        if (stop && *stop) return true;
-        std::vector<std::string> batch(order.begin() + static_cast<long>(i),
-                                       order.begin() + static_cast<long>(std::min(order.size(), i + n)));
+    // One batch, asked for up to `tries` times; false when it kept failing.
+    auto fetchBatch = [&](const std::vector<std::string>& batch, int tries, const char* givenUp) {
         std::map<std::string, xcloud::Product> full;
         std::string e;
-        // A batch that fails (a timeout now and then) is asked again; one
-        // that keeps failing is left for next time, and the rest carries on.
         bool got = false;
-        for (int attempt = 0; attempt < 3 && !got; ++attempt) {
+        for (int attempt = 0; attempt < tries && !got; ++attempt) {
             if (attempt) platform::sleepMs(1000);
             got = xcloud::fetchProducts(batch, market_, language_, full, e, true);
-            if (!got) XC_LOGW("%s%s", e.c_str(), attempt < 2 ? " (asking again)" : " (skipped)");
+            if (!got) XC_LOGW("%s%s", e.c_str(), attempt + 1 < tries ? " (asking again)" : givenUp);
         }
-        if (!got) {
-            ok = false;
-            continue;
-        }
+        if (!got) return false;
         for (const auto& id : batch) {
             // Not in the catalog's details: nothing more to know, not asked again.
             auto known = products_.find(id);
@@ -818,7 +815,27 @@ bool Library::fetchFull(const std::vector<std::string>& ids, const Changed& chan
         for (auto& [id, p] : full) mergeProduct(id, std::move(p));
         changed();
         if (++batches % 4 == 0) saveCache();  // a long fetch keeps what it got if the app closes
+        return true;
+    };
+    // A batch that fails (a timeout, a 500 now and then) is asked again; one that keeps failing
+    // goes to a second list and the rest carries on, so nothing waits behind it.
+    std::vector<std::vector<std::string>> later;
+    for (size_t i = 0, n = firstBatch; i < order.size(); i += n, n = 20) {
+        if (stop && *stop) return true;
+        std::vector<std::string> batch(order.begin() + static_cast<long>(i),
+                                       order.begin() + static_cast<long>(std::min(order.size(), i + n)));
+        if (!fetchBatch(batch, 3, " (left for the second pass)")) later.push_back(std::move(batch));
     }
+    // The second pass, once everything else is in: what failed before is asked for again. What
+    // still fails marks the library incomplete (the caller says so and schedules another try).
+    for (const auto& batch : later) {
+        if (stop && *stop) return true;
+        if (fetchBatch(batch, 2, " (skipped)")) continue;
+        ok = false;
+        incomplete_ = true;
+    }
+    if (!later.empty())
+        XC_LOGI("library: second pass over %zu batch(es) of details: %s", later.size(), ok ? "all in" : "some still missing");
     return ok;
 }
 

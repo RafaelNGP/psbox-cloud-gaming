@@ -29,6 +29,8 @@ public:
     // instead of reading an empty font: the app still runs without its
     // assets folder.
     bool load(const std::string& path);
+    // From bytes already in memory (the copy inside the binary); `what` names them in the log.
+    bool loadMemory(const unsigned char* bytes, size_t size, const char* what);
     bool loaded() const { return loaded_; }
 
     int lineHeight(int px) const;
@@ -70,6 +72,7 @@ struct Fonts {
     Font icons;
     bool hasIcons = false;
     bool load(const std::string& dir);
+    bool usedBuiltin = false;  // a file was missing or damaged: the copy inside the binary stands in
     // The first of `paths` that loads; false when none does.
     bool loadIcons(const std::vector<std::string>& paths);
 };

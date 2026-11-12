@@ -419,6 +419,7 @@ constexpr Column kItalian = {
     "Tieni premuto per ripristinare",                 // HoldToReset
     "La libreria è già aggiornata",                   // LibraryUpToDate
     "Libreria aggiornata (%s nuovi giochi)",          // LibraryUpdatedCount
+    "Libreria incompleta, nuovo tentativo",           // LibraryIncomplete
     "Modalità non in linea",                          // OfflineMode
     "Funzionalità Preview (xCloud)",                  // PreviewFeatures
     "Abilita le funzioni client preview e lo streaming Free-to-Play con annunci per account senza Game Pass.", // SettingDescPreviewFeatures

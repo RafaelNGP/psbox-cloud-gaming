@@ -419,6 +419,7 @@ constexpr Column kPortugueseBR = {
     "Segure para restaurar",                          // HoldToReset
     "Biblioteca já está atualizada",                  // LibraryUpToDate
     "Biblioteca atualizada (%s novos jogos)",         // LibraryUpdatedCount
+    "Biblioteca incompleta, tentando de novo",        // LibraryIncomplete
     "Modo offline",                                   // OfflineMode
     "Recursos Preview (xCloud)",                      // PreviewFeatures
     "Ativa identificação de cliente preview e suporte a jogos Free-to-Play com anúncios para contas sem Game Pass.", // SettingDescPreviewFeatures

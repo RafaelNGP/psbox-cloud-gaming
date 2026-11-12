@@ -86,6 +86,9 @@ public:
     std::vector<ui::GameTile> librarySearchPool() const;
     // True once the account's games are known (from the cache or the service).
     bool ownedKnown() const { return ownershipKnown_; }
+    // The last refresh could not get everything (the title list or some details kept failing):
+    // what is shown is partly the cache, and another try is due.
+    bool incomplete() const { return incomplete_; }
     // The account streams games through a Game Pass plan (titles it has by
     // a subscription's program, not bought nor free): its badge in the UI.
     bool gamePassMember() const { return gamePassMember_; }
@@ -170,6 +173,7 @@ private:
     // Details from a cache in another language: shown until replaced.
     std::set<std::string> otherLanguage_;
     Progress progress_;
+    bool incomplete_ = false;
     std::map<std::string, std::string> cloudTitleOf_; // productId -> cloud titleId
     std::map<std::string, std::string> xboxTitleOf_;  // productId -> Xbox title id
     std::map<std::string, std::string> platform_;     // Xbox title id -> platform code

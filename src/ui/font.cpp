@@ -12,6 +12,16 @@
 #define STBTT_STATIC
 #include "stb_truetype.h"
 
+#include <cstddef>
+
+// The three fonts as built into the binary (CMakeLists.txt, cmake/embed_file.cmake).
+extern const unsigned char xc_builtin_font_Regular[];
+extern const std::size_t xc_builtin_font_Regular_size;
+extern const unsigned char xc_builtin_font_SemiBold[];
+extern const std::size_t xc_builtin_font_SemiBold_size;
+extern const unsigned char xc_builtin_font_Bold[];
+extern const std::size_t xc_builtin_font_Bold_size;
+
 #include <atomic>
 #include <cmath>
 
@@ -31,12 +41,37 @@ bool Font::load(const std::string& path) {
     loaded_ = false;
     std::string bytes;
     if (!platform::readFile(path, bytes)) {
-        XC_LOGE("font %s: cannot read", path.c_str());
+        XC_LOGW("font %s: cannot read", path.c_str());
         return false;
     }
-    data_.assign(bytes.begin(), bytes.end());
-    if (!stbtt_InitFont(&impl_->info, data_.data(), stbtt_GetFontOffsetForIndex(data_.data(), 0))) {
-        XC_LOGE("font %s: not a TrueType font", path.c_str());
+    return loadMemory(reinterpret_cast<const unsigned char*>(bytes.data()), bytes.size(), path.c_str());
+}
+
+bool Font::loadMemory(const unsigned char* bytes, size_t size, const char* what) {
+    loaded_ = false;
+    // A file cut short would send the parser past its end: the table directory must fit.
+    if (!bytes || size < 12) {
+        XC_LOGW("font %s: too short (%zu bytes)", what, size);
+        return false;
+    }
+    // Every table must lie inside the bytes: the parser trusts the offsets it reads, and a file
+    // cut short by a transfer has tables that point past its end.
+    auto be16 = [&](size_t at) { return static_cast<uint32_t>(bytes[at] << 8 | bytes[at + 1]); };
+    auto be32 = [&](size_t at) { return static_cast<uint64_t>(be16(at)) << 16 | be16(at + 2); };
+    const size_t tables = be16(4);
+    bool whole = tables > 0 && 12 + 16 * tables <= size;
+    for (size_t t = 0; whole && t < tables; ++t) {
+        uint64_t at = be32(12 + 16 * t + 8), len = be32(12 + 16 * t + 12);
+        whole = at <= size && len <= size - at;
+    }
+    if (!whole) {
+        XC_LOGW("font %s: incomplete (%zu bytes)", what, size);
+        return false;
+    }
+    data_.assign(bytes, bytes + size);
+    int offset = stbtt_GetFontOffsetForIndex(data_.data(), 0);
+    if (offset < 0 || !stbtt_InitFont(&impl_->info, data_.data(), offset)) {
+        XC_LOGW("font %s: not a TrueType font", what);
         return false;
     }
     stbtt_GetFontVMetrics(&impl_->info, &impl_->ascent, &impl_->descent, &impl_->lineGap);
@@ -200,8 +235,27 @@ std::vector<std::string> Font::wrap(std::string_view input, int px, int maxWidth
 }
 
 bool Fonts::load(const std::string& dir) {
-    return regular.load(dir + "/Inter-Regular.ttf") && semibold.load(dir + "/Inter-SemiBold.ttf") &&
-           bold.load(dir + "/Inter-Bold.ttf");
+    // The file when it is there and whole; otherwise the copy inside the binary, so that a folder
+    // out of reach or a transfer that left the fonts out never leaves the screens without text.
+    struct Face {
+        Font& font;
+        const char* file;
+        const unsigned char* builtin;
+        std::size_t builtinSize;
+    } faces[] = {{regular, "Inter-Regular.ttf", xc_builtin_font_Regular, xc_builtin_font_Regular_size},
+                 {semibold, "Inter-SemiBold.ttf", xc_builtin_font_SemiBold, xc_builtin_font_SemiBold_size},
+                 {bold, "Inter-Bold.ttf", xc_builtin_font_Bold, xc_builtin_font_Bold_size}};
+    bool all = true;
+    usedBuiltin = false;
+    for (auto& f : faces) {
+        if (f.font.load(dir + "/" + f.file)) continue;
+        // The embedding adds a closing zero byte: not part of the font.
+        bool ok = f.font.loadMemory(f.builtin, f.builtinSize ? f.builtinSize - 1 : 0, "built-in");
+        XC_LOGW("fonts: %s not usable in %s; the copy inside the app %s", f.file, dir.c_str(), ok ? "is used" : "failed too");
+        usedBuiltin = true;
+        all = all && ok;
+    }
+    return all;
 }
 
 bool Fonts::loadIcons(const std::vector<std::string>& paths) {

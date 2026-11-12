@@ -105,7 +105,22 @@ add_library(xcloud_media STATIC src/media/decoder.cpp src/media/audio_queue.cpp 
 target_link_libraries(xcloud_media PUBLIC xcloud_core PRIVATE xc_ffmpeg)
 
 # --- Menus: software-rendered UI, Game Pass library ---------------------------
+# The fonts inside the binary too: used when assets/fonts can't be read (the app's folder out of
+# reach, a transfer that left them out), so that there is always text on the screen.
+set(XC_BUILTIN_FONTS)
+foreach(face Regular SemiBold Bold)
+    set(out "${CMAKE_CURRENT_BINARY_DIR}/generated/builtin_font_${face}.cpp")
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/assets/fonts/Inter-${face}.ttf -DOUT=${out}
+                -DNAME=xc_builtin_font_${face} -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+        DEPENDS assets/fonts/Inter-${face}.ttf cmake/embed_file.cmake
+        COMMENT "Embedding assets/fonts/Inter-${face}.ttf")
+    list(APPEND XC_BUILTIN_FONTS "${out}")
+endforeach()
+
 add_library(xcloud_ui STATIC
+    ${XC_BUILTIN_FONTS}
     src/ui/strings.cpp
     src/ui/canvas.cpp
     src/ui/font.cpp

@@ -428,6 +428,7 @@ enum class Str {
     HoldToReset,
     LibraryUpToDate,
     LibraryUpdatedCount,
+    LibraryIncomplete,
     OfflineMode,
     PreviewFeatures,
     SettingDescPreviewFeatures,

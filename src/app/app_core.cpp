@@ -368,13 +368,8 @@ bool coreStartup() {
             ctx.xblAuth = g_xblAuth;
             ctx.xuid = g_xuid;
         }
-        if (ctx.xblAuth.empty()) {
-            auth::AuthManager am(accountPath());
-            if (am.signedIn()) {
-                ctx.xblAuth = am.profile().xblAuthorization;
-                ctx.xuid = am.profile().xuid;
-            }
-        }
+        // Not signed in yet: nothing to sync. (A second sign-in manager made here was never signed
+        // in, and reading the account file it could write it at the same time as the real one.)
         if (ctx.xblAuth.empty()) return false;
 
         auto lib = currentLibrary();
@@ -1323,6 +1318,15 @@ bool Core::frame() {
     // playing as player 1 join pad 0 (the others: stream_screen.cpp), but
     // the one whose in-game menu is up.
     const bool streaming = g_ui->screen() == ui::Screen::Streaming;
+    // A library refresh that came back incomplete is tried again by itself, on the home screen only
+    // (never over a game, a dialog or another command).
+    if (uint64_t due = g_libraryRetryAt.load(); due && platform::nowMs() >= due && g_ui->screen() == ui::Screen::Home) {
+        int none = kNone;
+        if (g_command.compare_exchange_strong(none, kReloadLibrary)) {
+            g_libraryRetryAt = 0;
+            XC_LOGI("library: trying the refresh again");
+        }
+    }
     const int usbMenuOwner = streaming ? streamScreen->menuUsbOwner() : -1;
     input::ControllerState player1 = pad;
     input::ControllerState usbPad;

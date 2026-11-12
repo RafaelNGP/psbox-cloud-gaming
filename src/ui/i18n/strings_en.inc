@@ -419,6 +419,7 @@ constexpr Column kEnglish = {
     "Hold to reset",                                  // HoldToReset
     "Library is already up to date",                  // LibraryUpToDate
     "Library updated (%s new games)",                 // LibraryUpdatedCount
+    "Library incomplete, trying again",               // LibraryIncomplete
     "Offline mode",                                   // OfflineMode
     "Preview features (xCloud)",                      // PreviewFeatures
     "Enables preview client features and ad-supported Free-to-Play cloud streaming for accounts without Game Pass.", // SettingDescPreviewFeatures

@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <ctime>
 #include <map>
+#include <optional>
 
 namespace xc::xcloud {
 
@@ -333,8 +334,19 @@ bool GssvClient::listTitles(std::vector<Title>& out, std::string& err, bool rece
     do {
         std::string path = recentOnly ? "/v2/titles/mru?mr=25" : "/v2/titles?mr=200";
         if (!continuation.empty()) path += "&ct=" + net::urlEncode(continuation);
-        auto r = net::perform(authed(resolution_, previewFeatures_, login_, "GET", url(path)));
-        auto j = json::parse(r.body);
+        // A page that fails for a moment (5xx, a timeout, "slow down") is asked again with the same
+        // token: one bad answer in a list of fifteen pages no longer throws the whole list away.
+        net::Response r;
+        std::optional<json::Value> j;
+        constexpr int kTries = 3;
+        for (int attempt = 1; attempt <= kTries; ++attempt) {
+            r = net::perform(authed(resolution_, previewFeatures_, login_, "GET", url(path)));
+            j = json::parse(r.body);
+            bool transient = r.status == 0 || r.status == 408 || r.status == 429 || r.status >= 500 || (r.ok() && !j);
+            if ((r.ok() && j) || !transient || attempt == kTries) break;
+            XC_LOGW("title list: page %d: %s, asking again (%d/%d)", pages + 1, describe(r).c_str(), attempt + 1, kTries);
+            platform::sleepMs(1000u << (attempt - 1));
+        }
         if (!r.ok() || !j) {
             err = "title list failed: " + describe(r);
             return false;

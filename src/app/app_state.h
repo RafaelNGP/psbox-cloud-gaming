@@ -50,6 +50,11 @@ void refreshSettingsUiLocked();
 // --- Worker commands (worker.cpp) ----------------------------------------------
 enum Command { kNone, kSignIn, kPlay, kSignOut, kReloadLibrary, kConsoles, kUpdate, kClaimFree, kCheckSignIn, kNetworkTest, kSyncTrophies, kRemoveTrophies };
 extern std::atomic<int> g_command;
+// A library refresh that came back incomplete: when (platform::nowMs) the next try is due, 0 none.
+extern std::atomic<uint64_t> g_libraryRetryAt;
+// Called when a refresh ends: incomplete -> the notice and the next try (30 s, 1, 2, 5 min, then it
+// waits for the user's own refresh); complete -> nothing pending.
+void libraryRefreshEnded(bool incomplete);
 // Play was pressed and the worker has not taken it yet (it may be finishing a
 // library refresh that takes seconds): the launch screen is up already, and a
 // cancel made now withdraws the command instead of stopping a stream.
