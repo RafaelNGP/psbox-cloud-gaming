@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "auth/auth_manager.h"
+#include "auth/account_seal.h"
 
 #include "net/http.h"
 #include "platform/platform.h"
@@ -34,6 +35,17 @@ bool AuthManager::load() {
         XC_LOGI("no saved sign-in (%s)", storePath_.c_str());  // the reports tell "asked again" apart
         return false;
     }
+    // Sealed for this device (account_seal.h). One from before that is read as it is and
+    // sealed below; a sealed one this device cannot open (copied from another) is no sign-in.
+    const bool sealed = isSealedAccount(text);
+    if (sealed) {
+        std::string plain;
+        if (!unsealAccount(text, plain)) {
+            XC_LOGW("the saved sign-in was sealed on another device (or altered): asking again");
+            return false;
+        }
+        text = plain;
+    }
     auto j = json::parse(text);
     if (!j) {
         XC_LOGW("ignoring unreadable token store %s", storePath_.c_str());
@@ -48,6 +60,7 @@ bool AuthManager::load() {
     tokens_.userId = (*j)["userId"].str();
     profile_.gamertag = (*j)["gamertag"].str();
     profile_.xuid = (*j)["xuid"].str();
+    if (!sealed && !tokens_.refreshToken.empty() && save()) XC_LOGI("the saved sign-in is now sealed for this device");
     return !tokens_.refreshToken.empty();
 }
 
@@ -59,7 +72,11 @@ bool AuthManager::save() const {
     v.set("userId", tokens_.userId);
     v.set("gamertag", profile_.gamertag);
     v.set("xuid", profile_.xuid);
-    if (!platform::writeFileAtomic(storePath_, v.dump())) {
+    // XC_ACCOUNT_PLAIN=1 (development: an account file made on the PC and shipped to a console).
+    const char* plainWanted = std::getenv("XC_ACCOUNT_PLAIN");
+    std::string stored = (plainWanted && *plainWanted == '1') ? std::string() : sealAccount(v.dump());
+    if (stored.empty()) stored = v.dump();  // no key to be had: as before, readable
+    if (!platform::writeFileAtomic(storePath_, stored)) {
         XC_LOGE("could not write token store %s (errno %d)", storePath_.c_str(), errno);
         saved_ = false;
         return false;
