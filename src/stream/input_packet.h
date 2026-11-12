@@ -5,6 +5,7 @@
 // timestamp) followed by the frames the report type announces.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <vector>
 
