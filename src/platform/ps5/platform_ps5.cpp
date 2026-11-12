@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <sys/sysctl.h>
 #include <sys/types.h>
@@ -169,15 +170,38 @@ bool streamPayloadVia9021(const char* localElfPath) {
     return sent;
 }
 
+// The running title's own folder as the system root shows it. Once the process is out of its
+// sandbox (the trophy payload, at start), /app0 is no longer at the root: the same folder is
+// then under /mnt/sandbox/PPSA99810_<n>/app0, wherever the app was installed (the internal
+// /data/homebrew, a USB or an extended drive, a store's own folder). "" when there is none.
+std::string sandboxAppDir() {
+    std::string found;
+    if (DIR* d = ::opendir("/mnt/sandbox")) {
+        while (dirent* e = ::readdir(d)) {
+            if (std::strncmp(e->d_name, "PPSA99810", 9) != 0) continue;
+            std::string p = std::string("/mnt/sandbox/") + e->d_name + "/app0";
+            struct stat st{};
+            if (::stat((p + "/eboot.bin").c_str(), &st) == 0) {
+                found = p;
+                break;
+            }
+        }
+        ::closedir(d);
+    }
+    return found;
+}
+
 void stageInternalTrophyPayload() {
     const char* dstPath = "/data/psbox/PSBox_Trophies.elf";
     std::string srcBytes;
-    const char* candidates[] = {
+    const std::string sandbox = sandboxAppDir();  // where the app's folder is once out of the sandbox
+    const std::string candidates[] = {
         "/app0/assets/PSBox_Trophies.elf",
+        sandbox.empty() ? std::string() : sandbox + "/assets/PSBox_Trophies.elf",
         "/data/homebrew/PPSA99810/assets/PSBox_Trophies.elf"
     };
-    for (const char* src : candidates) {
-        if (readFile(src, srcBytes) && !srcBytes.empty()) break;
+    for (const auto& src : candidates) {
+        if (!src.empty() && readFile(src, srcBytes) && !srcBytes.empty()) break;
     }
     if (!srcBytes.empty()) {
         std::string existing;
@@ -319,10 +343,25 @@ std::string appDir() {
 }
 
 std::string assetDir() {
-    struct stat st{};
-    if (::stat("/app0/assets/fonts/Inter-Regular.ttf", &st) == 0) return "/app0/assets";
-    std::string legacyAssets = std::string(kLegacyDir) + "/assets";
-    if (::stat((legacyAssets + "/fonts/Inter-Regular.ttf").c_str(), &st) == 0) return legacyAssets;
+    // Found once: the answer doesn't change while the app runs, and the fonts, the certificates
+    // and the payload all ask.
+    static std::string resolved;
+    if (!resolved.empty()) return resolved;
+    auto has = [](const std::string& dir) {
+        struct stat st{};
+        return !dir.empty() && ::stat((dir + "/fonts/Inter-Regular.ttf").c_str(), &st) == 0;
+    };
+    const std::string sandbox = sandboxAppDir();
+    const std::string candidates[] = {"/app0/assets", sandbox.empty() ? std::string() : sandbox + "/assets",
+                                      std::string(kLegacyDir) + "/assets"};
+    for (const auto& dir : candidates) {
+        if (!has(dir)) continue;
+        resolved = dir;
+        XC_LOGI("assets: %s", resolved.c_str());
+        return resolved;
+    }
+    XC_LOGE("assets: not found in /app0/assets, %s, %s/assets (errno %d)",
+            sandbox.empty() ? "no /mnt/sandbox/PPSA99810*/app0" : (sandbox + "/assets").c_str(), kLegacyDir, errno);
     return appDir() + "/assets";
 }
 
