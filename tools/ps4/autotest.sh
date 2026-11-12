@@ -111,3 +111,5 @@ for ppm in glob.glob(os.path.join(psbox_data, "*.ppm")):
 PY
 
 echo "==> PS4 / shadPS4 autotest complete. Artifacts in $out"
+# A start without the fonts, the assets or the data folder fails the run, whatever the screenshots show.
+bash "$root/tools/check-startup-log.sh" "$out/xcloud.log"

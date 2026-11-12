@@ -99,3 +99,5 @@ echo "RESULT: $result"
 rm -f "$out"/frame*.png
 for f in "$out"/*.ppm; do [[ -f $f ]] && echo "frame: $f"; done
 echo "log: $out/xcloud.log"
+# A start without the fonts, the assets or the data folder fails the run, whatever the screenshots show.
+bash "$root/tools/check-startup-log.sh" "$out/xcloud.log"
