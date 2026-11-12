@@ -66,4 +66,4 @@ Status: **Em andamento (in progress / next)**, **Planejado (planned)**, **Futuro
 - **Captura de Vídeo dos Últimos 30s da Partida**: Descartado; impacto desnecessário em memória e I/O de disco no console.
 - **GeForce Now**: Descartado; protocolo totalmente distinto e incompatível com o propósito do aplicativo.
 - **Transmissão HDR / Surround 5.1 / Frame Generation**: xCloud transmite nativamente em áudio estéreo e vídeo SDR 1080p; interpolação artificial de quadros adicionaria latência intolerável.
-- **Múltiplas Contas Xbox Simultâneas**: Não suportado; simplificação de cache local e segurança de credenciais.
+- **Múltiplas Contas Xbox no Mesmo Perfil do Console**: Não suportado. Desde a v1.7.0 cada perfil do PS5 tem a sua própria conta Xbox, biblioteca, configurações e troféus.

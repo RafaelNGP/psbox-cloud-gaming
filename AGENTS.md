@@ -221,11 +221,9 @@ Para o sistema de atualização automática in-app e manipulação de binários 
    - Ao realizar o unjail (`jailbreak`) para sincronização nativa de troféus ou chamadas privilegiadas do kernel, o `chroot` do processo é alterado para a raiz do sistema real (`/`).
    - O ponto de montagem virtual `/app0` deixa de estar acessível no nível superior da raiz. Qualquer função de resolução de executável, validação de integridade ou reinicialização (`isInstalledCopy`, `restartApp`, `appDir`) NUNCA deve assumir que `/app0/eboot.bin` existe.
    - A resolução deve SEMPRE escanear dinamicamente `/mnt/sandbox/` para instâncias ativas do título (`/mnt/sandbox/<TITLE_ID>*/app0/eboot.bin`), comparando inodes (`st_ino`), com fallback seguro para o diretório canônico homebrew (`/data/homebrew/<TITLE_ID>/`).
-2. **Protocolo de Hotfix e Substituição de Releases Publicadas**:
-   - Caso um bug crítico exija a substituição emergencial de binários de uma release oficial já lançada:
-     * Utilizar a flag `--force` em `tools/release.sh <VERSION> [out-dir] --force` para ignorar travas de tag pré-existente e reconstruir os pacotes de PS5 e PS4 com assinatura ECDSA e checksums válidos.
-     * Atualizar a tag Git localmente e forçar envio ao repositório remoto (`git tag -fa vX.Y.Z -m "..." && git push -f origin vX.Y.Z`).
-     * Enviar os binários corrigidos ao GitHub via `gh release upload vX.Y.Z ... --clobber` preservando rigorosamente a sintaxe de rótulos `#label` para evitar duplicatas e perda de colchetes.
-     * Executar e obter aprovação com código 0 em `tools/release-verify.sh vX.Y.Z --verify-sigs`.
+2. **Protocolo de Hotfix: Sempre uma Versão Nova**:
+   - Um binário publicado NUNCA é substituído na mesma tag. O catálogo do ProsperoStore (`darkxex/ps5-homebrew-catalog`, `apps/PPSA99810.json`) grava o `sha256` do `PPSA99810.zip` no momento da publicação; trocar o arquivo depois quebra o download na loja para todos (aconteceu com a v1.6.9 em 2026-11-10).
+   - Correção urgente = nova versão de patch (`vX.Y.Z+1`) publicada com `tools/publish-release.sh`; o job diário do catálogo a indexa sozinho.
+   - Se um arquivo já publicado tiver sido trocado mesmo assim: abrir PR a partir da conta RafaelNGP no catálogo alterando somente o `sha256` de `apps/PPSA99810.json` (exemplo: PR #1268) e executar `tools/release-verify.sh vX.Y.Z --verify-sigs`.
 
 
