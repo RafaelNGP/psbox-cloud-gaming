@@ -182,11 +182,25 @@ const char* usbPadKindName(UsbPadKind kind);
 struct InstrumentState {
     bool prevStrum = false;
     bool armed[5] = {};
+    // A fret held through another strum is let go for a moment (until this time, ms), so the game
+    // sees a new note: held frets can be strummed again and again.
+    uint64_t gapUntil[5] = {};
+    bool tiltUp = false;  // star power by raising the guitar, with some hysteresis
 };
-ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum);
+constexpr uint64_t kStrumGapMs = 30;
+// `nowMs`: when the report came. The guitar's tilt (right stick Y, as read) past `tiltAt` (with
+// `tiltOn`) is star power too.
+ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum,
+                                  uint64_t nowMs = 0, bool tiltOn = false, float tiltAt = 0.0f);
+// The frets let go for a moment after a repeated strum, at the time the game reads them.
+void applyStrumGaps(ControllerState& game, const InstrumentState& st, uint64_t nowMs);
 // The guitar's strum option (Settings), for every guitar.
 void setGuitarStrum(bool on);
 bool guitarStrum();
+// Star power by raising the guitar: on / off, and the tilt reading (right stick Y as read, -1..1)
+// it takes; its sign is the guitar's.
+void setGuitarTilt(bool on, float at);
+bool guitarTilt();
 void setUsbPadRumble(int player, uint8_t large, uint8_t small);
 void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small);
 

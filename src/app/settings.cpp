@@ -173,6 +173,8 @@ bool Settings::load(const std::string& path) {
     syncTrophies = (*j)["syncTrophies"].asBool(syncTrophies);
     usbControllers = (*j)["usbControllers"].asBool((*j)["usb_controllers"].asBool((*j)["enable_onefamily"].asBool(usbControllers)));
     guitarStrum = (*j)["guitarStrum"].asBool(guitarStrum);
+    guitarTilt = (*j)["guitarTilt"].asBool(guitarTilt);
+    guitarTiltAt = static_cast<float>(std::clamp((*j)["guitarTiltAt"].asNumber(guitarTiltAt), -1.0, 1.0));
     soloInputRedirect = (*j)["soloInputRedirect"].asBool((*j)["solo_input_redirect"].asBool(soloInputRedirect));
     titlePlaytime.clear();
     for (const auto& [id, sec] : (*j)["titlePlaytime"].members())
@@ -403,6 +405,8 @@ bool Settings::save(const std::string& path) const {
     v.set("usbControllers", usbControllers);
     v.set("soloInputRedirect", soloInputRedirect);
     v.set("guitarStrum", guitarStrum);
+    v.set("guitarTilt", guitarTilt);
+    v.set("guitarTiltAt", static_cast<double>(guitarTiltAt));
     json::Value pt = json::Value::object();
     for (const auto& [id, sec] : titlePlaytime)
         if (sec > 0) pt.set(id, static_cast<int64_t>(sec));

@@ -433,6 +433,7 @@ constexpr Column kGerman = {
     "Dieses Konto muss 'Preview-Funktionen' im Profil auf xbox.com/play aktivieren, um werbefinanziertes Free-to-Play-Streaming freizuschalten.", // F2pPreviewAccountNeededDesc
     "Spieler",                                   // MenuPlayer
     "Anschlag", // MenuStrum
+    "Star Power durch Anheben", // MenuTilt
     "Ihre Xbox-Cloud-Spielzeit ist aufgebraucht, deshalb hat der Xbox-Dienst die Sitzung beendet. Seit November 2026 begrenzt Xbox das Cloud-Gaming pro Monat: 15 Std. mit Game Pass Ultimate, 10 Std. mit Premium und 5 Std. mit Essential. Mehr Zeit: Ihre Optionen finden Sie auf xbox.com, oder Sie warten auf die Stunden des nächsten Monats.", // CloudTimeUp
     "Die Sitzung wurde wegen Inaktivität beendet", // EndedIdle
     "%s verbleibend", // CloudTimeLeft
@@ -461,6 +462,7 @@ constexpr Column kGerman = {
     "Unbegrenzt",                                     // FpsUnlimited
     "Begrenzt die Bildrate des Streams für ein gleichmäßiges Bild-Pacing", // SettingDescFpsLimit
     "Allgemein",                                      // MenuTabGeneral
+    "Gitarre", // MenuTabGuitar
     "Tab",                                            // MenuTabLabel
     "Tabs",                                           // MenuTabsLabel
     "Einstellungen gespeichert",                      // SettingsSavedToast
@@ -549,6 +551,7 @@ constexpr Column kGerman = {
     "Beendet das Remote Play von der Xbox-Konsole und kehrt zum Startbildschirm zurück.", // MenuDescEndStream
     "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
     "Gitarre: Ein Bund erreicht das Spiel nur, wenn du ihn hältst und anschlägst (wie in Guitar Hero). Aus: Die Bünde allein spielen.", // MenuDescStrum
+    "Die Gitarre anheben (Hals nach oben) löst Star Power aus (Overdrive, RT), wie die Back-Taste.", // MenuDescTilt
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
     "Lenkrad (Linker Stick)",                          // GyroSteering
     "Lenkrad (Gas R2)",                                // GyroSteeringDrive

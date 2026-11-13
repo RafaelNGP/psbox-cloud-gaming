@@ -391,7 +391,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             menuUsbOwner_ = menuCombo || swipeMenu_ ? -1 : usbMenu;
             menu_.setUsbOwner(menuUsbOwner_ >= 0 ? input::usbPadPlayer(menuUsbOwner_) : -1);
             menu_.setUsbOwnerGuitar(menuUsbOwner_ >= 0 && input::usbPadSlotKind(menuUsbOwner_) == input::UsbPadKind::Guitar,
-                                    input::guitarStrum());
+                                    input::guitarStrum(), input::guitarTilt());
             if (menuUsbOwner_ >= 0)
                 XC_LOGI("menu_: opened by usb pad %d (player %d)", menuUsbOwner_, menu_.usbOwnerPlayer() + 1);
             swipeMenu_ = false;
@@ -495,6 +495,13 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             case ui::MenuAction::Player:
                 input::setUsbPadPlayer(menuUsbOwner_, menu_.usbOwnerPlayer());
                 break;
+            case ui::MenuAction::GuitarTilt: {
+                std::lock_guard<std::mutex> lock(g_settingsMutex);
+                g_settings.guitarTilt = menu_.guitarTilt();
+                input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarTiltAt);
+                g_settings.save(settingsPath());  // warns itself
+                break;
+            }
             case ui::MenuAction::GuitarStrum: {
                 input::setGuitarStrum(menu_.guitarStrum());
                 std::lock_guard<std::mutex> lock(g_settingsMutex);

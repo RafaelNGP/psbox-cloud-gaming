@@ -433,6 +433,7 @@ constexpr Column kFrench = {
     "Ce compte doit activer les 'Fonctionnalités Preview' sur son profil sur xbox.com/play pour débloquer le streaming gratuit avec publicités.", // F2pPreviewAccountNeededDesc
     "Joueur",                                    // MenuPlayer
     "Grattage", // MenuStrum
+    "Star Power en levant", // MenuTilt
     "Votre temps de jeu dans le cloud Xbox est écoulé : le service Xbox a fermé la session. Depuis novembre 2026, Xbox limite le jeu dans le cloud chaque mois : 15 h avec le Game Pass Ultimate, 10 h avec Premium et 5 h avec Essential. Pour avoir plus de temps, consultez les options sur xbox.com, ou attendez les heures du mois prochain.", // CloudTimeUp
     "La session s’est terminée pour inactivité", // EndedIdle
     "%s restantes", // CloudTimeLeft
@@ -461,6 +462,7 @@ constexpr Column kFrench = {
     "Illimité",                                       // FpsUnlimited
     "Limite la fréquence d'affichage du flux pour maintenir une cadence fluide", // SettingDescFpsLimit
     "Général",                                        // MenuTabGeneral
+    "Guitare", // MenuTabGuitar
     "Onglet",                                         // MenuTabLabel
     "Onglets",                                        // MenuTabsLabel
     "Paramètres enregistrés",                         // SettingsSavedToast
@@ -549,6 +551,7 @@ constexpr Column kFrench = {
     "Met fin à la diffusion depuis votre console Xbox et retourne à l'accueil.", // MenuDescEndStream
     "Assigne la manette physique correspondant à ce joueur virtuel.", // MenuDescPlayer
     "Guitare : une frette n'atteint le jeu que si tu grattes en la tenant (comme dans Guitar Hero). Désactivé : les frettes seules jouent.", // MenuDescStrum
+    "Lever la guitare (le manche vers le haut) active le Star Power (Overdrive, RT), comme le bouton Back.", // MenuDescTilt
     "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
     "Volant (Stick Gauche)",                           // GyroSteering
     "Volant (Accélérer R2)",                           // GyroSteeringDrive

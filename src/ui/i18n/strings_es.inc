@@ -433,6 +433,7 @@ constexpr Column kSpanish = {
     "Esta cuenta necesita habilitar 'Funciones Preview' en su perfil en xbox.com/play para desbloquear el streaming con anuncios de juegos gratuitos.", // F2pPreviewAccountNeededDesc
     "Jugador",                                   // MenuPlayer
     "Rasgueo", // MenuStrum
+    "Star Power al levantar", // MenuTilt
     "Se acabó tu tiempo de juego en la nube de Xbox, así que el servicio de Xbox cerró la sesión. Desde noviembre de 2026, Xbox limita el juego en la nube cada mes: 15 h con Game Pass Ultimate, 10 h con Premium e 5 h con Essential. Para tener más tiempo, mira las opciones en xbox.com, o espera las horas del próximo mes.", // CloudTimeUp
     "La sesión terminó por inactividad", // EndedIdle
     "%s restantes", // CloudTimeLeft
@@ -461,6 +462,7 @@ constexpr Column kSpanish = {
     "Ilimitado",                                      // FpsUnlimited
     "Limita la tasa de cuadros de presentación de la transmisión para mantener una cadencia fluida", // SettingDescFpsLimit
     "General",                                        // MenuTabGeneral
+    "Guitarra", // MenuTabGuitar
     "Pestaña",                                        // MenuTabLabel
     "Pestañas",                                       // MenuTabsLabel
     "Configuraciones guardadas",                      // SettingsSavedToast
@@ -549,6 +551,7 @@ constexpr Column kSpanish = {
     "Finaliza la retransmisión desde tu consola Xbox y vuelve al inicio.", // MenuDescEndStream
     "Asigna qué mando físico controlará esta ranura de jugador virtual.", // MenuDescPlayer
     "Guitarra: un traste llega al juego solo cuando rasgueas mientras lo mantienes (como en Guitar Hero). Apagado: los trastes solos tocan.", // MenuDescStrum
+    "Levantar la guitarra (el mástil hacia arriba) activa el Star Power (Overdrive, RT), como el botón Back.", // MenuDescTilt
     "Ajusta el nivel de volumen del altavoz integrado en el mando.", // MenuDescPadSpeakerVolume
     "Volante (Stick Izq.)",                            // GyroSteering
     "Volante (Acelerar R2)",                           // GyroSteeringDrive

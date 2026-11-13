@@ -2590,6 +2590,51 @@ static void testUsbInstruments() {
     out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
     CHECK(out.btnA && out.btnY);
 
+    // Held frets strummed again: let go for a moment, then down again (a new note each strum).
+    {
+        InstrumentState rs;
+        ControllerState g;
+        g.btnA = true, g.dpadDown = true;
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1000).btnA);
+        g.dpadDown = false;
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1050).btnA);
+        g.dpadUp = true;  // the bar again, green still held
+        ControllerState again = instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1100);
+        CHECK(!again.btnA);
+        ControllerState later = again;
+        later.btnA = true;
+        applyStrumGaps(later, rs, 1100 + kStrumGapMs - 1);
+        CHECK(!later.btnA);
+        later.btnA = true;
+        applyStrumGaps(later, rs, 1100 + kStrumGapMs);
+        CHECK(later.btnA);
+    }
+    // Star power by raising the guitar: past the reading set, off again a little before it.
+    {
+        InstrumentState ts;
+        ControllerState g;
+        g.rawRightY = -0.5f;
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 0.0f);
+        g.rawRightY = -0.95f;
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 1.0f);
+        g.rawRightY = -0.8f;  // within the margin: still on
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 1.0f);
+        g.rawRightY = -0.6f;
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 0.0f);
+        g.rawRightY = -0.99f;  // tilt off: nothing
+        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, false, -0.9f).triggerR2 == 0.0f);
+    }
+    // A guitar at rest (whammy at full left, tilt moving) is not "in use": after a menu it goes
+    // back to the game at once.
+    {
+        ControllerState rest;
+        rest.connected = true;
+        rest.rawRightX = rest.rightStickX = -1.0f;
+        rest.rawRightY = rest.rightStickY = -0.55f;
+        InstrumentState rst;
+        CHECK(inUse(rest) && !inUse(instrumentForGame(UsbPadKind::Guitar, rest, rst, false)));
+    }
+
     // Drums: the buttons as they come, the pads' strengths off the sticks.
     ControllerState drum;
     drum.btnB = drum.btnL1 = true;
