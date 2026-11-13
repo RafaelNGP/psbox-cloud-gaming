@@ -7,6 +7,7 @@
 #include <cstdint>
 #include "input/pad_usb.h"
 #include "input/pad_usb_hid.h"
+#include <initializer_list>
 
 #include "input/keyboard_nav.h"
 #include "platform/platform.h"
@@ -285,7 +286,7 @@ UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len, const uint8_t*
             if (d[off + 5] == 0x03 && hasBootKbdOrMouse && !hasVerifiedGamepadReport) {
                 proto = UsbPadProtocol::None;
             }
-            pad = {proto, d[off + 2], 0, 0};
+            pad = {proto, d[off + 2], 0, 0, proto == UsbPadProtocol::XInput && d[off + 7] == 0x81};
             inPad = pad.protocol != UsbPadProtocol::None && d[off + 3] == 0;
         } else if (d[off + 1] == 0x05 && l >= 7 && inPad && (d[off + 3] & 0x03) == 0x03) {  // an interrupt endpoint
             const uint8_t addr = d[off + 2];
@@ -340,6 +341,7 @@ UsbPadInterface probeUsbPadPs5(uint16_t vid, uint16_t pid, const uint8_t* config
     } else if (!hasBootKbdOrMouse && vid == 0x045E && pid == 0x0719) {
         iface.protocol = UsbPadProtocol::XInput;
         iface.number = 0;
+        iface.wireless = true;
         if (!iface.epIn) iface.epIn = 0x81;
     }
 
@@ -446,7 +448,15 @@ std::vector<std::array<uint8_t, 13>> gipAcksFor(const uint8_t* data, size_t len)
 // Clones fill the length byte in their own way; the type and the size
 // tell an input report from the LED (01), rumble (03) and status ones.
 bool parseXInputReport(const uint8_t* data, size_t len, ControllerState& s) {
-    if (!data || len < 14 || data[0] != 0x00) return false;
+    if (!data) return false;
+    // The wireless receiver (after the Linux xpad driver): presence, then input behind a header.
+    if (len >= 2 && data[0] == 0x08) {
+        if (data[1] & 0x80) return false;  // a pad connected: nothing pressed yet
+        s = ControllerState{};             // gone: let go of everything
+        return true;
+    }
+    if (len >= 18 && data[0] == 0x00 && data[1] == 0x01) return parseXInputReport(data + 4, len - 4, s);
+    if (len < 14 || data[0] != 0x00) return false;
     const unsigned b = static_cast<unsigned>(data[2] | (data[3] << 8));
     s.dpadUp = b & 0x0001;
     s.dpadDown = b & 0x0002;
@@ -1032,6 +1042,48 @@ void setUsbPadsEnabled(bool enabled) {
 
 bool usbPadsEnabled() {
     return g_usbPadsEnabled.load(std::memory_order_relaxed);
+}
+
+std::array<uint8_t, 12> xinputWirelessLedPacket(int player) {
+    // 0x40 + the light pattern: 6..9 are "player 1..4 on".
+    return {0x00, 0x00, 0x08, static_cast<uint8_t>(0x40 + 6 + std::clamp(player, 0, 3)), 0, 0, 0, 0, 0, 0, 0, 0};
+}
+
+std::array<uint8_t, 12> xinputWirelessPresenceQuery() {
+    return {0x08, 0x00, 0x0F, 0xC0, 0, 0, 0, 0, 0, 0, 0, 0};
+}
+
+size_t usbPadRumblePacket(UsbPadProtocol protocol, uint8_t large, uint8_t small, uint8_t& sequence, uint8_t* out,
+                          size_t capacity, bool wireless) {
+    auto put = [&](std::initializer_list<uint8_t> bytes) -> size_t {
+        if (bytes.size() > capacity) return 0;
+        std::copy(bytes.begin(), bytes.end(), out);
+        return bytes.size();
+    };
+    switch (protocol) {
+        case UsbPadProtocol::XInput:  // Xbox 360: 00 08 00 <large> <small> 00 00 00; its receiver, 12 bytes
+            if (wireless) return put({0x00, 0x01, 0x0F, 0xC0, 0x00, large, small, 0x00, 0x00, 0x00, 0x00, 0x00});
+            return put({0x00, 0x08, 0x00, large, small, 0x00, 0x00, 0x00});
+        case UsbPadProtocol::Gip: {
+            // Xbox One / Series: command 09, all four motors (mask 0x0F; the triggers' own at
+            // 0), strengths 0..100, on for 0xFF x 10 ms with no pause, repeated 0xFF times: it
+            // lasts until the next packet, so the app's own time-out is what ends it.
+            if (++sequence == 0) sequence = 1;
+            const auto pct = [](uint8_t v) { return static_cast<uint8_t>((v * 100 + 127) / 255); };
+            return put({0x09, 0x00, sequence, 0x09, 0x00, 0x0F, 0x00, 0x00, pct(large), pct(small), 0xFF, 0x00, 0xFF});
+        }
+        case UsbPadProtocol::DualShock4: {  // output report 05: flags (motors), then small, large
+            if (capacity < 32) return 0;
+            std::fill(out, out + 32, uint8_t{0});
+            out[0] = 0x05;
+            out[1] = 0x01;
+            out[4] = small;
+            out[5] = large;
+            return 32;
+        }
+        default:
+            return 0;
+    }
 }
 
 void setUsbPadRumble(int player, uint8_t large, uint8_t small) {
