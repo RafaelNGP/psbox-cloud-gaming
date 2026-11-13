@@ -488,7 +488,6 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
         bool free = isFreeGame(t);
         std::string label = free                               ? tr(Str::Free)
                             : price != prices_.end()           ? price->second.now
-                            : pricesNone_.count(t.productId)   ? tr(Str::NotSoldAloneBadge)
                                                                : tr(Str::BuyBadge);
         int tw = fonts_.bold.measure(label, 11);
         int w = std::min(maxLeftW, 20 + tw + 8);

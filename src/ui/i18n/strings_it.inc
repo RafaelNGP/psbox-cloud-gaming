@@ -438,7 +438,6 @@ constexpr Column kItalian = {
     "di %s", // CloudTimeOf
     "Tempo cloud illimitato", // CloudTimeUnlimited
     "Sessioni di %s min (gratis con pubblicità)", // CloudTimeFreeTier
-    "NON VENDUTO DA SOLO", // NotSoldAloneBadge
     "Restano %s del tuo tempo di gioco nel cloud Xbox questo mese", // CloudTimeWarn
     "Sincronizza trofei",                             // SyncTrophies
     "Sincronizza tutti gli obiettivi Xbox del tuo account e assegna i trofei corrispondenti al tuo profilo PlayStation.", // SettingDescSyncTrophies
