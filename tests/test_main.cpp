@@ -2495,6 +2495,19 @@ static void testUsbPadRumblePacket() {
     in[10] = 0x00, in[11] = 0x80;  // left stick fully left
     CHECK(parseXInputReport(in, sizeof in, st));
     CHECK(st.btnA && !st.btnB && st.triggerL2 > 0.99f && st.rawLeftX < -0.9f && !st.dpadUp);
+    // The receiver's other messages, as a Guitar Hero 5 guitar linked up (seen on the console):
+    // not input, nothing pressed.
+    {
+        ControllerState g;
+        const uint8_t announce[29] = {0x00, 0x0f, 0x00, 0xf0, 0xf0, 0xcc, 0xaa, 0xaa, 0xaa, 0xa0, 0x11, 0xa9,
+                                      0x06, 0x91, 0x00, 0x01, 0x13, 0xe3, 0x20, 0x1d, 0x30, 0x03, 0x44, 0x30};
+        const uint8_t other[29] = {0x00, 0x01, 0x00, 0x13, 0xa2, 0x13};
+        const uint8_t status[29] = {0x00, 0x05, 0x00, 0x20, 0x1d, 0x12, 0x3f, 0xff, 0x00, 0x00, 0x30, 0x14, 0x05, 0x07, 0x01};
+        const uint8_t zero[29] = {0x00, 0x00, 0x00, 0x00, 0x01};
+        CHECK(!parseXInputReport(announce, sizeof announce, g) && !parseXInputReport(other, sizeof other, g));
+        CHECK(!parseXInputReport(status, sizeof status, g) && !parseXInputReport(zero, sizeof zero, g));
+        CHECK(!g.btnA && g.triggerL2 == 0.0f);
+    }
     const uint8_t gone[] = {0x08, 0x00};
     CHECK(parseXInputReport(gone, sizeof gone, st) && !st.btnA && st.triggerL2 == 0.0f);
     // A wired report is unchanged: A, nothing else.

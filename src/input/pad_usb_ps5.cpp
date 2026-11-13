@@ -79,7 +79,7 @@ const char* protocolName(UsbPadProtocol p) {
 std::string hex(const uint8_t* p, int n) {
     std::string s;
     char b[4];
-    for (int i = 0; i < n && i < 24; ++i) std::snprintf(b, sizeof b, "%02x ", p[i]), s += b;
+    for (int i = 0; i < n && i < 32; ++i) std::snprintf(b, sizeof b, "%02x ", p[i]), s += b;
     return s;
 }
 
