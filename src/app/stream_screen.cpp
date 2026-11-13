@@ -1325,10 +1325,11 @@ void StreamScreen::finishGyroCalibration_(bool cancelled) {
     if (g_player) g_player->setFrameTap(nullptr);  // returns once the video thread is out of it
     gyrocal::Result result;
     if (!cancelled) result = gyrocal::analyze(gyroCalRecording_);
-    XC_LOGI("gyro calibration: %s; %zu pictures, start %d %%, exponent %d.%d, fit error %.3f, top %.0f px/s, vertical %.2f",
+    XC_LOGI("gyro calibration: %s; %zu pictures, start %d %%, exponent %d.%d, fit error %.3f, top %.0f px/s (full stick read %.0f), vertical %.2f",
             cancelled ? "cancelled" : result.ok() ? "ok" : "failed", gyroCalRecording_.size(), result.startPct,
             result.exponentTenths / 10, result.exponentTenths % 10, static_cast<double>(result.fitError),
-            static_cast<double>(result.topSpeed), static_cast<double>(result.verticalRatio));
+            static_cast<double>(result.topSpeed), static_cast<double>(result.fullStickSpeed),
+            static_cast<double>(result.verticalRatio));
     for (const gyrocal::Point& p : result.horizontal)
         XC_LOGD("gyro calibration: stick %.2f -> %.0f px/s", static_cast<double>(p.level), static_cast<double>(p.speed));
     gyroCalRecording_.clear();

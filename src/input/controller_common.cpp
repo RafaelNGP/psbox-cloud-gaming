@@ -370,9 +370,11 @@ bool pollPad(int index, ControllerState& out) {
         } else {
             // Closed-loop posture tracking: anchor reference orientation when entering aiming
             // or when manually slewing with the right thumbstick (post-deadzone).
-            if (std::hypot(out.rightStickX, out.rightStickY) > 0.10f || !slot.gyro.aimingActive) {
+            if (!slot.gyro.aimingActive) {
                 anchorGyroPosture(slot.gyro, pad.hasOrientation ? pad.orientation : nullptr,
                                   pad.hasAccel ? pad.accel : nullptr);
+            } else if (std::hypot(out.rightStickX, out.rightStickY) > 0.10f) {
+                rebaseGyroPosture(slot.gyro, pad.hasOrientation ? pad.orientation : nullptr);
             }
             float gx, gy;
             gyroToStick(pad.gyro, pad.hasAccel ? pad.accel : nullptr, g_gyroLevel.load(std::memory_order_relaxed),

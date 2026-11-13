@@ -3093,6 +3093,23 @@ static void testGyroCalibration() {
         const float truth = 2400.0f * std::pow((p.level - 0.18f) / 0.82f, 2.2f);
         CHECK(std::abs(model / truth - 1.0f) < 0.2f);
     }
+    // The stick held full reads differently from run to run (the game's turn boost): the same
+    // levels below it give the same curve and the same top speed whatever that read was.
+    {
+        auto pointsWithFull = [](float fullRead) {
+            std::vector<Point> pts;
+            for (float l : {0.14f, 0.18f, 0.22f, 0.26f, 0.30f, 0.35f, 0.40f, 0.45f, 0.50f, 0.60f, 0.70f, 0.80f, 0.90f})
+                pts.push_back({l, l <= 0.15f ? 0.0f : 2500.0f * std::pow((l - 0.15f) / 0.85f, 2.4f)});
+            pts.push_back({1.0f, fullRead});
+            return pts;
+        };
+        float topLow = 0, topHigh = 0;
+        int sLow = 0, eLow = 0, sHigh = 0, eHigh = 0;
+        CHECK(fitResponse(pointsWithFull(2039.0f), topLow, sLow, eLow) < 0.01f);
+        CHECK(fitResponse(pointsWithFull(2715.0f), topHigh, sHigh, eHigh) < 0.01f);
+        CHECK(sLow == sHigh && eLow == eHigh && topLow == topHigh);
+        CHECK(std::abs(sLow - 15) <= 1 && std::abs(eLow - 24) <= 1 && std::abs(topLow - 2500.0f) < 75.0f);
+    }
     // A picture that never moves (a menu was open): said so, nothing made up.
     Recording still;
     view(2000.0f, frame.data());
@@ -3150,6 +3167,43 @@ static void testGyro() {
     for (int i = 0; i < 60; ++i) gyroToStick(rollTurn, level, 5, sRoll, xRoll, yRoll);
     CHECK(xRoll < -0.3f);
     CHECK(std::abs(yRoll) < 1e-6f); // Decoupled pitch: zero crosstalk from roll turning
+
+    // Held rolled 30 degrees to one side: an up / down turn (the pad's pitch axis) aims up /
+    // down only. The room's vertical has a share on that axis then, and it used to turn the
+    // aim sideways as well; with and without the closed-loop posture tracking.
+    {
+        const float rolled[3] = {0.5f, 0.866f, 0.0f}, pitchOnly[3] = {0.6f, 0.0f, 0.0f};
+        GyroState open;
+        float xo = 0, yo = 0;
+        for (int i = 0; i < 60; ++i) gyroToStick(pitchOnly, rolled, 5, open, xo, yo);
+        CHECK(std::abs(xo) < 1e-5f);
+        CHECK(yo < -0.2f);
+        GyroState tracked;
+        anchorGyroPosture(tracked, nullptr, rolled);
+        float xt = 0, yt = 0, worstX = 0;
+        for (int i = 0; i < 120; ++i) {
+            gyroToStick(pitchOnly, rolled, 5, tracked, xt, yt);
+            worstX = std::max(worstX, std::abs(xt));
+        }
+        CHECK(worstX < 1e-4f);
+        CHECK(yt < -0.2f);
+    }
+    // The thumb on the right stick re-references the posture on every reading; the hand's
+    // push must come through whole (it used to be zeroed each time, leaving a fraction).
+    {
+        const float turn[3] = {0.0f, 0.8f, 0.0f};
+        GyroState freeHand, withThumb;
+        anchorGyroPosture(freeHand, nullptr, level);
+        anchorGyroPosture(withThumb, nullptr, level);
+        float xa = 0, ya = 0, xb = 0, yb = 0;
+        for (int i = 0; i < 100; ++i) {
+            gyroToStick(turn, level, 5, freeHand, xa, ya);
+            rebaseGyroPosture(withThumb, nullptr);
+            gyroToStick(turn, level, 5, withThumb, xb, yb);
+        }
+        CHECK(xa < -0.3f);
+        CHECK(xb < 0.9f * xa + 1e-4f);  // at least 90 % of the free hand's push
+    }
 
     // The game's stick response (setGyroResponse): through a measured curve
     // the stick level sent gives a camera speed in step with the hand's turn.

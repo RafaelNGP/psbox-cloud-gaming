@@ -73,15 +73,20 @@ struct Result {
     int startPct = 12;         // GyroResponse::start, percent
     int exponentTenths = 10;   // GyroResponse::exponent, tenths
     float fitError = 0;        // rms distance of the curve from the measured levels, in stick units
-    float topSpeed = 0;        // picture pixels per second at full stick
+    float topSpeed = 0;        // picture pixels per second at full stick, as the curve of the levels below it gives
+    float fullStickSpeed = 0;  // as read with the stick held full (0: not read); games add a boost there
     float verticalRatio = 0;   // the game's vertical speed as a share of its horizontal one (0: not read)
     std::vector<Point> horizontal, vertical;
 };
 
 Result analyze(const Recording& rec);
 
-// The two numbers that fit points best (speeds as shares of the top speed);
-// the rms stick error is returned.
-float fitResponse(const std::vector<Point>& points, float topSpeed, int& startPct, int& exponentTenths);
+// The two numbers that fit the points best, and the top speed their curve
+// reaches at full stick; the rms stick error is returned. The speed read with
+// the stick held full is left out: games add a turn boost there that grows
+// with time, and it read 2039 to 2715 px/s over six runs of one game whose
+// levels below it agreed within 0.02 of stick. Taking it as the top speed moved
+// the whole curve, and with it how far the aim turns, by up to 20 %.
+float fitResponse(const std::vector<Point>& points, float& topSpeed, int& startPct, int& exponentTenths);
 
 }  // namespace xc::app::gyrocal

@@ -207,24 +207,33 @@ bool pictureShift(const uint8_t* a, const uint8_t* b, bool vertical, float& shif
     return true;
 }
 
-float fitResponse(const std::vector<Point>& points, float topSpeed, int& startPct, int& exponentTenths) {
+float fitResponse(const std::vector<Point>& points, float& topSpeed, int& startPct, int& exponentTenths) {
     float best = 1e9f;
-    if (topSpeed <= 0) return best;
+    topSpeed = 0;
     for (int s = 0; s <= 40; ++s)
         for (int e = 10; e <= 40; ++e) {
             const float start = static_cast<float>(s) / 100.0f, exponent = static_cast<float>(e) / 10.0f;
-            float sum = 0;
+            // The top speed this curve gives the points below full stick (least squares of the logs).
+            float logSum = 0;
             int n = 0;
             for (const Point& p : points) {
-                if (p.speed <= 0) continue;
-                const float v = std::min(1.0f, p.speed / topSpeed);
+                if (p.speed <= 0 || p.level >= 0.999f || p.level <= start) continue;
+                logSum += std::log(p.speed) - exponent * std::log((p.level - start) / (1.0f - start));
+                ++n;
+            }
+            if (n < 3) continue;
+            const float top = std::exp(logSum / static_cast<float>(n));
+            float sum = 0;
+            n = 0;
+            for (const Point& p : points) {
+                if (p.speed <= 0 || p.level >= 0.999f) continue;
+                const float v = std::min(1.0f, p.speed / top);
                 const float level = start + (1.0f - start) * std::pow(v, 1.0f / exponent);
                 sum += (level - p.level) * (level - p.level);
                 ++n;
             }
-            if (n < 3) continue;
             const float err = std::sqrt(sum / static_cast<float>(n));
-            if (err < best) best = err, startPct = s, exponentTenths = e;
+            if (err < best) best = err, startPct = s, exponentTenths = e, topSpeed = top;
         }
     return best;
 }
@@ -301,11 +310,9 @@ Result analyze(const Recording& rec) {
         r.failure = Failure::Unreadable;
         return r;
     }
-    // The top speed: full stick, or the last level read scaled up along its neighbours' slope.
-    r.topSpeed = r.horizontal.back().speed;
-    if (r.horizontal.back().level < 0.999f) r.topSpeed /= std::pow(r.horizontal.back().level, 2.0f);
+    if (r.horizontal.back().level >= 0.999f) r.fullStickSpeed = r.horizontal.back().speed;
     r.fitError = fitResponse(r.horizontal, r.topSpeed, r.startPct, r.exponentTenths);
-    if (r.fitError > 0.05f) {
+    if (r.topSpeed <= 0 || r.fitError > 0.05f) {
         r.failure = Failure::NoFit;
         return r;
     }

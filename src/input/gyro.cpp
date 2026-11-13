@@ -158,6 +158,31 @@ void anchorGyroPosture(GyroState& s, const float* orientationQuat, const float* 
     s.y = 0.0f;
 }
 
+void rebaseGyroPosture(GyroState& s, const float* orientationQuat) {
+    if (!s.aimingActive) {
+        anchorGyroPosture(s, orientationQuat, nullptr);
+        return;
+    }
+    float n = std::sqrt(s.up[0] * s.up[0] + s.up[1] * s.up[1] + s.up[2] * s.up[2]);
+    if (s.upInitialized && n > 1e-3f) {
+        for (int i = 0; i < 3; ++i) s.baseUp[i] = s.up[i] / n;
+        s.baseUpInitialized = true;
+    }
+    float qNorm[4];
+    if (isValidUnitQuat(orientationQuat, qNorm)) {
+        std::copy(qNorm, qNorm + 4, s.baseQuat);
+        s.hasBaseQuat = true;
+    } else {
+        s.baseQuat[0] = s.baseQuat[1] = s.baseQuat[2] = 0.0f;
+        s.baseQuat[3] = 1.0f;
+        s.hasBaseQuat = false;
+    }
+    s.softQuat[0] = s.softQuat[1] = s.softQuat[2] = 0.0f;
+    s.softQuat[3] = 1.0f;
+    s.targetAngle[0] = s.targetAngle[1] = 0.0f;
+    s.injected[0] = s.injected[1] = 0.0f;
+}
+
 void resetGyroPosture(GyroState& s) {
     s.aimingActive = false;
     s.hasBaseQuat = false;
@@ -237,8 +262,10 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
     }
 
     // 3. Player Space Gyro with Combined Yaw and Roll (JSL / Steam Input standard)
-    // The world vertical projection from gravity:
-    const float wWorldProj = w[0] * s.up[0] + w[1] * s.up[1] + w[2] * s.up[2];
+    // The turn about the room's vertical, read on the pad's yaw and roll axes only: its pitch
+    // axis already aims up / down by itself, and with the pad rolled to one side that axis has
+    // a share of the vertical too, so counting it here turned an up / down move sideways as well.
+    const float wWorldProj = w[1] * s.up[1] + w[2] * s.up[2];
 
     // Total angular rate in turning plane (Y-Z plane of controller):
     const float yzMag = std::sqrt(w[1] * w[1] + w[2] * w[2]);
@@ -362,8 +389,8 @@ void gyroToStick(const float rawW[3], const float* accel, int level, GyroState& 
         const float rz = zr * angScale;
 
         // World vertical yaw in anchor body frame
-        const float ux = s.baseUp[0], uy = s.baseUp[1], uz = s.baseUp[2];
-        float rTurn = rx * ux + ry * uy + rz * uz;
+        const float uy = s.baseUp[1], uz = s.baseUp[2];
+        float rTurn = ry * uy + rz * uz;  // not the pitch axis: see the rate above
         float rzMag = std::sqrt(ry * ry + rz * rz);
         if (rzMag > 1e-6f) {
             float rRollExtra = rz * (1.0f - std::abs(uz));
