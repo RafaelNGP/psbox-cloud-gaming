@@ -1383,7 +1383,6 @@ void autoplayNav(ui::NavInput& nav, bool& menuCombo, uint64_t now) {
 }
 
 void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
-    if (g_autoplay.title.empty()) return;
     // Autoplay: save the rendered home and loading screens.
     auto saveCanvas = [&](const char* name) {
         std::string ppm = "P6\n1920 1080\n255\n";
@@ -1397,6 +1396,19 @@ void autoplayScreens(const ui::Canvas& canvas, uint64_t now) {
         XC_LOGI("ui snapshot %s: %s", name,
                 platform::writeFileAtomic(platform::dataDir() + "/" + name, ppm) ? "ok" : "failed");
     };
+    // A capture of the menus asked for from outside (the file ui.req appears), in any mode: what
+    // the screen shows now, without restarting the app (ui_now.ppm).
+    static uint64_t uiReqCheckedAt = 0;
+    if (now - uiReqCheckedAt >= 500) {
+        uiReqCheckedAt = now;
+        const std::string req = platform::dataDir() + "/ui.req";
+        std::string unused;
+        if (platform::readFile(req, unused)) {
+            std::remove(req.c_str());
+            saveCanvas("ui_now.ppm");
+        }
+    }
+    if (g_autoplay.title.empty()) return;
     if (!g_autoplay.title.empty() && !launchSaved && g_ui->screen() == ui::Screen::Launching) {
         if (!launchSince) launchSince = now;
         if (now - launchSince > 8000) {
