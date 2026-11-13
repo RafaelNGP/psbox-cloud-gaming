@@ -122,6 +122,8 @@ constexpr Column kEnglish = {
     "Scan to get it free",                          // ScanToGet
     "%s is not on your account yet. It is free: open its page and choose Get, then try again (it can take a minute).", // NoEntitlementFree
     "Your account can't play %s: it is not in your subscription or not bought.", // NoEntitlement
+    "Xbox streams %s only on an Xbox console or a Samsung TV.",
+    "Xbox streams %s only on: %s.",// DeviceTypeRestricted
     "My consoles",                                   // TabConsoles
     "On",                                            // ConsoleOn
     "Sleeping",                                      // ConsoleSleeping

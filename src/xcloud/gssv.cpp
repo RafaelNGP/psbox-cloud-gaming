@@ -372,6 +372,8 @@ bool GssvClient::listTitles(std::vector<Title>& out, std::string& err, bool rece
                 ++inputTypes[input.str()];
                 if (input.str() == "MKB") title.mouseKeyboard = true;
             }
+            for (const auto& d : t["details"]["allowedDeviceTypes"].items())
+                if (d.isString() && !d.str().empty()) title.allowedDeviceTypes.push_back(d.str());
             // What lets this account play it: a subscription's program
             // (CALLISTO for Game Pass in the cloud), F2P, or FERDINAND, the
             // free tier with ads (an account with no subscription has it:
@@ -481,6 +483,10 @@ bool GssvClient::listConsoles(std::vector<Console>& out, std::string& err) {
         if (!con.serverId.empty()) out.push_back(std::move(con));
     }
     return true;
+}
+
+bool isDeviceTypeRefusal(const std::string& sessionError) {
+    return sessionError.find("DeviceTypeNotAllowed") != std::string::npos;
 }
 
 bool GssvClient::startSession(const std::string& titleId, const std::string& locale, std::string& err, int* status) {

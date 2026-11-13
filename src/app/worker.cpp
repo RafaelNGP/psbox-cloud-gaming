@@ -155,6 +155,31 @@ std::string g_subscription;
 
 namespace {
 
+// Device-kind tokens (details.allowedDeviceTypes) as names a person recognises, joined with " / ".
+std::string friendlyDeviceList(const std::vector<std::string>& kinds) {
+    auto name = [](const std::string& k) -> std::string {
+        if (k == "XBOXONE") return "Xbox One";
+        if (k == "SCARLETT" || k == "XBOXSERIES") return "Xbox Series X|S";
+        if (k == "SAMSUNGTV") return "Samsung TV";
+        if (k == "AMAZONFIRETV" || k == "FIRETV" || k == "AMAZONTV") return "Amazon Fire TV";
+        if (k == "ANDROID") return "Android";
+        if (k == "IOS") return "iOS";
+        if (k == "WIN32" || k == "WINDOWS" || k == "WINPC") return "Windows PC";
+        if (k.empty()) return k;
+        std::string s = k;  // unknown token: Capitalised, the rest lower case
+        for (size_t i = 1; i < s.size(); ++i) s[i] = static_cast<char>(std::tolower(static_cast<unsigned char>(s[i])));
+        return s;
+    };
+    std::string out;
+    for (const auto& k : kinds) {
+        std::string n = name(k);
+        if (n.empty()) continue;
+        if (!out.empty()) out += " / ";
+        out += n;
+    }
+    return out;
+}
+
 bool isDnsOrSinkholeError(const std::string& err) {
     return err.find("DNS lookup failed") != std::string::npos ||
            err.find("0x8041013d") != std::string::npos ||
@@ -812,6 +837,14 @@ void worker() {
                                                     tile.name),
                                             tile);
                     }
+                } else if (failed && xcloud::isDeviceTypeRefusal(result)) {
+                    // Entitled, but Xbox licenses the title only for some device kinds, fixed by the
+                    // signed-in client, which we can't change: name the kinds so the user knows where.
+                    std::string devices = friendlyDeviceList(tile.allowedDeviceTypes);
+                    if (devices.empty())
+                        g_ui->showPlayError(ui::trf(ui::Str::DeviceTypeRestricted, tile.name), tile);
+                    else
+                        g_ui->showPlayError(ui::trf(ui::Str::DeviceTypeRestrictedOn, tile.name, devices), tile);
                 } else if (failed) {
                     if (net::lastTlsProblem() == net::TlsProblem::Clock) {
                         g_ui->showError(ui::trf(shell::caps().console ? ui::Str::ClockWrong : ui::Str::ClockWrongPc, net::todayText()));

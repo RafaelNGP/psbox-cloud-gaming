@@ -49,6 +49,8 @@ struct GameTile {
     bool freeInStore = false;
     // The cloud takes native mouse and keyboard in it (xCloud's "MKB").
     bool mouseKeyboard = false;
+    // Device kinds Xbox limits the title to (empty = no limit); shown if a session is refused.
+    std::vector<std::string> allowedDeviceTypes;
     // Console it was made for: "360", "ONE", "XS" (xcloud/titlehub.h); empty
     // while unknown.
     std::string platform;

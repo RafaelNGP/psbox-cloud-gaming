@@ -366,6 +366,7 @@ ui::GameTile Library::tile(const std::string& productId, const std::string& titl
         if (myPlan > 0 && !xcloud::planIncludes(myPlan, t.plan, t.freeInStore)) t.playable = false;
     }
     t.mouseKeyboard = mouseKeyboard_.count(productId) > 0;
+    if (auto it = allowedDevices_.find(productId); it != allowedDevices_.end()) t.allowedDeviceTypes = it->second;
     // A free-to-play game not on the account yet is got like one bought
     // (the store page's QR code), only free.
     t.purchasable = !t.playable && (purchasableSet_.count(productId) || t.freeInStore);
@@ -694,6 +695,11 @@ bool Library::loadCache(bool withLayout) {
     }
     for (const auto& [id, code] : (*j)["platforms"].members()) platform_[id] = code.str();
     for (const auto& [pid, xbox] : (*j)["xboxTitles"].members()) xboxTitleOf_[pid] = xbox.str();
+    for (const auto& [pid, devices] : (*j)["allowedDevices"].members()) {
+        std::vector<std::string> list;
+        for (const auto& d : devices.items()) if (d.isString()) list.push_back(d.str());
+        if (!list.empty()) allowedDevices_[pid] = std::move(list);
+    }
     for (const auto& id : (*j)["freeInStore"].items()) freeInStore_.insert(id.str());
     for (const auto& id : (*j)["mouseKeyboard"].items()) mouseKeyboard_.insert(id.str());
     for (const auto& t : (*j)["ownedTitles"].items()) ownedTitles_.insert(t.str());
@@ -925,10 +931,16 @@ void Library::saveCache() const {
         if (!p.empty()) kp.push(p);
     }
     root.set("knownProducts", kp);
-    json::Value platforms = json::Value::object(), xboxTitles = json::Value::object(), cloudTitles = json::Value::object();
+    json::Value platforms = json::Value::object(), xboxTitles = json::Value::object(), cloudTitles = json::Value::object(), allowedDevices = json::Value::object();
     for (const auto& [id, code] : platform_) platforms.set(id, code);
     for (const auto& [pid, xbox] : xboxTitleOf_) xboxTitles.set(pid, xbox);
     for (const auto& [pid, title] : cloudTitleOf_) cloudTitles.set(pid, title);
+    for (const auto& [pid, devices] : allowedDevices_) {
+        json::Value arr = json::Value::array();
+        for (const auto& d : devices) arr.push(d);
+        allowedDevices.set(pid, arr);
+    }
+    root.set("allowedDevices", allowedDevices);
     root.set("platforms", platforms);
     root.set("xboxTitles", xboxTitles);
     root.set("cloudTitles", cloudTitles);
