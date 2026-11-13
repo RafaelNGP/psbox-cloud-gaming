@@ -176,6 +176,18 @@ bool Settings::load(const std::string& path) {
     titlePlaytime.clear();
     for (const auto& [id, sec] : (*j)["titlePlaytime"].members())
         if (sec.asInt() > 0) titlePlaytime[id] = static_cast<uint64_t>(sec.asInt());
+    listsAccount = (*j)["listsAccount"].str();
+    accountLists.clear();
+    for (const auto& [xuid, lists] : (*j)["accountLists"].members()) {
+        if (xuid.empty() || xuid == listsAccount) continue;
+        AccountLists& l = accountLists[xuid];
+        for (const auto& id : lists["hidden"].items())
+            if (!id.str().empty()) l.hidden.push_back(id.str());
+        for (const auto& id : lists["favorites"].items())
+            if (!id.str().empty()) l.favorites.push_back(id.str());
+        for (const auto& [id, sec] : lists["titlePlaytime"].members())
+            if (sec.asInt() > 0) l.titlePlaytime[id] = static_cast<uint64_t>(sec.asInt());
+    }
     perGame.clear();
     for (const auto& [id, obj] : (*j)["perGame"].members()) {
         GameProfile p;
@@ -294,6 +306,26 @@ GameProfile Settings::profileForGame(const std::string& productId, const std::st
     return defaultProfile();
 }
 
+Settings::ListsSwitch Settings::useListsOf(const std::string& xuid) {
+    if (xuid.empty() || xuid == listsAccount) return ListsSwitch::Same;
+    if (listsAccount.empty()) {  // from before the lists had an owner: this account's
+        listsAccount = xuid;
+        accountLists.erase(xuid);
+        return ListsSwitch::Adopted;
+    }
+    accountLists[listsAccount] = AccountLists{std::move(hidden), std::move(favorites), std::move(titlePlaytime)};
+    AccountLists mine;
+    if (auto it = accountLists.find(xuid); it != accountLists.end()) {
+        mine = std::move(it->second);
+        accountLists.erase(it);
+    }
+    hidden = std::move(mine.hidden);
+    favorites = std::move(mine.favorites);
+    titlePlaytime = std::move(mine.titlePlaytime);
+    listsAccount = xuid;
+    return ListsSwitch::Changed;
+}
+
 bool Settings::save(const std::string& path) const {
     json::Value v = json::Value::object();
     v.set("language", language);
@@ -373,6 +405,20 @@ bool Settings::save(const std::string& path) const {
     for (const auto& [id, sec] : titlePlaytime)
         if (sec > 0) pt.set(id, static_cast<int64_t>(sec));
     v.set("titlePlaytime", pt);
+    v.set("listsAccount", listsAccount);
+    json::Value others = json::Value::object();
+    for (const auto& [xuid, l] : accountLists) {
+        json::Value o = json::Value::object(), h = json::Value::array(), f = json::Value::array(), t = json::Value::object();
+        for (const auto& id : l.hidden) h.push(id);
+        for (const auto& id : l.favorites) f.push(id);
+        for (const auto& [id, sec] : l.titlePlaytime)
+            if (sec > 0) t.set(id, static_cast<int64_t>(sec));
+        o.set("hidden", h);
+        o.set("favorites", f);
+        o.set("titlePlaytime", t);
+        others.set(xuid, o);
+    }
+    v.set("accountLists", others);
     v.set("skippedUpdate", skippedUpdate);
     v.set("maxHeightCloud", maxHeightCloud);
     v.set("maxHeightHome", maxHeightHome);

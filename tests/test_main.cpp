@@ -2469,6 +2469,35 @@ static void testH264LossWaitFollowsRtt() {
     CHECK(rx.lossWaitMs() == 90);
 }
 
+// Hidden games, favourites and play time follow the Xbox account signed in: lists from before
+// they had an owner go to the first account, a second account starts empty, each finds its
+// own again, and all of it survives the settings file.
+static void testAccountLists() {
+    using xc::app::Settings;
+    Settings s;
+    s.hidden = {"A"};
+    s.favorites = {"B"};
+    s.titlePlaytime["A"] = 120;
+    CHECK(s.useListsOf("") == Settings::ListsSwitch::Same);
+    CHECK(s.useListsOf("111") == Settings::ListsSwitch::Adopted);
+    CHECK(s.hidden.size() == 1 && s.listsAccount == "111");
+    CHECK(s.useListsOf("111") == Settings::ListsSwitch::Same);
+    CHECK(s.useListsOf("222") == Settings::ListsSwitch::Changed);
+    CHECK(s.hidden.empty() && s.favorites.empty() && s.titlePlaytime.empty());
+    s.hidden = {"C", "D"};
+    s.titlePlaytime["C"] = 30;
+    const std::string path = "/tmp/xc_test_account_lists.json";
+    CHECK(s.save(path));
+    Settings back;
+    CHECK(back.load(path));
+    std::remove(path.c_str());
+    CHECK(back.listsAccount == "222" && back.hidden.size() == 2 && back.accountLists.count("111") == 1);
+    CHECK(back.useListsOf("111") == Settings::ListsSwitch::Changed);
+    CHECK(back.hidden == std::vector<std::string>{"A"} && back.favorites == std::vector<std::string>{"B"});
+    CHECK(back.titlePlaytime["A"] == 120 && back.accountLists.count("111") == 0);
+    CHECK(back.accountLists["222"].hidden.size() == 2 && back.accountLists["222"].titlePlaytime["C"] == 30);
+}
+
 static void testH264Resync() {
     xc::stream::VideoReceiveStats stats;
     int keyframeAsks = 0;
@@ -11592,6 +11621,7 @@ int main() {
     testAudioEncoder();
     testH264LossWaitFollowsRtt();
     testH264Resync();
+    testAccountLists();
     testH264PaddingPacket();
     testAudioDecoderEmptyPacket();
     testAudioDecoderPlc();

@@ -302,6 +302,31 @@ void signInAndLoad(auth::AuthManager& am, xcloud::GssvClient& gssv) {
         g_xuid = am.profile().xuid;
     }
     setPriceAuth(g_xblAuth, g_xuid);
+    // Hidden games, favourites and play time are this Xbox account's: another account signed in
+    // on the same console user gets its own, and the one before finds its own when it returns.
+    {
+        std::vector<std::string> favorites;
+        bool changed = false;
+        {
+            std::lock_guard<std::mutex> lock(g_settingsMutex);
+            const Settings::ListsSwitch sw = g_settings.useListsOf(am.profile().xuid);
+            if (sw != Settings::ListsSwitch::Same) {
+                g_settings.save(settingsPath());  // warns itself
+                XC_LOGI("lists: %s for this Xbox account (%zu hidden, %zu favorites, %zu games with play time)",
+                        sw == Settings::ListsSwitch::Changed ? "switched" : "kept", g_settings.hidden.size(),
+                        g_settings.favorites.size(), g_settings.titlePlaytime.size());
+            }
+            if (sw == Settings::ListsSwitch::Changed) {
+                changed = true;
+                favorites = g_settings.favorites;
+                g_ui->setPrefs(g_settings.hidden, g_settings.librarySort == "az"        ? ui::LibrarySort::AZ
+                                                  : g_settings.librarySort == "console" ? ui::LibrarySort::Console
+                                                                                        : ui::LibrarySort::Recent,
+                               g_settings.favorites, g_settings.wishlist);
+            }
+        }
+        if (changed) updateLibraryFavorites(favorites);
+    }
     platform::notify(ui::trf(ui::Str::SignedInAs, am.profile().gamertag), "signed in (notification)");
     static bool updateChecked = false;
     static platform::Thread s_updateThread;

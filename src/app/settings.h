@@ -153,6 +153,21 @@ struct Settings {
     bool queueReadyAlert = true; // Queue-ready chime and rumble alert
     bool previewFeatures = true; // xCloud preview client identification & ad-supported F2P streaming
     bool syncTrophies = false;   // Xbox achievement to PlayStation trophy conversion
+    // `hidden`, `favorites` and `titlePlaytime` belong to the Xbox account signed in, not to the
+    // console's user: another account signed in on the same user starts with its own (empty)
+    // lists and the first one finds its own again. The live ones are `listsAccount`'s (its
+    // xuid; empty: nobody signed in since this was added, they go to the first who does); the
+    // other accounts' wait in `accountLists`.
+    struct AccountLists {
+        std::vector<std::string> hidden, favorites;
+        std::map<std::string, uint64_t> titlePlaytime;
+    };
+    std::string listsAccount;
+    std::map<std::string, AccountLists> accountLists;
+    enum class ListsSwitch { Same, Adopted, Changed };
+    // Makes the live lists `xuid`'s. Adopted: the lists there were had no owner and are now this
+    // account's (to be saved); Changed: other lists are live now (to be saved and shown).
+    ListsSwitch useListsOf(const std::string& xuid);
     bool usbControllers = true;  // in-app USB controllers driver (OneFamily)
     bool soloInputRedirect = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
