@@ -62,6 +62,10 @@ void setRestore(bool on);
 // Measurements only: the picture rounded to 8 bits between the passes and no
 // dither, as before the 16-bit images.
 void setLegacyPrecision(bool on);
+// Measurements only: off gives the colour spread evenly, as before it followed the brightness.
+void setChromaGuide(bool on);
+// Measurements only: on, "no overlay" clears it and sends it to the GPU again every time, as before.
+void setOverlayRefreshAlways(bool on);
 // 119.88 Hz output on or back to 59.94 Hz while running (a game's stream
 // only); false when the driver can't (a RADV without the PSBox patch, or the
 // console refused). The swapchain stays as it is.

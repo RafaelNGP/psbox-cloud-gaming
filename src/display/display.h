@@ -69,6 +69,12 @@ void setRestore(bool on);
 // Measurements only (autoplay "imgtest"): the picture rounded to 8 bits between
 // the passes and no dither, as before the 16-bit images.
 void setLegacyPrecision(bool on);
+// Measurements only (autoplay "imgtest"): off spreads the colour samples evenly, as before
+// they followed the brightness edges.
+void setChromaGuide(bool on);
+// Measurements only (autoplay "abimage"): on, a hidden overlay is cleared and sent to the GPU
+// again each time it is set hidden, as before that was skipped.
+void setOverlayRefreshAlways(bool on);
 
 // What this display can do, as of now (the GPU's part once init() has run):
 // an option it can't honour is hidden or has no effect.

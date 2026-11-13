@@ -959,6 +959,8 @@ void setDeband(int) {}
 void setUpscaler(int) {}
 void setRestore(bool) {}
 void setLegacyPrecision(bool) {}
+void setChromaGuide(bool) {}
+void setOverlayRefreshAlways(bool) {}
 DisplayCaps caps() {
     DisplayCaps c{};
     c.asyncPresent = true;

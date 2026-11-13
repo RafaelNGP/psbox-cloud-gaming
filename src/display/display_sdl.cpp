@@ -521,6 +521,11 @@ void setLegacyPrecision(bool on) {
     gpu::setLegacyPrecision(on);
     g_repaint = true;
 }
+void setChromaGuide(bool on) {
+    gpu::setChromaGuide(on);
+    g_repaint = true;
+}
+void setOverlayRefreshAlways(bool on) { gpu::setOverlayRefreshAlways(on); }
 DisplayCaps caps() {
     DisplayCaps c;
     c.upscalers = c.deband = c.sharpen = gpu::ready();

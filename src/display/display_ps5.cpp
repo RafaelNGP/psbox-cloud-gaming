@@ -529,6 +529,8 @@ void setDeband(int level) { gpu::setDeband(level); }
 void setUpscaler(int mode) { gpu::setUpscaler(mode); }
 void setRestore(bool on) { gpu::setRestore(on); }
 void setLegacyPrecision(bool on) { gpu::setLegacyPrecision(on); }
+void setChromaGuide(bool on) { gpu::setChromaGuide(on); }
+void setOverlayRefreshAlways(bool on) { gpu::setOverlayRefreshAlways(on); }
 
 // The CPU path sharpens too; the rest is the GPU's.
 DisplayCaps caps() {
