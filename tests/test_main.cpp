@@ -2503,6 +2503,47 @@ static void testH264Resync() {
     CHECK(framesOut == 3);
     CHECK(stats.framesDropped >= 1);
     CHECK(keyframeAsks >= 1);
+
+    // A session's first packets are its key frame (parameter sets first): nothing came before
+    // them, and it goes out at once, with no key frame asked for.
+    {
+        xc::stream::VideoReceiveStats st;
+        int asks = 0;
+        xc::stream::H264Receiver first([&] { ++asks; }, st, 150);
+        rtc::message_vector in = {packet(100, 0, false, 0x67), packet(101, 0, true, 0x65)};
+        first.incoming(in, [](rtc::message_ptr) { return true; });
+        CHECK(in.size() == 1 && asks == 0 && st.keyframeRequests == 0);
+    }
+    // The last packet of a frame is lost for good and a key frame follows it: resumed at that
+    // key frame, though the packet before it never came. A key slice that isn't the first of
+    // its picture (its first macroblock isn't 0) is no place to start.
+    {
+        xc::stream::VideoReceiveStats st;
+        xc::stream::H264Receiver lossy([] {}, st, 60);
+        size_t out = 0;
+        auto give = [&](rtc::message_vector in) {
+            lossy.incoming(in, [](rtc::message_ptr) { return true; });
+            out += in.size();
+        };
+        give({packet(0, 0, false, 0x67), packet(1, 0, true, 0x65), packet(2, 1500, false, 0x41)});
+        CHECK(out == 1);
+        // seq 3 (the end of that P frame) never comes; 4-5 a key frame; 6 a P frame.
+        give({packet(4, 3000, false, 0x65), packet(5, 3000, true, 0x65), packet(6, 4500, true, 0x41)});
+        CHECK(out == 1);
+        xc::platform::sleepMs(100);
+        give({});
+        CHECK(out == 3);  // the key frame and the P frame after it
+        // Now seq 7 is lost and what follows is the second slice of a key picture (0x25: first_mb != 0).
+        auto slice2 = [&](uint16_t seq, uint32_t ts) {
+            auto m = packet(seq, ts, true, 0x65);
+            (*m)[13] = std::byte{0x25};
+            return m;
+        };
+        give({slice2(8, 6000)});
+        xc::platform::sleepMs(100);
+        give({});
+        CHECK(out == 3);
+    }
 }
 
 // A padding-only RTP packet (payload all padding) inside a frame is skipped,
