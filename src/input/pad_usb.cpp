@@ -37,9 +37,14 @@ void setSticks(ControllerState& s, const uint8_t* p) {
     s.rawRightY = s.rightStickY = -stick(le16(p + 6));
 }
 
+std::atomic<bool> g_guitarStrum{false};
+
 struct Slot {
     bool attached = false;
     std::string name;
+    UsbPadKind kind = UsbPadKind::Gamepad;
+    InstrumentState instrument;
+    ControllerState game;  // an instrument's state as the game gets it (instrumentForGame)
     ControllerState state;  // as read; connected once its first input came
     int player = -1;        // -1: given one at the next poll
     uint64_t order = 0;     // when it came, for the players' order
@@ -93,6 +98,16 @@ void movePlayer(Slot& s, int slot, int player) {
     g_events.push_back({UsbPadEvent::Kind::Moved, player, s.name, slot});
 }
 
+// What the game gets from a pad: an instrument passed on as a gamepad (the menus get it as read).
+ControllerState shownInGame(const Slot& slot) {
+    if (slot.kind == UsbPadKind::Gamepad) return shown(slot);
+    ControllerState s = slot.game;
+    applyPadSettings(s);
+    if (slot.guideHeld) s.btnL1 = s.btnR1 = false;
+    s.btnNexus = false;
+    return s;
+}
+
 // `player` -1: every pad (the menus, so a pad waiting for its buttons to be
 // let go too); otherwise those playing as it, but `except`.
 bool pollWhere(int player, int except, ControllerState& out) {
@@ -105,7 +120,7 @@ bool pollWhere(int player, int except, ControllerState& out) {
         const Slot& slot = g_slots[i];
         if (!slot.attached || !slot.state.connected) continue;
         if (player >= 0 && (slot.player != player || slot.waitRelease || static_cast<int>(i) == except)) continue;
-        ControllerState s = shown(slot);
+        ControllerState s = player >= 0 ? shownInGame(slot) : shown(slot);
         if (any) mergePads(out, s);
         else out = s;
         any = true;
@@ -902,14 +917,115 @@ bool parseUsbPadReport(UsbPadProtocol protocol, const uint8_t* data, size_t len,
     return false;
 }
 
-void usbPadAttached(int slot, const std::string& name) {
+void usbPadAttached(int slot, const std::string& name, UsbPadKind kind) {
     if (slot < 0 || slot >= kMaxUsbPads) return;
     std::lock_guard<std::mutex> lock(g_mutex);
     g_slots[slot] = Slot{};
     g_slots[slot].attached = true;
     g_slots[slot].name = name;
+    g_slots[slot].kind = kind;
     g_slots[slot].order = ++g_attachCount;
-    XC_LOGI("usb pad %d: %s connected", slot, name.c_str());
+    XC_LOGI("usb pad %d: %s connected (%s)", slot, name.c_str(), usbPadKindName(kind));
+}
+
+void usbPadSetKind(int slot, UsbPadKind kind) {
+    if (slot < 0 || slot >= kMaxUsbPads) return;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    Slot& s = g_slots[slot];
+    if (!s.attached || s.kind == kind) return;
+    s.kind = kind;
+    s.instrument = InstrumentState{};
+    XC_LOGI("usb pad %d: %s is a %s", slot, s.name.c_str(), usbPadKindName(kind));
+}
+
+UsbPadKind usbPadSlotKind(int slot) {
+    if (slot < 0 || slot >= kMaxUsbPads) return UsbPadKind::Gamepad;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_slots[slot].attached ? g_slots[slot].kind : UsbPadKind::Gamepad;
+}
+
+UsbPadKind usbPadKindFor(int player) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (const Slot& s : g_slots)
+        if (s.attached && s.player == player && player >= 0) return s.kind;
+    return UsbPadKind::Gamepad;
+}
+
+UsbPadKind usbPadKindForSubtype(int subtype) {
+    switch (subtype) {
+        case 0x06: case 0x07: case 0x0B: case 0x19: return UsbPadKind::Guitar;
+        case 0x08: return UsbPadKind::Drums;
+        case -1: case 0x01: case 0x03: case 0x13: return UsbPadKind::Gamepad;
+        default: return UsbPadKind::Other;
+    }
+}
+
+const char* usbPadKindName(UsbPadKind kind) {
+    switch (kind) {
+        case UsbPadKind::Guitar: return "guitar";
+        case UsbPadKind::Drums: return "drum kit";
+        case UsbPadKind::Other: return "other device";
+        default: return "gamepad";
+    }
+}
+
+void setGuitarStrum(bool on) {
+    if (g_guitarStrum.exchange(on) != on) XC_LOGI("usb pad: guitar strum %s", on ? "on" : "off");
+}
+bool guitarStrum() { return g_guitarStrum.load(std::memory_order_relaxed); }
+
+ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum) {
+    if (kind == UsbPadKind::Gamepad || kind == UsbPadKind::Other) return in;
+    ControllerState out;
+    out.connected = in.connected;
+    out.btnOptions = in.btnOptions;
+    out.btnNexus = in.btnNexus;
+    out.dpadUp = in.dpadUp, out.dpadDown = in.dpadDown, out.dpadLeft = in.dpadLeft, out.dpadRight = in.dpadRight;
+    if (kind == UsbPadKind::Drums) {
+        out.btnA = in.btnA, out.btnB = in.btnB, out.btnX = in.btnX, out.btnY = in.btnY;
+        out.btnL1 = in.btnL1, out.btnR1 = in.btnR1, out.btnTouchpad = in.btnTouchpad;
+        out.btnL3 = in.btnL3, out.btnR3 = in.btnR3;
+        return out;
+    }
+    // The guitar.
+    const bool frets[5] = {in.btnA, in.btnB, in.btnY, in.btnX, in.btnL1};
+    const bool bar = in.dpadUp || in.dpadDown;
+    const bool strummed = bar && !st.prevStrum;
+    st.prevStrum = bar;
+    bool lanes[5];
+    for (int i = 0; i < 5; ++i) {
+        if (!strum) {
+            lanes[i] = frets[i];
+            st.armed[i] = false;
+            continue;
+        }
+        if (strummed) st.armed[i] = frets[i];
+        if (!frets[i]) st.armed[i] = false;
+        lanes[i] = st.armed[i];
+    }
+    out.btnA = lanes[0], out.btnB = lanes[1], out.btnY = lanes[2], out.btnX = lanes[3], out.btnL1 = lanes[4];
+    out.triggerR2 = in.btnTouchpad ? 1.0f : 0.0f;  // star power: Overdrive (RT in Fortnite Festival)
+    return out;
+}
+
+std::vector<UsbPadInterface> findXInputWirelessInterfaces(const uint8_t* d, size_t len) {
+    std::vector<UsbPadInterface> out;
+    UsbPadInterface cur;
+    bool inPad = false;
+    for (size_t off = 0; d && off + 2 <= len; off += d[off]) {
+        const size_t l = d[off];
+        if (l < 2 || off + l > len) break;
+        if (d[off + 1] == 0x04 && l >= 9) {
+            if (inPad && cur.epIn) out.push_back(cur);
+            inPad = d[off + 3] == 0 && d[off + 5] == 0xFF && d[off + 6] == 0x5D && d[off + 7] == 0x81;
+            cur = {UsbPadProtocol::XInput, d[off + 2], 0, 0, true};
+        } else if (d[off + 1] == 0x05 && l >= 7 && inPad && (d[off + 3] & 0x03) == 0x03) {
+            uint8_t& ep = (d[off + 2] & 0x80) ? cur.epIn : cur.epOut;
+            if (!ep) ep = d[off + 2];
+        }
+    }
+    if (inPad && cur.epIn) out.push_back(cur);
+    return out;
 }
 
 void usbPadState(int slot, const ControllerState& in) {
@@ -931,6 +1047,7 @@ void usbPadState(int slot, const ControllerState& in) {
     }
     s.state = in;
     s.state.connected = true;
+    if (s.kind != UsbPadKind::Gamepad) s.game = instrumentForGame(s.kind, s.state, s.instrument, guitarStrum());
     ControllerState used = in;
     applyPadSettings(used);
     const bool pressed = inUse(used) || in.btnNexus;

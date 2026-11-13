@@ -2529,6 +2529,77 @@ static void testUsbPadRumblePacket() {
     CHECK(rx.protocol == UsbPadProtocol::XInput && rx.wireless && rx.epIn == 0x81 && rx.epOut == 0x01);
 }
 
+// Instruments behind an Xbox 360 wireless receiver: its four channels, what each device is, and
+// what a guitar sends to the game (the frets, with or without the strum bar; nothing on the sticks).
+static void testUsbInstruments() {
+    using namespace xc::input;
+    // The receiver's configuration: per device a pad interface (FF/5D/81) and a headset one (82).
+    std::vector<uint8_t> cfg = {9, 2, 0, 0, 8, 1, 0, 0xA0, 250};
+    for (uint8_t k = 0; k < 4; ++k) {
+        const uint8_t pad[] = {9, 4, static_cast<uint8_t>(2 * k), 0, 2, 0xFF, 0x5D, 0x81, 0,
+                               7, 5, static_cast<uint8_t>(0x81 + 2 * k), 3, 32, 0, 1,
+                               7, 5, static_cast<uint8_t>(0x01 + 2 * k), 3, 32, 0, 8};
+        const uint8_t headset[] = {9, 4, static_cast<uint8_t>(2 * k + 1), 0, 2, 0xFF, 0x5D, 0x82, 0,
+                                   7, 5, static_cast<uint8_t>(0x82 + 2 * k), 3, 32, 0, 2,
+                                   7, 5, static_cast<uint8_t>(0x02 + 2 * k), 3, 32, 0, 4};
+        cfg.insert(cfg.end(), pad, pad + sizeof pad);
+        cfg.insert(cfg.end(), headset, headset + sizeof headset);
+    }
+    const auto channels = findXInputWirelessInterfaces(cfg.data(), cfg.size());
+    CHECK(channels.size() == 4);
+    CHECK(channels[0].epIn == 0x81 && channels[0].epOut == 0x01 && channels[3].number == 6 && channels[3].epIn == 0x87);
+    CHECK(channels[2].wireless && channels[2].protocol == UsbPadProtocol::XInput);
+
+    CHECK(usbPadKindForSubtype(0x07) == UsbPadKind::Guitar && usbPadKindForSubtype(0x06) == UsbPadKind::Guitar);
+    CHECK(usbPadKindForSubtype(0x08) == UsbPadKind::Drums && usbPadKindForSubtype(0x01) == UsbPadKind::Gamepad);
+    CHECK(usbPadKindForSubtype(-1) == UsbPadKind::Gamepad && usbPadKindForSubtype(0x02) == UsbPadKind::Other);
+
+    // The guitar at rest, as seen on the console: whammy at full left, the tilt sensor moving.
+    ControllerState in;
+    in.connected = true;
+    in.rawRightX = in.rightStickX = -1.0f;
+    in.rawRightY = in.rightStickY = -0.55f;
+    InstrumentState st;
+    ControllerState out = instrumentForGame(UsbPadKind::Guitar, in, st, false);
+    CHECK(out.rightStickX == 0.0f && out.rightStickY == 0.0f && !out.btnA);
+    in.btnA = in.btnY = true;  // green and yellow held: without strum, at once
+    out = instrumentForGame(UsbPadKind::Guitar, in, st, false);
+    CHECK(out.btnA && out.btnY && !out.btnB && out.rightStickX == 0.0f);
+    in.btnTouchpad = true;  // Back: star power
+    CHECK(instrumentForGame(UsbPadKind::Guitar, in, st, false).triggerR2 == 1.0f);
+    in.btnTouchpad = false;
+
+    // With strum: nothing until the bar moves, then held as long as the frets are.
+    InstrumentState ss;
+    in.btnA = true, in.btnY = false;
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    CHECK(!out.btnA);
+    in.dpadDown = true;  // strum
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    CHECK(out.btnA && out.dpadDown);
+    in.dpadDown = false;  // the bar back, green still held: the note goes on (a sustain)
+    CHECK(instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
+    in.btnY = true;  // yellow pressed later, no strum: not played
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    CHECK(out.btnA && !out.btnY);
+    in.btnA = false;  // green let go: off, and not back until strummed again
+    CHECK(!instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
+    in.btnA = true;
+    CHECK(!instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
+    in.dpadUp = true;
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    CHECK(out.btnA && out.btnY);
+
+    // Drums: the buttons as they come, the pads' strengths off the sticks.
+    ControllerState drum;
+    drum.btnB = drum.btnL1 = true;
+    drum.leftStickX = drum.rightStickY = 0.7f;
+    out = instrumentForGame(UsbPadKind::Drums, drum, st, false);
+    CHECK(out.btnB && out.btnL1 && out.leftStickX == 0.0f && out.rightStickY == 0.0f);
+    // A gamepad is untouched.
+    CHECK(instrumentForGame(UsbPadKind::Gamepad, drum, st, true).leftStickX == 0.7f);
+}
+
 // Hidden games, favourites and play time follow the Xbox account signed in: lists from before
 // they had an owner go to the first account, a second account starts empty, each finds its
 // own again, and all of it survives the settings file.
@@ -11683,6 +11754,7 @@ int main() {
     testH264Resync();
     testAccountLists();
     testUsbPadRumblePacket();
+    testUsbInstruments();
     testH264PaddingPacket();
     testAudioDecoderEmptyPacket();
     testAudioDecoderPlc();

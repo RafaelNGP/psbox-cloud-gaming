@@ -321,6 +321,14 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
                 ev.affectsHardware = true;
             }
         }
+        if (root.has("guitarStrum")) {
+            const bool v = root["guitarStrum"].asBool(settings_.guitarStrum);
+            if (v != settings_.guitarStrum) {
+                settings_.guitarStrum = v;
+                changed = true;
+                ev.affectsHardware = true;
+            }
+        }
         if (root.has("soloInputRedirect") || root.has("solo_input_redirect")) {
             bool v = root.has("soloInputRedirect") ? root["soloInputRedirect"].asBool(settings_.soloInputRedirect)
                                                    : root["solo_input_redirect"].asBool(settings_.soloInputRedirect);

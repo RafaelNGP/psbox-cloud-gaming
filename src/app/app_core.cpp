@@ -115,6 +115,7 @@ void applyControllerSettings() {
     input::setCircleConfirms(g_settings.circleConfirms);
     media::setAudioHapticsLevel(g_settings.audioHaptics);
     input::setUsbPadsEnabled(g_settings.usbControllers);
+    input::setGuitarStrum(g_settings.guitarStrum);
     if (g_ui) g_ui->setCircleConfirms(g_settings.circleConfirms);
 }
 
@@ -487,6 +488,12 @@ bool coreStartup() {
             root.set("queueReadyAlert", g_settings.queueReadyAlert);
             root.set("previewFeatures", g_settings.previewFeatures);
             root.set("usbControllers", g_settings.usbControllers);
+            root.set("guitarStrum", g_settings.guitarStrum);
+            {
+                bool guitar = false;  // the strum option is shown while a USB guitar is connected
+                for (int p = 0; p < input::kMaxPads; ++p) guitar |= input::usbPadKindFor(p) == input::UsbPadKind::Guitar;
+                root.set("guitarConnected", guitar);
+            }
             root.set("videoDecoder", g_settings.videoDecoder);
             root.set("voiceRouting", g_settings.voiceRouting);
             root.set("padSpeakerVolume", g_settings.padSpeakerVolume);
@@ -634,6 +641,14 @@ bool coreStartup() {
                     if (val != g_settings.usbControllers) {
                         g_settings.usbControllers = val;
                         input::setUsbPadsEnabled(val);
+                        changed = true;
+                    }
+                }
+                if (root.has("guitarStrum")) {
+                    const bool val = root["guitarStrum"].asBool(g_settings.guitarStrum);
+                    if (val != g_settings.guitarStrum) {
+                        g_settings.guitarStrum = val;
+                        input::setGuitarStrum(val);
                         changed = true;
                     }
                 }
@@ -1561,9 +1576,19 @@ bool Core::frame() {
                 dev = ui::PadDevice::Keyboard;
             } else if (padT > 0) {
                 dev = ui::PadDevice::Gamepad;
+                // A USB guitar or drum kit, the last used there: its own icon.
+                const input::UsbPadKind usbKind = usbConn ? input::usbPadKindFor(i) : input::UsbPadKind::Gamepad;
+                if (usbKind == input::UsbPadKind::Guitar || usbKind == input::UsbPadKind::Drums) {
+                    if (input::usbPadActiveAt(i) >= (input::padConnected(i) ? input::padActiveAt(i) : 0))
+                        dev = usbKind == input::UsbPadKind::Guitar ? ui::PadDevice::Guitar : ui::PadDevice::Drums;
+                }
             } else {
                 if (padConn) {
                     dev = ui::PadDevice::Gamepad;
+                    const input::UsbPadKind usbKind = usbConn && !input::padConnected(i) ? input::usbPadKindFor(i)
+                                                                                         : input::UsbPadKind::Gamepad;
+                    if (usbKind == input::UsbPadKind::Guitar) dev = ui::PadDevice::Guitar;
+                    if (usbKind == input::UsbPadKind::Drums) dev = ui::PadDevice::Drums;
                 } else if (kbmConnected && i == kbPlayer) {
                     dev = ui::PadDevice::Keyboard;
                 } else if (vpadValid) {

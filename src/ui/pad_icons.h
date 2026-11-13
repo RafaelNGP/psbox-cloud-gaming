@@ -12,7 +12,7 @@
 
 namespace xc::ui {
 
-enum class PadDevice : uint8_t { Gamepad = 0, Keyboard = 1, Phone = 2 };
+enum class PadDevice : uint8_t { Gamepad = 0, Keyboard = 1, Phone = 2, Guitar = 3, Drums = 4 };
 
 struct PadSlot {
     bool connected = false;
@@ -38,6 +38,11 @@ void drawPhoneGlyph(Canvas& c, int x, int y, int w, Color color, Color backgroun
 // when not. Its buttons are cut out in `background`, the colour behind it.
 void drawPadIcon(Canvas& c, const Font& font, int x, int y, int w, int index, bool connected, Color background);
 int padIconHeight(int w);
+
+// A guitar (body low left, neck up to the right) and a drum kit (a drum, two sticks), in a box
+// `w` wide and `w * 7 / 10` tall at (x, y), cut-outs in `background`.
+void drawGuitarGlyph(Canvas& c, int x, int y, int w, Color color, Color background);
+void drawDrumsGlyph(Canvas& c, int x, int y, int w, Color color, Color background);
 
 // The four side by side, `gap` apart; returns the width taken.
 // One slot: its pad, or the keyboard and mouse playing in it (`icons`: the

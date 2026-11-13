@@ -37,6 +37,8 @@ enum class UsbPadProtocol {
     Stadia,
     GenericHid
 };
+// What a USB pad is, for its icon and for what reaches the game.
+enum class UsbPadKind { Gamepad, Guitar, Drums, Other };
 const char* usbPadProtocolName(UsbPadProtocol protocol);
 UsbPadProtocol usbPadProtocolFor(uint8_t ifaceClass, uint8_t ifaceSubclass, uint8_t ifaceProtocol);
 
@@ -102,7 +104,8 @@ bool parseUsbPadReport(UsbPadProtocol protocol, const uint8_t* data, size_t len,
 
 // The transport tells the shared code about each pad (slot 0..kMaxUsbPads-1).
 constexpr int kMaxUsbPads = 4;
-void usbPadAttached(int slot, const std::string& name);
+void usbPadAttached(int slot, const std::string& name, UsbPadKind kind = UsbPadKind::Gamepad);
+void usbPadSetKind(int slot, UsbPadKind kind);  // learned after it attached
 void usbPadState(int slot, const ControllerState& state);
 void usbPadDetached(int slot);
 
@@ -141,6 +144,8 @@ void usbPadsWaitRelease();
 // when one of them was last used (ms; 0: never).
 std::string usbPadNameFor(int player);
 uint64_t usbPadActiveAt(int player);
+UsbPadKind usbPadKindFor(int player);
+UsbPadKind usbPadSlotKind(int slot);  // the first USB pad playing as `player` (Gamepad: none)
 
 void setUsbPadsEnabled(bool enabled);
 bool usbPadsEnabled();
@@ -159,6 +164,29 @@ std::array<uint8_t, 12> xinputWirelessPresenceQuery();
 // driver). -1 when `data` is not that report.
 int xinputWirelessSubtype(const uint8_t* data, size_t len);
 const char* xinputSubtypeName(int subtype);
+// Every pad interface of an Xbox 360 wireless receiver (FF/5D/81: one per device it can link,
+// up to four), with its endpoints, in order.
+std::vector<UsbPadInterface> findXInputWirelessInterfaces(const uint8_t* configDesc, size_t len);
+
+UsbPadKind usbPadKindForSubtype(int subtype);  // -1 (not known): a gamepad
+const char* usbPadKindName(UsbPadKind kind);
+
+// Instruments in a game. The cloud only takes gamepads, so an instrument is passed on as one:
+//   guitar: the frets as they come (green A, red B, yellow Y, blue X, orange LB), the strum bar
+//           as the D-pad, Start and the Xbox button as they are, Back (star power) as RT, and
+//           nothing on the sticks (the whammy bar rests at full left and the tilt sensor moves
+//           all the time: they turned the camera). With `strum`, a fret reaches the game only
+//           once the bar is strummed while it is held, and stays down while it is held.
+//   drums:  the buttons as they come, nothing on the sticks (the pads' strengths).
+// `prevStrum` / `armed` carry the strum state between reports.
+struct InstrumentState {
+    bool prevStrum = false;
+    bool armed[5] = {};
+};
+ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum);
+// The guitar's strum option (Settings), for every guitar.
+void setGuitarStrum(bool on);
+bool guitarStrum();
 void setUsbPadRumble(int player, uint8_t large, uint8_t small);
 void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small);
 
