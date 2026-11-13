@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #include <cstdint>
 #include "ui/stream_menu.h"
+#include "input/pad_usb.h"
 
 #include "ui/cloud_time.h"
 #include "ui/strings.h"
@@ -849,6 +850,39 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         int thumbH = std::max(24, trackH * kMaxVisible / totalShown);
         int thumbY = trackY + (trackH - thumbH) * startIdx / (totalShown - kMaxVisible);
         c.fillRect({trackX, thumbY, 4, thumbH}, kGray, 2);
+    }
+
+    // A guitar's menu: what to bind in Fortnite Festival for the layout in use, lane by lane in
+    // the frets' colours, and star power.
+    if (activeTab_ == MenuTab::Guitar) {
+        const input::GuitarBinding& b = guitarStrum_ ? input::kStrumLanes : input::kFretLanes;
+        const Color frets[5] = {rgba(40, 180, 70), rgba(220, 50, 50), rgba(235, 200, 40), rgba(40, 110, 230),
+                                rgba(240, 130, 30)};
+        int y = 128 + 5 * 38 + 14;
+        c.fillRect({kPad, y, kMenuW - 2 * kPad, 1}, rgba(60, 60, 60));
+        y += 14;
+        fonts_.semibold.draw(c, tr(Str::GuitarBindTitle), kPad, y, 16, kGray);
+        y += 32;
+        const int colW = (kMenuW - 2 * kPad) / 2;
+        for (int i = 0; i < 6; ++i) {
+            const int x = kPad + (i % 2) * colW, rowY = y + (i / 2) * 34;
+            std::string label, button;
+            if (i < 5) {
+                c.fillCircle(static_cast<float>(x + 9), static_cast<float>(rowY + 11), 8.0f, frets[i]);
+                label = std::string(tr(Str::GuitarBindLane)) + " " + std::to_string(i + 1);
+                button = b.lanes[i];
+            } else {
+                label = tr(Str::GuitarBindOverdrive);
+                button = b.starPower;
+                c.fillCircle(static_cast<float>(x + 9), static_cast<float>(rowY + 11), 8.0f, rgba(80, 200, 230));
+            }
+            fonts_.semibold.draw(c, label, x + 26, fonts_.semibold.centeredY(rowY, 22, 17), 17, kWhite);
+            const int bw = fonts_.bold.measure(button, 15) + 18, bx = x + colW - 24 - bw;
+            c.fillRect({bx, rowY, bw, 24}, rgba(255, 255, 255, 30), 5);
+            fonts_.bold.draw(c, button, bx + 9, fonts_.bold.centeredY(rowY, 24, 15), 15, kWhite);
+        }
+        y += 3 * 34 + 10;
+        fonts_.regular.draw(c, tr(guitarStrum_ ? Str::GuitarBindStrumOn : Str::GuitarBindStrumOff), kPad, y, 15, kGray);
     }
 
     // LOWER SECTION (Utilizing lower empty third):

@@ -552,6 +552,11 @@ constexpr Column kItalian = {
     "Assegna quale controller fisico corrisponde a questo giocatore virtuale.", // MenuDescPlayer
     "Chitarra: un tasto arriva al gioco solo se plettri tenendolo premuto (come in Guitar Hero). Disattivata: i tasti da soli suonano.", // MenuDescStrum
     "Alzare la chitarra (il manico in su) attiva lo Star Power (Overdrive, RT), come il tasto Back.", // MenuDescTilt
+    "Imposta in Fortnite: Impostazioni > Controller > Fortnite Festival", // GuitarBindTitle
+    "Corsia", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Plettrata attiva: i tasti funzionano anche nei menu (A B Y X).", // GuitarBindStrumOn
+    "Plettrata disattivata: il tasto suona appena premuto.", // GuitarBindStrumOff
     "Regola il livello del volume dell'altoparlante integrato nel controller.", // MenuDescPadSpeakerVolume
     "Volante (Levetta Sin.)",                          // GyroSteering
     "Volante (Accellera R2)",                          // GyroSteeringDrive

@@ -552,6 +552,11 @@ constexpr Column kPortugueseBR = {
     "Atribui qual entrada de controle físico corresponderá a este jogador virtual.", // MenuDescPlayer
     "Guitarra: o traste só chega ao jogo quando você palheta segurando ele (como no Guitar Hero). Desligada: os trastes sozinhos tocam.", // MenuDescStrum
     "Levantar a guitarra (o braço para cima) ativa o Star Power (Overdrive, RT), como o botão Back.", // MenuDescTilt
+    "Defina no Fortnite: Configurações > Controle > Fortnite Festival", // GuitarBindTitle
+    "Pista", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Palhetada ligada: os trastes também navegam nos menus (A B Y X).", // GuitarBindStrumOn
+    "Palhetada desligada: o traste toca ao ser apertado.", // GuitarBindStrumOff
     "Ajusta o nível de volume do som emitido pelo alto-falante integrado do controle.", // MenuDescPadSpeakerVolume
     "Volante (Analógico Esq.)",                        // GyroSteering
     "Volante (Acelerar R2)",                           // GyroSteeringDrive

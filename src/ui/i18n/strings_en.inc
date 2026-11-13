@@ -552,6 +552,11 @@ constexpr Column kEnglish = {
     "Assigns which physical controller input operates this virtual player slot.", // MenuDescPlayer
     "Guitar: a fret reaches the game only when you strum while holding it (as in Guitar Hero). Off: the frets alone play.", // MenuDescStrum
     "Raising the guitar (its neck up) turns on star power (Overdrive, RT), as Back does.", // MenuDescTilt
+    "Bind these in Fortnite: Settings > Controller > Fortnite Festival", // GuitarBindTitle
+    "Lane", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Strum on: the frets also work the menus (A B Y X).", // GuitarBindStrumOn
+    "Strum off: a fret plays as it is pressed.", // GuitarBindStrumOff
     "Adjusts the volume level for sound played through the controller's speaker.", // MenuDescPadSpeakerVolume
     "Steering wheel (Left Stick)",                     // GyroSteering
     "Steering wheel (R2)",                             // GyroSteeringDrive

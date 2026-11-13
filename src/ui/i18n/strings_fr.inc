@@ -552,6 +552,11 @@ constexpr Column kFrench = {
     "Assigne la manette physique correspondant à ce joueur virtuel.", // MenuDescPlayer
     "Guitare : une frette n'atteint le jeu que si tu grattes en la tenant (comme dans Guitar Hero). Désactivé : les frettes seules jouent.", // MenuDescStrum
     "Lever la guitare (le manche vers le haut) active le Star Power (Overdrive, RT), comme le bouton Back.", // MenuDescTilt
+    "À régler dans Fortnite : Paramètres > Manette > Fortnite Festival", // GuitarBindTitle
+    "Piste", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Grattage activé : les frettes servent aussi aux menus (A B Y X).", // GuitarBindStrumOn
+    "Grattage désactivé : la frette joue dès qu'elle est appuyée.", // GuitarBindStrumOff
     "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
     "Volant (Stick Gauche)",                           // GyroSteering
     "Volant (Accélérer R2)",                           // GyroSteeringDrive

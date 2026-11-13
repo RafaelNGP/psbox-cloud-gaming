@@ -983,10 +983,23 @@ void setGuitarTilt(bool on, float at) {
 }
 bool guitarTilt() { return g_guitarTilt.load(std::memory_order_relaxed); }
 
+namespace {
+// Lane i of the strum layout down or up (kStrumLanes: LT LB RB RT R3).
+void setStrumLane(ControllerState& g, int i, bool on) {
+    switch (i) {
+        case 0: g.triggerL2 = on ? 1.0f : 0.0f; break;
+        case 1: g.btnL1 = on; break;
+        case 2: g.btnR1 = on; break;
+        case 3: g.triggerR2 = on ? 1.0f : 0.0f; break;
+        default: g.btnR3 = on; break;
+    }
+}
+}  // namespace
+
 void applyStrumGaps(ControllerState& g, const InstrumentState& st, uint64_t nowMs) {
-    bool* lanes[5] = {&g.btnA, &g.btnB, &g.btnY, &g.btnX, &g.btnL1};
+    if (!st.strumLayout) return;
     for (int i = 0; i < 5; ++i)
-        if (nowMs < st.gapUntil[i]) *lanes[i] = false;
+        if (nowMs < st.gapUntil[i]) setStrumLane(g, i, false);
 }
 
 ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum,
@@ -1022,7 +1035,7 @@ ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, In
         if (!frets[i]) st.armed[i] = false, st.gapUntil[i] = 0;
         lanes[i] = st.armed[i];
     }
-    out.btnA = lanes[0], out.btnB = lanes[1], out.btnY = lanes[2], out.btnX = lanes[3], out.btnL1 = lanes[4];
+    st.strumLayout = strum;
     // Star power: Back, or the guitar raised (its tilt past `tiltAt`, let go a little before it).
     if (tiltOn && tiltAt != 0.0f) {
         const float v = in.rawRightY, margin = 0.15f;
@@ -1031,7 +1044,16 @@ ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, In
     } else {
         st.tiltUp = false;
     }
-    out.triggerR2 = in.btnTouchpad || st.tiltUp ? 1.0f : 0.0f;  // Overdrive (RT in Fortnite Festival)
+    const bool starPower = in.btnTouchpad || st.tiltUp;
+    if (!strum) {
+        out.btnA = lanes[0], out.btnB = lanes[1], out.btnY = lanes[2], out.btnX = lanes[3], out.btnL1 = lanes[4];
+        out.triggerR2 = starPower ? 1.0f : 0.0f;  // Overdrive (RT by default in Fortnite Festival)
+        return out;
+    }
+    // The menus: the frets at once (orange has no menu use: it is LB, a lane, here).
+    out.btnA = frets[0], out.btnB = frets[1], out.btnY = frets[2], out.btnX = frets[3];
+    for (int i = 0; i < 5; ++i) setStrumLane(out, i, lanes[i]);
+    out.btnL3 = starPower;
     applyStrumGaps(out, st, nowMs);
     return out;
 }

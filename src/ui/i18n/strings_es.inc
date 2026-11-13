@@ -552,6 +552,11 @@ constexpr Column kSpanish = {
     "Asigna qué mando físico controlará esta ranura de jugador virtual.", // MenuDescPlayer
     "Guitarra: un traste llega al juego solo cuando rasgueas mientras lo mantienes (como en Guitar Hero). Apagado: los trastes solos tocan.", // MenuDescStrum
     "Levantar la guitarra (el mástil hacia arriba) activa el Star Power (Overdrive, RT), como el botón Back.", // MenuDescTilt
+    "Asígnalos en Fortnite: Configuración > Mando > Fortnite Festival", // GuitarBindTitle
+    "Carril", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Rasgueo activado: los trastes también usan los menús (A B Y X).", // GuitarBindStrumOn
+    "Rasgueo apagado: el traste toca al pulsarlo.", // GuitarBindStrumOff
     "Ajusta el nivel de volumen del altavoz integrado en el mando.", // MenuDescPadSpeakerVolume
     "Volante (Stick Izq.)",                            // GyroSteering
     "Volante (Acelerar R2)",                           // GyroSteeringDrive
