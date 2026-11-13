@@ -455,8 +455,12 @@ bool parseXInputReport(const uint8_t* data, size_t len, ControllerState& s) {
         s = ControllerState{};             // gone: let go of everything
         return true;
     }
-    if (len >= 18 && data[0] == 0x00 && data[1] == 0x01) return parseXInputReport(data + 4, len - 4, s);
-    if (len < 14 || data[0] != 0x00) return false;
+    // Input from the receiver: 00 01 00 F0 then the wired report (00 13 ...). Its other messages
+    // (00 0F announce, 00 05 / 00 00 status, 00 01 00 13 ...) are not input: read as a wired
+    // report they pressed A B X Y and both triggers when a pad linked up.
+    if (len >= 18 && data[0] == 0x00 && data[1] == 0x01 && data[3] == 0xF0) return parseXInputReport(data + 4, len - 4, s);
+    // A wired report: 00, then its length (0x14; 0x13 behind the receiver's header).
+    if (len < 14 || data[0] != 0x00 || (data[1] != 0x14 && data[1] != 0x13)) return false;
     const unsigned b = static_cast<unsigned>(data[2] | (data[3] << 8));
     s.dpadUp = b & 0x0001;
     s.dpadDown = b & 0x0002;
