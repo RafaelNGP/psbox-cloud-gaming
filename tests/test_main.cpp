@@ -2507,6 +2507,12 @@ static void testUsbPadRumblePacket() {
         CHECK(!parseXInputReport(announce, sizeof announce, g) && !parseXInputReport(other, sizeof other, g));
         CHECK(!parseXInputReport(status, sizeof status, g) && !parseXInputReport(zero, sizeof zero, g));
         CHECK(!g.btnA && g.triggerL2 == 0.0f);
+        CHECK(xinputWirelessSubtype(other, sizeof other) == -1);
+        uint8_t link[29] = {};
+        std::copy(std::begin(announce), std::end(announce), link);
+        link[25] = 0x87;  // a guitar (alternate), with the motors flag
+        CHECK(xinputWirelessSubtype(link, sizeof link) == 0x07);
+        CHECK(std::string(xinputSubtypeName(0x08)) == "drum kit");
     }
     const uint8_t gone[] = {0x08, 0x00};
     CHECK(parseXInputReport(gone, sizeof gone, st) && !st.btnA && st.triggerL2 == 0.0f);
