@@ -38,6 +38,8 @@ void setSticks(ControllerState& s, const uint8_t* p) {
 }
 
 std::atomic<bool> g_guitarStrum{false};
+std::atomic<bool> g_guitarTilt{true};
+std::atomic<float> g_guitarTiltAt{-0.9f};
 
 struct Slot {
     bool attached = false;
@@ -102,6 +104,7 @@ void movePlayer(Slot& s, int slot, int player) {
 ControllerState shownInGame(const Slot& slot) {
     if (slot.kind == UsbPadKind::Gamepad) return shown(slot);
     ControllerState s = slot.game;
+    applyStrumGaps(s, slot.instrument, platform::nowMs());
     applyPadSettings(s);
     if (slot.guideHeld) s.btnL1 = s.btnR1 = false;
     s.btnNexus = false;
@@ -974,7 +977,20 @@ void setGuitarStrum(bool on) {
 }
 bool guitarStrum() { return g_guitarStrum.load(std::memory_order_relaxed); }
 
-ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum) {
+void setGuitarTilt(bool on, float at) {
+    g_guitarTilt = on;
+    g_guitarTiltAt = std::clamp(at, -1.0f, 1.0f);
+}
+bool guitarTilt() { return g_guitarTilt.load(std::memory_order_relaxed); }
+
+void applyStrumGaps(ControllerState& g, const InstrumentState& st, uint64_t nowMs) {
+    bool* lanes[5] = {&g.btnA, &g.btnB, &g.btnY, &g.btnX, &g.btnL1};
+    for (int i = 0; i < 5; ++i)
+        if (nowMs < st.gapUntil[i]) *lanes[i] = false;
+}
+
+ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum,
+                                  uint64_t nowMs, bool tiltOn, float tiltAt) {
     if (kind == UsbPadKind::Gamepad || kind == UsbPadKind::Other) return in;
     ControllerState out;
     out.connected = in.connected;
@@ -999,12 +1015,24 @@ ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, In
             st.armed[i] = false;
             continue;
         }
-        if (strummed) st.armed[i] = frets[i];
-        if (!frets[i]) st.armed[i] = false;
+        if (strummed && frets[i]) {
+            if (st.armed[i]) st.gapUntil[i] = nowMs + kStrumGapMs;  // held through: a new note
+            st.armed[i] = true;
+        }
+        if (!frets[i]) st.armed[i] = false, st.gapUntil[i] = 0;
         lanes[i] = st.armed[i];
     }
     out.btnA = lanes[0], out.btnB = lanes[1], out.btnY = lanes[2], out.btnX = lanes[3], out.btnL1 = lanes[4];
-    out.triggerR2 = in.btnTouchpad ? 1.0f : 0.0f;  // star power: Overdrive (RT in Fortnite Festival)
+    // Star power: Back, or the guitar raised (its tilt past `tiltAt`, let go a little before it).
+    if (tiltOn && tiltAt != 0.0f) {
+        const float v = in.rawRightY, margin = 0.15f;
+        if (tiltAt < 0) st.tiltUp = st.tiltUp ? v < tiltAt + margin : v <= tiltAt;
+        else st.tiltUp = st.tiltUp ? v > tiltAt - margin : v >= tiltAt;
+    } else {
+        st.tiltUp = false;
+    }
+    out.triggerR2 = in.btnTouchpad || st.tiltUp ? 1.0f : 0.0f;  // Overdrive (RT in Fortnite Festival)
+    applyStrumGaps(out, st, nowMs);
     return out;
 }
 
@@ -1047,8 +1075,12 @@ void usbPadState(int slot, const ControllerState& in) {
     }
     s.state = in;
     s.state.connected = true;
-    if (s.kind != UsbPadKind::Gamepad) s.game = instrumentForGame(s.kind, s.state, s.instrument, guitarStrum());
-    ControllerState used = in;
+    if (s.kind != UsbPadKind::Gamepad)
+        s.game = instrumentForGame(s.kind, s.state, s.instrument, guitarStrum(), platform::nowMs(), guitarTilt(),
+                                   g_guitarTiltAt.load(std::memory_order_relaxed));
+    // An instrument's sticks rest away from the centre (the whammy bar, the tilt sensor): whether
+    // it is in use is told from what the game gets.
+    ControllerState used = s.kind != UsbPadKind::Gamepad ? s.game : in;
     applyPadSettings(used);
     const bool pressed = inUse(used) || in.btnNexus;
     if (pressed) s.activeAt = platform::nowMs();
@@ -1110,7 +1142,7 @@ void usbPadsWaitRelease() {
     std::lock_guard<std::mutex> lock(g_mutex);
     for (Slot& s : g_slots) {
         if (!s.attached) continue;
-        ControllerState used = s.state;
+        ControllerState used = s.kind != UsbPadKind::Gamepad ? s.game : s.state;
         applyPadSettings(used);
         s.waitRelease = inUse(used) || s.state.btnNexus;
     }

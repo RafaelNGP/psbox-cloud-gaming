@@ -433,6 +433,7 @@ constexpr Column kItalian = {
     "Questo account deve abilitare le 'Funzionalità Preview' nel profilo su xbox.com/play per sbloccare lo streaming gratuito supportato da annunci.", // F2pPreviewAccountNeededDesc
     "Giocatore",                                 // MenuPlayer
     "Plettrata", // MenuStrum
+    "Star Power alzandola", // MenuTilt
     "Il tuo tempo di gioco nel cloud Xbox è esaurito, quindi il servizio Xbox ha chiuso la sessione. Da novembre 2026 Xbox limita il gioco nel cloud ogni mese: 15 ore con Game Pass Ultimate, 10 con Premium e 5 con Essential. Per avere più tempo, vedi le opzioni su xbox.com, o attendi le ore del mese prossimo.", // CloudTimeUp
     "La sessione è terminata per inattività", // EndedIdle
     "%s rimanenti", // CloudTimeLeft
@@ -461,6 +462,7 @@ constexpr Column kItalian = {
     "Illimitato",                                     // FpsUnlimited
     "Limita il framerate di visualizzazione dello stream per mantenere la fluidità", // SettingDescFpsLimit
     "Generale",                                       // MenuTabGeneral
+    "Chitarra", // MenuTabGuitar
     "Scheda",                                         // MenuTabLabel
     "Schede",                                         // MenuTabsLabel
     "Impostazioni salvate",                           // SettingsSavedToast
@@ -549,6 +551,7 @@ constexpr Column kItalian = {
     "Termina la riproduzione remota dalla console Xbox e torna alla home.", // MenuDescEndStream
     "Assegna quale controller fisico corrisponde a questo giocatore virtuale.", // MenuDescPlayer
     "Chitarra: un tasto arriva al gioco solo se plettri tenendolo premuto (come in Guitar Hero). Disattivata: i tasti da soli suonano.", // MenuDescStrum
+    "Alzare la chitarra (il manico in su) attiva lo Star Power (Overdrive, RT), come il tasto Back.", // MenuDescTilt
     "Regola il livello del volume dell'altoparlante integrato nel controller.", // MenuDescPadSpeakerVolume
     "Volante (Levetta Sin.)",                          // GyroSteering
     "Volante (Accellera R2)",                          // GyroSteeringDrive

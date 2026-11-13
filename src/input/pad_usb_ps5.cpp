@@ -23,6 +23,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -58,7 +59,8 @@ struct Link {
     std::atomic<bool> rumbleAsked{false};
     uint8_t rumbleSequence = 0;
     ControllerState state;
-    int shown = 0, changesLogged = 0, lightPlayer = -1;
+    int shown = 0, changesLogged = 0, lightPlayer = -1, sticksLogged = 0;
+    float loggedRightX = 0, loggedRightY = 0;
     unsigned buttons = 0;
     std::chrono::steady_clock::time_point lastOther{};
 };
@@ -464,9 +466,19 @@ void handleReport(Device& d, Link& l, int channel, const uint8_t* buf, int n) {
     l.state = state;
     if (l.slot < 0) return;
     usbPadState(l.slot, state);
-    // The first presses, to check the buttons from the log.
+    // An instrument's sticks (a guitar's whammy and tilt, a drum kit's pad strengths): their moves,
+    // to set what raising the guitar reads.
+    const UsbPadKind kind = usbPadKindForSubtype(l.subtype);
+    if (kind != UsbPadKind::Gamepad && l.sticksLogged < 400 &&
+        (std::abs(state.rawRightY - l.loggedRightY) > 0.08f || std::abs(state.rawRightX - l.loggedRightX) > 0.15f)) {
+        ++l.sticksLogged;
+        l.loggedRightX = state.rawRightX, l.loggedRightY = state.rawRightY;
+        XC_LOGI("usb pad %d: %s sticks: left %.2f,%.2f right %.2f,%.2f (whammy x, tilt y)", l.slot, usbPadKindName(kind),
+                state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY);
+    }
+    // The first presses, to check the buttons from the log (an instrument's, more of them).
     const unsigned now = buttonBits(state);
-    if (now != l.buttons && l.changesLogged < 80) {
+    if (now != l.buttons && l.changesLogged < (kind != UsbPadKind::Gamepad ? 400 : 80)) {
         ++l.changesLogged;
         XC_LOGI("usb pad %d: buttons %s, sticks %.2f,%.2f %.2f,%.2f, triggers %.2f %.2f", l.slot, buttonNames(now).c_str(),
                 state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY, state.triggerL2, state.triggerR2);

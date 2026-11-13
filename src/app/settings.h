@@ -170,6 +170,8 @@ struct Settings {
     ListsSwitch useListsOf(const std::string& xuid);
     bool usbControllers = true;  // in-app USB controllers driver (OneFamily)
     bool guitarStrum = false;    // USB guitars: a fret plays only with the strum bar
+    bool guitarTilt = true;      // USB guitars: raising one is star power
+    float guitarTiltAt = -0.9f;  // the tilt reading (right stick Y as read) that counts as raised
     bool soloInputRedirect = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
 

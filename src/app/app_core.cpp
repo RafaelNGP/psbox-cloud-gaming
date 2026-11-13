@@ -116,6 +116,7 @@ void applyControllerSettings() {
     media::setAudioHapticsLevel(g_settings.audioHaptics);
     input::setUsbPadsEnabled(g_settings.usbControllers);
     input::setGuitarStrum(g_settings.guitarStrum);
+    input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarTiltAt);
     if (g_ui) g_ui->setCircleConfirms(g_settings.circleConfirms);
 }
 

@@ -433,6 +433,7 @@ constexpr Column kEnglish = {
     "This account needs to enable 'Preview Features' in its profile on xbox.com/play to unlock ad-supported free-to-play streaming.", // F2pPreviewAccountNeededDesc
     "Player",                                    // MenuPlayer
     "Strum", // MenuStrum
+    "Star power by raising", // MenuTilt
     "Your Xbox cloud gaming time has run out, so the Xbox service ended the session. Since November 2026, Xbox limits cloud play each month: 15 h with Game Pass Ultimate, 10 h with Premium and 5 h with Essential. To get more time, see your options at xbox.com, or new hours come next month.", // CloudTimeUp
     "The stream ended after a while without input", // EndedIdle
     "%s left", // CloudTimeLeft
@@ -461,6 +462,7 @@ constexpr Column kEnglish = {
     "Unlimited",                                      // FpsUnlimited
     "Limits the stream presentation framerate to maintain smooth frame pacing", // SettingDescFpsLimit
     "General",                                        // MenuTabGeneral
+    "Guitar", // MenuTabGuitar
     "Tab",                                            // MenuTabLabel
     "Tabs",                                           // MenuTabsLabel
     "Settings saved",                                 // SettingsSavedToast
@@ -549,6 +551,7 @@ constexpr Column kEnglish = {
     "Ends remote play from your Xbox console and returns to the home screen.", // MenuDescEndStream
     "Assigns which physical controller input operates this virtual player slot.", // MenuDescPlayer
     "Guitar: a fret reaches the game only when you strum while holding it (as in Guitar Hero). Off: the frets alone play.", // MenuDescStrum
+    "Raising the guitar (its neck up) turns on star power (Overdrive, RT), as Back does.", // MenuDescTilt
     "Adjusts the volume level for sound played through the controller's speaker.", // MenuDescPadSpeakerVolume
     "Steering wheel (Left Stick)",                     // GyroSteering
     "Steering wheel (R2)",                             // GyroSteeringDrive

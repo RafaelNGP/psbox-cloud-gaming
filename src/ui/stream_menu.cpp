@@ -33,6 +33,8 @@ std::string fmt(const char* f, double v) {
 }  // namespace
 
 bool StreamMenu::itemInTab(int item, MenuTab tab) const {
+    if (tab == MenuTab::Guitar)
+        return item == XboxButton || item == PlayerItem || item == StrumItem || item == TiltItem || item == Leave;
     if (tab == MenuTab::General) {
         return item == XboxButton || item == Stats ||
                item == Upscaler || item == Sharpness || item == Deband ||
@@ -40,7 +42,7 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
                item == BitrateLimiterItem || item == VrrItem ||
                item == ReloadStreamItem || item == Leave;
     } else { // Controls
-        return item == PlayerItem || item == StrumItem || item == ConfirmItem || item == Triggers ||
+        return item == PlayerItem || item == ConfirmItem || item == Triggers ||
                item == DeadzoneItem || item == TouchpadShortcutsItem || item == GyroItem ||
                item == AudioHapticsItem || item == PadSpeakerVolumeItem;
     }
@@ -64,6 +66,7 @@ bool StreamMenu::itemShown(int item) const {
     case TouchpadShortcutsItem: return caps_.touchpad;
     case PlayerItem: return usbOwnerPlayer_ >= 0;
     case StrumItem: return usbOwnerPlayer_ >= 0 && usbOwnerGuitar_;
+    case TiltItem: return usbOwnerPlayer_ >= 0 && usbOwnerGuitar_;
     default: return true;
     }
 }
@@ -112,7 +115,7 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     micLevel_ = micLevel;
     micMuted_ = micMuted;
     padSpeakerVolume_ = std::clamp(padSpeakerVolume, 0, 100);
-    activeTab_ = MenuTab::General;
+    activeTab_ = usbOwnerGuitar_ && usbOwnerPlayer_ >= 0 ? MenuTab::Guitar : MenuTab::General;
     selected_ = XboxButton;
     resolution_ = applied_ = resolution;
     resolutionAsked_ = false;
@@ -138,7 +141,8 @@ void StreamMenu::update(uint64_t nowMs) {
     }
 }
 
-MenuAction StreamMenu::handle(const NavInput& in) {
+MenuAction StreamMenu::handle(const NavInput& navIn) {
+    NavInput in = navIn;
     if (!open_) return MenuAction::None;
 
     if (gyroDialog_.isOpen()) {
@@ -251,7 +255,8 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         return MenuAction::None;
     }
 
-    // Shoulder tabs switching (L1 / R1)
+    // Shoulder tabs switching (L1 / R1); a guitar's menu has one tab (its orange fret is LB).
+    if (activeTab_ == MenuTab::Guitar) in.l1 = in.r1 = false;
     if (in.l1) {
         activeTab_ = (activeTab_ == MenuTab::Controls) ? MenuTab::General : MenuTab::Controls;
         selectFirstItem();
@@ -274,6 +279,10 @@ MenuAction StreamMenu::handle(const NavInput& in) {
     if (selected_ == StrumItem && (in.left || in.right || in.accept)) {
         guitarStrum_ = !guitarStrum_;
         return MenuAction::GuitarStrum;
+    }
+    if (selected_ == TiltItem && (in.left || in.right || in.accept)) {
+        guitarTilt_ = !guitarTilt_;
+        return MenuAction::GuitarTilt;
     }
     if (selected_ == Profile && (in.left || in.right || in.accept)) {
         hasCustomProfile_ = !hasCustomProfile_;
@@ -423,6 +432,7 @@ const char* StreamMenu::itemDescription(int item) const {
 
         case PlayerItem: return tr(Str::MenuDescPlayer);
         case StrumItem: return tr(Str::MenuDescStrum);
+        case TiltItem: return tr(Str::MenuDescTilt);
         case ConfirmItem: return tr(Str::SettingDescConfirmButton);
         case Triggers: return tr(Str::SettingDescTriggerRumble);
         case DeadzoneItem: return tr(Str::SettingDescDeadzone);
@@ -583,9 +593,16 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
     }
 
-    // Tabs Header: [L1]  Geral  |  Controles  [R1]
+    // Tabs Header: [L1]  Geral  |  Controles  [R1]; a guitar's menu: its one tab, no badges.
     int tabY = 66, tabH = 34;
-    {
+    if (activeTab_ == MenuTab::Guitar) {
+        const char* tabGuitar = tr(Str::MenuTabGuitar);
+        const int gw = fonts_.semibold.measure(tabGuitar, 18) + 24;
+        const Rect r{kPad, tabY, gw, tabH};
+        c.fillRect(r, rgba(255, 255, 255, 24), 6);
+        c.fillRect({r.x + 6, r.y + r.h - 3, r.w - 12, 3}, kGreen, 2);
+        fonts_.semibold.draw(c, tabGuitar, r.x + 12, fonts_.semibold.centeredY(r.y, r.h, 18), 18, kWhite);
+    } else {
         int bx = kPad;
         constexpr int badgeW = 36, badgeH = 24;
         const int badgeY = tabY + (tabH - badgeH) / 2;
@@ -658,7 +675,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         constexpr int kStatsSepY = 704;
         constexpr int kLeaveMarginBottom = 18;
         const int kLeaveTargetY = kStatsSepY - kLeaveMarginBottom - (kRowH - 4); // 704 - 18 - 34 = 652
-        int rowY = (activeTab_ == MenuTab::General && i == Leave)
+        int rowY = (activeTab_ != MenuTab::Controls && i == Leave)
             ? std::max(kTop + v * kRowH + 16, kLeaveTargetY)
             : (kTop + v * kRowH);
         Rect row{kPad - 16, rowY, kMenuW - 2 * (kPad - 16), kRowH - 4};
@@ -670,6 +687,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
                             : i == PlayerItem          ? tr(Str::MenuPlayer)
                             : i == StrumItem           ? tr(Str::MenuStrum)
+                            : i == TiltItem            ? tr(Str::MenuTilt)
                             : i == Profile             ? tr(Str::Profile)
                             : i == Stats               ? tr(Str::MenuStats)
                             : i == Resolution          ? tr(Str::MenuResolution)
@@ -697,8 +715,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             value = std::to_string(usbOwnerPlayer_ + 1);
             if (sel) value = "< " + value + " >";
         }
-        if (i == StrumItem) {
-            value = tr(guitarStrum_ ? Str::On : Str::Off);
+        if (i == StrumItem || i == TiltItem) {
+            value = tr((i == StrumItem ? guitarStrum_ : guitarTilt_) ? Str::On : Str::Off);
             if (sel) value = "< " + value + " >";
         }
         if (i == Profile) {
@@ -957,7 +975,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     icon(circleConfirms_, x, hy);
     x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
 
-    // L1 / R1 Tab Switch Hint (separated with clear spacing)
+    // L1 / R1 Tab Switch Hint (separated with clear spacing); a guitar's menu has one tab.
+    if (activeTab_ == MenuTab::Guitar) return c;
     const char* tabBadge = "L1 / R1";
     int bw = fonts_.bold.measure(tabBadge, 13) + 20;
     c.fillRect({x, hy + 1, bw, 22}, rgba(255, 255, 255, 30), 4);
