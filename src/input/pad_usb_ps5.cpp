@@ -20,6 +20,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstring>
@@ -39,33 +40,59 @@ constexpr int kUsbErrNormal = 0;      // USB_ERR_NORMAL_COMPLETION (dev/usb/usbd
 constexpr int kUsbErrShortXfer = 21;  // USB_ERR_SHORT_XFER
 constexpr uint16_t kShortXferOk = 0x0004;  // USB_SHORT_XFER_OK (usbdi.h): a reply shorter than asked is fine
 constexpr uint16_t kMediaTekVid = 0x0e8d;  // the console's own Bluetooth radio: never touched
-constexpr int kInIndex = 0, kOutIndex = 1;
+// One pad on a USB device: a wired pad is the device's only one; an Xbox 360 wireless receiver
+// has one per device it can link (up to four), each its own player once something links to it.
+// Its IN transfer sits at endpoint index 2k, its OUT at 2k + 1, all on the device's one fd.
+struct Link {
+    UsbPadInterface iface;
+    int inIndex = 0, outIndex = 1;
+    bool opened = false, hasOut = false;
+    uint8_t rx[64]{}, tx[64]{};
+    void* frames[2]{};
+    uint32_t lengths[2]{};
+    bool inPending = false, inDone = false, outDone = false, clearStall = false;
+    int slot = -1;          // its player slot; -1: nothing linked yet (a receiver's)
+    int subtype = -1;       // XInput device subtype, once a receiver's link report told it
+    // The motors asked for (large << 8 | small) by any thread; the device's thread sends them.
+    std::atomic<uint32_t> rumble{0};
+    std::atomic<bool> rumbleAsked{false};
+    uint8_t rumbleSequence = 0;
+    ControllerState state;
+    int shown = 0, changesLogged = 0, lightPlayer = -1;
+    unsigned buttons = 0;
+    std::chrono::steady_clock::time_point lastOther{};
+};
 
 struct Device {
     std::string path;
     int fd = -1;
-    int slot = -1;
     uint16_t vid = 0, pid = 0;
     std::string name;
-    UsbPadInterface iface;
-    bool hasOut = false;
-    usb_fs_endpoint eps[2]{};
-    void* frames[2]{};
-    uint32_t lengths[2]{};
-    uint8_t rx[64]{}, tx[64]{};
-    bool inPending = false, inDone = false, clearStall = false;
-    std::atomic<bool> stop{false}, dead{false}, attached{false}, failed{false};
+    bool receiver = false;  // an Xbox 360 wireless receiver: not a pad itself
+    std::vector<std::unique_ptr<Link>> links;
+    usb_fs_endpoint eps[8]{};
+    std::atomic<bool> stop{false}, dead{false}, failed{false};
     // A generic HID pad read as its own report descriptor says (hidReady); without one, the
     // usual layout is guessed.
     GenericHidContext hid{};
     bool hidReady = false;
-    // The motors asked for (large << 8 | small) by any thread; the pad's own thread sends them.
-    std::atomic<uint32_t> rumble{0};
-    std::atomic<bool> rumbleAsked{false};
-    uint8_t rumbleSequence = 0;
-    int subtype = -1;  // XInput device subtype, once a receiver's link report told it
     std::thread thread;
 };
+
+// The player slots taken (any thread; a receiver's pad takes one as it links).
+std::array<std::atomic<bool>, kMaxUsbPads> g_slotTaken{};
+
+int takeSlot() {
+    for (int s = 0; s < kMaxUsbPads; ++s) {
+        bool expected = false;
+        if (g_slotTaken[s].compare_exchange_strong(expected, true)) return s;
+    }
+    return -1;
+}
+
+void releaseSlot(int slot) {
+    if (slot >= 0 && slot < kMaxUsbPads) g_slotTaken[slot] = false;
+}
 
 std::mutex g_mutex;  // g_devices, g_ignored
 std::vector<std::unique_ptr<Device>> g_devices;
@@ -162,113 +189,134 @@ bool setupTransfers(Device& d) {
     }
     usb_fs_init init{};
     init.pEndpoints = d.eps;
-    init.ep_index_max = 2;
+    init.ep_index_max = static_cast<uint8_t>(2 * d.links.size());
     if (ioctl(d.fd, USB_FS_INIT, &init) != 0) {
         XC_LOGW("usb pad: %s: USB_FS_INIT: errno %d (%s)", d.path.c_str(), errno, std::strerror(errno));
         return false;
     }
-    usb_fs_open op{};
-    op.max_bufsize = sizeof d.rx;
-    op.max_frames = 1;
-    op.ep_index = kInIndex;
-    op.ep_no = d.iface.epIn;
-    if (ioctl(d.fd, USB_FS_OPEN, &op) != 0) {
-        int err = errno;
-        char driver[64] = {};
-        usb_gen_descriptor gd{};
-        gd.ugd_data = driver;
-        gd.ugd_maxlen = sizeof driver - 1;
-        gd.ugd_iface_index = d.iface.number;
-        bool claimed = ioctl(d.fd, USB_GET_IFACE_DRIVER, &gd) == 0;
-        XC_LOGW("usb pad: %s: opening IN 0x%02x: errno %d (%s)%s%s", d.path.c_str(), d.iface.epIn, err, std::strerror(err),
-                claimed ? ", interface held by the driver " : "", claimed ? driver : "");
-        return false;
-    }
-    if (d.iface.epOut) {
-        op = {};
-        op.max_bufsize = sizeof d.tx;
+    int opened = 0;
+    for (size_t k = 0; k < d.links.size(); ++k) {
+        Link& l = *d.links[k];
+        l.inIndex = static_cast<int>(2 * k), l.outIndex = static_cast<int>(2 * k + 1);
+        usb_fs_open op{};
+        op.max_bufsize = sizeof l.rx;
         op.max_frames = 1;
-        op.ep_index = kOutIndex;
-        op.ep_no = d.iface.epOut;
-        d.hasOut = ioctl(d.fd, USB_FS_OPEN, &op) == 0;
-        if (!d.hasOut) XC_LOGW("usb pad: %s: opening OUT 0x%02x: errno %d", d.path.c_str(), d.iface.epOut, errno);
+        op.ep_index = static_cast<uint8_t>(l.inIndex);
+        op.ep_no = l.iface.epIn;
+        if (ioctl(d.fd, USB_FS_OPEN, &op) != 0) {
+            int err = errno;
+            char driver[64] = {};
+            usb_gen_descriptor gd{};
+            gd.ugd_data = driver;
+            gd.ugd_maxlen = sizeof driver - 1;
+            gd.ugd_iface_index = l.iface.number;
+            bool claimed = ioctl(d.fd, USB_GET_IFACE_DRIVER, &gd) == 0;
+            XC_LOGW("usb pad: %s: opening IN 0x%02x: errno %d (%s)%s%s", d.path.c_str(), l.iface.epIn, err,
+                    std::strerror(err), claimed ? ", interface held by the driver " : "", claimed ? driver : "");
+            continue;
+        }
+        if (l.iface.epOut) {
+            op = {};
+            op.max_bufsize = sizeof l.tx;
+            op.max_frames = 1;
+            op.ep_index = static_cast<uint8_t>(l.outIndex);
+            op.ep_no = l.iface.epOut;
+            l.hasOut = ioctl(d.fd, USB_FS_OPEN, &op) == 0;
+            if (!l.hasOut) XC_LOGW("usb pad: %s: opening OUT 0x%02x: errno %d", d.path.c_str(), l.iface.epOut, errno);
+        }
+        for (int i : {0, 1}) {
+            const int index = i == 0 ? l.inIndex : l.outIndex;
+            l.frames[i] = i == 0 ? l.rx : l.tx;
+            l.lengths[i] = sizeof l.rx;
+            d.eps[index].ppBuffer = &l.frames[i];
+            d.eps[index].pLength = &l.lengths[i];
+            d.eps[index].nFrames = 1;
+            d.eps[index].flags = USB_FS_FLAG_SINGLE_SHORT_OK;
+        }
+        l.opened = true;
+        ++opened;
     }
-    for (int i : {kInIndex, kOutIndex}) {
-        d.frames[i] = i == kInIndex ? d.rx : d.tx;
-        d.lengths[i] = sizeof d.rx;
-        d.eps[i].ppBuffer = &d.frames[i];
-        d.eps[i].pLength = &d.lengths[i];
-        d.eps[i].nFrames = 1;
-        d.eps[i].flags = USB_FS_FLAG_SINGLE_SHORT_OK;
+    return opened > 0;
+}
+
+// The link a finished transfer belongs to, marked done.
+void noteComplete(Device& d, int epIndex) {
+    for (auto& l : d.links) {
+        if (epIndex == l->inIndex) l->inDone = true;
+        else if (epIndex == l->outIndex) l->outDone = true;
     }
+}
+
+// Each opened link keeps one IN transfer queued (no kernel timeout): a pad that reports only on
+// change (the 8BitDo dongle) would lose a press landing between a timed-out transfer and the next.
+bool queueIn(Device& d, Link& l) {
+    if (!l.opened || l.inPending) return true;
+    l.lengths[0] = sizeof l.rx;
+    usb_fs_endpoint& ep = d.eps[l.inIndex];
+    ep.timeout = 0;
+    ep.flags = USB_FS_FLAG_SINGLE_SHORT_OK | (l.clearStall ? USB_FS_FLAG_CLEAR_STALL : 0);
+    l.clearStall = false;
+    usb_fs_start start{};
+    start.ep_index = static_cast<uint8_t>(l.inIndex);
+    if (ioctl(d.fd, USB_FS_START, &start) != 0 && errno != EBUSY) return false;
+    l.inPending = true;
     return true;
 }
 
-// One report off the IN endpoint: its size, 0 when none came within
-// `waitMs`, -1 on an error. The transfer stays queued between calls (no
-// kernel timeout): a pad that reports only on change (the 8BitDo dongle)
-// would lose a press landing between a timed-out transfer and the next.
-int receive(Device& d, uint8_t* out, int waitMs) {
-    usb_fs_endpoint& ep = d.eps[kInIndex];
-    if (!d.inPending) {
-        d.lengths[kInIndex] = sizeof d.rx;
-        ep.timeout = 0;
-        ep.flags = USB_FS_FLAG_SINGLE_SHORT_OK | (d.clearStall ? USB_FS_FLAG_CLEAR_STALL : 0);
-        d.clearStall = false;
-        usb_fs_start start{};
-        start.ep_index = kInIndex;
-        if (ioctl(d.fd, USB_FS_START, &start) != 0 && errno != EBUSY) return -1;
-        d.inPending = true;
-    }
+// Waits up to `waitMs` for any IN transfer to finish; false on an error.
+bool waitIn(Device& d, int waitMs) {
     for (int spins = waitMs / 4 + 1; spins > 0; --spins) {
-        bool done = d.inDone;
-        if (!done) {
+        for (;;) {
             usb_fs_complete complete{};
-            if (ioctl(d.fd, USB_FS_COMPLETE, &complete) == 0) {
-                if (complete.ep_index != kInIndex) continue;  // an OUT transfer that ended late
-                done = true;
-            } else if (errno != EBUSY && errno != EAGAIN && errno != ETIMEDOUT) {
-                return -1;
+            if (ioctl(d.fd, USB_FS_COMPLETE, &complete) != 0) {
+                if (errno != EBUSY && errno != EAGAIN && errno != ETIMEDOUT) return false;
+                break;
             }
+            noteComplete(d, complete.ep_index);
         }
-        if (done) {
-            d.inDone = d.inPending = false;
-            if (ep.status != kUsbErrNormal && ep.status != kUsbErrShortXfer) {
-                d.clearStall = true;
-                return -1;
-            }
-            const int n = static_cast<int>(std::min<uint32_t>(d.lengths[kInIndex], sizeof d.rx));
-            std::memcpy(out, d.rx, static_cast<size_t>(n));
-            return n;
-        }
+        for (auto& l : d.links)
+            if (l->inDone) return true;
         fd_set rset;
         FD_ZERO(&rset);
         FD_SET(d.fd, &rset);
         timeval wait{0, 4000};
         select(d.fd + 1, &rset, nullptr, nullptr, &wait);
     }
-    return 0;
+    return true;
 }
 
-// One packet out the OUT endpoint; false when it was not sent.
-bool send(Device& d, const uint8_t* data, size_t len, int timeoutMs = 80) {
-    if (!d.hasOut) return false;
-    usb_fs_endpoint& ep = d.eps[kOutIndex];
-    len = std::min(len, sizeof d.tx);
-    std::memcpy(d.tx, data, len);
-    d.lengths[kOutIndex] = static_cast<uint32_t>(len);
+// A finished IN transfer's report: its size, -1 when it ended in an error (the stall cleared on
+// the next one).
+int takeIn(Device& d, Link& l, uint8_t* out) {
+    l.inDone = l.inPending = false;
+    const usb_fs_endpoint& ep = d.eps[l.inIndex];
+    if (ep.status != kUsbErrNormal && ep.status != kUsbErrShortXfer) {
+        l.clearStall = true;
+        return -1;
+    }
+    const int n = static_cast<int>(std::min<uint32_t>(l.lengths[0], sizeof l.rx));
+    std::memcpy(out, l.rx, static_cast<size_t>(n));
+    return n;
+}
+
+// One packet out a link's OUT endpoint; false when it was not sent.
+bool send(Device& d, Link& l, const uint8_t* data, size_t len, int timeoutMs = 80) {
+    if (!l.hasOut) return false;
+    usb_fs_endpoint& ep = d.eps[l.outIndex];
+    len = std::min(len, sizeof l.tx);
+    std::memcpy(l.tx, data, len);
+    l.lengths[1] = static_cast<uint32_t>(len);
     ep.timeout = static_cast<uint16_t>(timeoutMs);
+    l.outDone = false;
     usb_fs_start start{};
-    start.ep_index = kOutIndex;
+    start.ep_index = static_cast<uint8_t>(l.outIndex);
     if (ioctl(d.fd, USB_FS_START, &start) != 0 && errno != EBUSY) return false;
     for (int spins = timeoutMs / 4 + 1; spins > 0; --spins) {
         usb_fs_complete complete{};
         if (ioctl(d.fd, USB_FS_COMPLETE, &complete) == 0) {
-            if (complete.ep_index == kInIndex) {  // the queued IN transfer: the next receive() takes it
-                d.inDone = true;
-                continue;
-            }
-            return ep.status == kUsbErrNormal || ep.status == kUsbErrShortXfer;
+            noteComplete(d, complete.ep_index);  // a queued IN transfer: the read loop takes it
+            if (l.outDone) return ep.status == kUsbErrNormal || ep.status == kUsbErrShortXfer;
+            continue;
         }
         if (errno != EBUSY && errno != EAGAIN) return false;
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
@@ -277,45 +325,44 @@ bool send(Device& d, const uint8_t* data, size_t len, int timeoutMs = 80) {
 }
 
 // What each kind of pad waits for before it reports.
-void wakeUp(Device& d) {
-    if (d.iface.protocol == UsbPadProtocol::Gip) {
+void wakeUp(Device& d, Link& l) {
+    if (l.iface.protocol == UsbPadProtocol::Gip) {
         // Power on, the "S" init and the Xbox button's light.
         static const uint8_t powerOn[] = {0x05, 0x20, 0x00, 0x01, 0x00};
         static const uint8_t sInit[] = {0x05, 0x20, 0x00, 0x0f, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00,
                                         0x00, 0x55, 0x53, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
         static const uint8_t ledOn[] = {0x0a, 0x20, 0x00, 0x03, 0x00, 0x01, 0x14};
-        bool a = send(d, powerOn, sizeof powerOn);
+        bool a = send(d, l, powerOn, sizeof powerOn);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        bool b = send(d, sInit, sizeof sInit);
+        bool b = send(d, l, sInit, sizeof sInit);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        bool c = send(d, ledOn, sizeof ledOn);
-        XC_LOGI("usb pad %d: GIP power on %s, init %s, light %s", d.slot, a ? "ok" : "failed", b ? "ok" : "failed",
+        bool c = send(d, l, ledOn, sizeof ledOn);
+        XC_LOGI("usb pad %d: GIP power on %s, init %s, light %s", l.slot, a ? "ok" : "failed", b ? "ok" : "failed",
                 c ? "ok" : "failed");
-    } else if (d.iface.wireless) {
-        // The Xbox 360 receiver: ask whether a pad is connected (a presence message comes back,
-        // and the pad's light is set then, in the read loop).
+    } else if (l.iface.wireless) {
+        // The Xbox 360 receiver: ask whether something is linked on this channel (a presence
+        // message comes back).
         const auto query = xinputWirelessPresenceQuery();
-        bool ok = send(d, query.data(), query.size());
-        XC_LOGI("usb pad %d: Xbox 360 receiver: presence query %s", d.slot, ok ? "sent" : "not sent");
-    } else if (d.iface.protocol == UsbPadProtocol::XInput) {
+        send(d, l, query.data(), query.size());
+    } else if (l.iface.protocol == UsbPadProtocol::XInput) {
         // The player 1 light, which XInput hosts set as a pad connects: the
         // 8BitDo Ultimate dongle stays silent without it and drops off USB
         // after ~10 s.
         static const uint8_t led[] = {0x01, 0x03, 0x02};
-        bool ok = send(d, led, sizeof led);
-        XC_LOGI("usb pad %d: XInput light %s", d.slot, ok ? "sent" : "not sent");
+        bool ok = send(d, l, led, sizeof led);
+        XC_LOGI("usb pad %d: XInput light %s", l.slot, ok ? "sent" : "not sent");
     }
 }
 
-// The motors, when another thread asked: from the pad's own thread, as every transfer is.
-void sendRumble(Device& d, uint8_t large, uint8_t small) {
+// The motors, when another thread asked: from the device's own thread, as every transfer is.
+void sendRumble(Device& d, Link& l, uint8_t large, uint8_t small) {
     uint8_t packet[32];
     const size_t n =
-        usbPadRumblePacket(d.iface.protocol, large, small, d.rumbleSequence, packet, sizeof packet, d.iface.wireless);
+        usbPadRumblePacket(l.iface.protocol, large, small, l.rumbleSequence, packet, sizeof packet, l.iface.wireless);
     if (!n) return;
-    const bool ok = send(d, packet, n, 40);
+    const bool ok = send(d, l, packet, n, 40);
     static std::atomic<int> logged{0};
-    if (logged < 6 && ++logged) XC_LOGI("usb pad %d: motors %u / %u %s", d.slot, large, small, ok ? "sent" : "not sent");
+    if (logged < 6 && ++logged) XC_LOGI("usb pad %d: motors %u / %u %s", l.slot, large, small, ok ? "sent" : "not sent");
 }
 
 unsigned buttonBits(const ControllerState& s) {
@@ -336,15 +383,107 @@ std::string buttonNames(unsigned bits) {
     return s.empty() ? "none" : s;
 }
 
+// The name a receiver's device goes by, from what it says it is.
+std::string receiverDeviceName(int subtype) {
+    switch (usbPadKindForSubtype(subtype)) {
+        case UsbPadKind::Guitar: return "Xbox 360 Guitar";
+        case UsbPadKind::Drums: return "Xbox 360 Drum Kit";
+        case UsbPadKind::Other: return std::string("Xbox 360 ") + xinputSubtypeName(subtype);
+        default: return subtype < 0 ? "Xbox 360 Wireless" : "Xbox 360 Controller";
+    }
+}
+
+// A receiver's channel got something linked to it (or reporting): it becomes a player.
+void linkAttach(Device& d, Link& l, int channel) {
+    if (l.slot >= 0) return;
+    l.slot = takeSlot();
+    if (l.slot < 0) {
+        XC_LOGW("usb pad: %s channel %d: no free player for it", d.path.c_str(), channel);
+        return;
+    }
+    l.lightPlayer = -1;
+    l.state = ControllerState{};
+    l.shown = l.changesLogged = 0;
+    usbPadAttached(l.slot, receiverDeviceName(l.subtype), usbPadKindForSubtype(l.subtype));
+    if (l.subtype < 0) {
+        // Linked before the app started: its link report is not sent again. Ask for its
+        // capabilities (00 00 02 80, answered with a 00 05 report: vendor, product, version).
+        static const uint8_t ask[12] = {0x00, 0x00, 0x02, 0x80};
+        send(d, l, ask, sizeof ask, 40);
+    }
+}
+
+void linkDetach(Link& l) {
+    if (l.slot < 0) return;
+    usbPadDetached(l.slot);
+    releaseSlot(l.slot);
+    l.slot = -1;
+    l.subtype = -1;
+}
+
+// One report off a link.
+void handleReport(Device& d, Link& l, int channel, const uint8_t* buf, int n) {
+    if (l.iface.protocol == UsbPadProtocol::Gip)
+        for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) send(d, l, ack.data(), ack.size(), 40);
+    if (l.iface.wireless) {
+        // Linked (08 80) or gone (08 00); the link report that follows says what it is.
+        if (n >= 2 && buf[0] == 0x08) {
+            const bool linked = (buf[1] & 0x80) != 0;
+            XC_LOGI("usb pad: %s channel %d: device %s", d.path.c_str(), channel, linked ? "linked" : "gone");
+            if (!linked) linkDetach(l);
+            return;
+        }
+        if (n >= 16 && buf[0] == 0x00 && buf[1] == 0x05 && buf[5] == 0x12) {
+            XC_LOGI("usb pad: %s channel %d: capabilities: vendor %04x product %04x version %04x: %s", d.path.c_str(),
+                    channel, buf[10] | buf[11] << 8, buf[12] | buf[13] << 8, buf[14] | buf[15] << 8, hex(buf, n).c_str());
+            return;
+        }
+        if (const int subtype = xinputWirelessSubtype(buf, static_cast<size_t>(n)); subtype >= 0) {
+            l.subtype = subtype;
+            XC_LOGI("usb pad: %s channel %d: device is a %s (subtype 0x%02x%s): %s", d.path.c_str(), channel,
+                    xinputSubtypeName(subtype), subtype, (buf[25] & 0x80) ? ", motors flag" : "", hex(buf, n).c_str());
+            if (l.slot < 0) linkAttach(d, l, channel);
+            else usbPadSetKind(l.slot, usbPadKindForSubtype(subtype));
+            return;
+        }
+    }
+    ControllerState state = l.state;
+    const bool parsed = d.hidReady ? parseGenericHidReport(d.hid, buf, static_cast<size_t>(n), state)
+                                   : parseUsbPadReport(l.iface.protocol, buf, static_cast<size_t>(n), state);
+    // Input from a receiver's channel nobody announced (linked before the app started): a player
+    // too, of a kind not known until it links again.
+    if (parsed && l.iface.wireless && l.slot < 0) linkAttach(d, l, channel);
+    if (l.shown < 6) XC_LOGI("usb pad %d: report %d: %d bytes: %s", l.slot, ++l.shown, n, hex(buf, n).c_str());
+    if (!parsed) {
+        if (std::chrono::steady_clock::now() - l.lastOther > std::chrono::seconds(5)) {
+            l.lastOther = std::chrono::steady_clock::now();
+            XC_LOGD("usb pad %d: other report, %d bytes: %s", l.slot, n, hex(buf, n).c_str());
+        }
+        return;
+    }
+    l.state = state;
+    if (l.slot < 0) return;
+    usbPadState(l.slot, state);
+    // The first presses, to check the buttons from the log.
+    const unsigned now = buttonBits(state);
+    if (now != l.buttons && l.changesLogged < 80) {
+        ++l.changesLogged;
+        XC_LOGI("usb pad %d: buttons %s, sticks %.2f,%.2f %.2f,%.2f, triggers %.2f %.2f", l.slot, buttonNames(now).c_str(),
+                state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY, state.triggerL2, state.triggerR2);
+    }
+    l.buttons = now;
+}
+
 void readLoop(Device* d) {
+    Link& first = *d->links.front();
     // The XInput wake-up through the control endpoint some 2.4G dongles
     // want (OmniPad CE's handshake), before the transfers start.
-    if (d->iface.protocol == UsbPadProtocol::XInput && !d->iface.wireless) {
+    if (first.iface.protocol == UsbPadProtocol::XInput && !first.iface.wireless) {
         uint8_t buf[32];
-        int r1 = controlRequest(d->fd, 0xc1, 0x01, 0x0100, d->iface.number, buf, 20);
+        int r1 = controlRequest(d->fd, 0xc1, 0x01, 0x0100, first.iface.number, buf, 20);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
         uint8_t led[] = {0x01, 0x03, 0x02};
-        int r2 = controlRequest(d->fd, 0x21, 0x09, 0x0200, d->iface.number, led, sizeof led);
+        int r2 = controlRequest(d->fd, 0x21, 0x09, 0x0200, first.iface.number, led, sizeof led);
         XC_LOGI("usb pad: %s: XInput wake-up requests: errno %d, %d", d->path.c_str(), r1, r2);
     }
     if (!setupTransfers(*d)) {
@@ -352,82 +491,61 @@ void readLoop(Device* d) {
         d->dead = true;
         return;
     }
-    XC_LOGI("usb pad %d: %s (%04x:%04x, %s, IN 0x%02x, OUT 0x%02x%s) on %s", d->slot, d->name.c_str(), d->vid, d->pid,
-            protocolName(d->iface.protocol), d->iface.epIn, d->iface.epOut, d->hasOut ? "" : " not opened",
-            d->path.c_str());
-    usbPadAttached(d->slot, d->name);
-    d->attached = true;
-    wakeUp(*d);
-
-    ControllerState state;
-    uint8_t buf[64];
-    int errors = 0, shown = 0, changesLogged = 0, lightPlayer = -1;
-    unsigned buttons = 0;
-    auto lastOther = std::chrono::steady_clock::time_point{};
-    while (!d->stop) {
-        // XInput pads show their player on their four lights (01 03 06..09).
-        if (const int player = usbPadPlayer(d->slot);
-            d->iface.protocol == UsbPadProtocol::XInput && player >= 0 && player != lightPlayer) {
-            if (d->iface.wireless) {
-                const auto led = xinputWirelessLedPacket(player);
-                send(*d, led.data(), led.size(), 40);
-            } else {
-                const uint8_t led[] = {0x01, 0x03, static_cast<uint8_t>(0x06 + player)};
-                send(*d, led, sizeof led, 40);
-            }
-            lightPlayer = player;
-        }
-        if (d->rumbleAsked.exchange(false)) {
-            const uint32_t v = d->rumble;
-            sendRumble(*d, static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v));
-        }
-        const int n = receive(*d, buf, 20);
-        if (n < 0) {
-            if (++errors >= 50) {
-                XC_LOGW("usb pad %d: %d errors in a row (errno %d): closed", d->slot, errors, errno);
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(4));
-            continue;
-        }
-        if (n == 0) continue;
-        errors = 0;
-        if (d->iface.protocol == UsbPadProtocol::Gip)
-            for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) send(*d, ack.data(), ack.size(), 40);
-        // The device's link report: what kind it is (a pad, a guitar, a drum kit...), logged whole.
-        if (d->iface.wireless) {
-            if (const int subtype = xinputWirelessSubtype(buf, static_cast<size_t>(n)); subtype >= 0) {
-                d->subtype = subtype;
-                XC_LOGI("usb pad %d: Xbox 360 receiver: device is a %s (subtype 0x%02x%s): %s", d->slot,
-                        xinputSubtypeName(subtype), subtype, (buf[25] & 0x80) ? ", motors flag" : "",
-                        hex(buf, n).c_str());
-            }
-        }
-        // The receiver's pad connected (again): its light is set anew.
-        if (d->iface.wireless && n >= 2 && buf[0] == 0x08) {
-            XC_LOGI("usb pad %d: Xbox 360 receiver: pad %s", d->slot, (buf[1] & 0x80) ? "connected" : "gone");
-            lightPlayer = -1;
-        }
-        if (shown < 6) XC_LOGI("usb pad %d: report %d: %d bytes: %s", d->slot, ++shown, n, hex(buf, n).c_str());
-        const bool parsed = d->hidReady ? parseGenericHidReport(d->hid, buf, static_cast<size_t>(n), state)
-                                        : parseUsbPadReport(d->iface.protocol, buf, static_cast<size_t>(n), state);
-        if (parsed) {
-            usbPadState(d->slot, state);
-            // The first presses, to check the buttons from the log.
-            const unsigned now = buttonBits(state);
-            if (now != buttons && changesLogged < 80) {
-                ++changesLogged;
-                XC_LOGI("usb pad %d: buttons %s, sticks %.2f,%.2f %.2f,%.2f, triggers %.2f %.2f", d->slot,
-                        buttonNames(now).c_str(), state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY,
-                        state.triggerL2, state.triggerR2);
-            }
-            buttons = now;
-        } else if (std::chrono::steady_clock::now() - lastOther > std::chrono::seconds(5)) {
-            lastOther = std::chrono::steady_clock::now();
-            XC_LOGD("usb pad %d: other report, %d bytes: %s", d->slot, n, hex(buf, n).c_str());
-        }
+    for (size_t k = 0; k < d->links.size(); ++k) {
+        const Link& l = *d->links[k];
+        XC_LOGI("usb pad: %s (%04x:%04x, %s%s, channel %zu: IN 0x%02x, OUT 0x%02x%s) on %s", d->name.c_str(), d->vid,
+                d->pid, protocolName(l.iface.protocol), d->receiver ? " receiver" : "", k, l.iface.epIn, l.iface.epOut,
+                !l.opened ? " not opened" : l.hasOut ? "" : " not opened", d->path.c_str());
     }
-    if (d->rumble) sendRumble(*d, 0, 0);  // not left turning
+    // A wired pad is a player from the start; a receiver's channels once something links to them.
+    if (!d->receiver) usbPadAttached(first.slot, d->name);
+    for (auto& l : d->links)
+        if (l->opened) wakeUp(*d, *l);
+
+    uint8_t buf[64];
+    int errors = 0;
+    while (!d->stop) {
+        for (size_t k = 0; k < d->links.size(); ++k) {
+            Link& l = *d->links[k];
+            if (!l.opened) continue;
+            // XInput pads show their player on their four lights.
+            if (const int player = usbPadPlayer(l.slot);
+                l.iface.protocol == UsbPadProtocol::XInput && player >= 0 && player != l.lightPlayer) {
+                if (l.iface.wireless) {
+                    const auto led = xinputWirelessLedPacket(player);
+                    send(*d, l, led.data(), led.size(), 40);
+                } else {
+                    const uint8_t led[] = {0x01, 0x03, static_cast<uint8_t>(0x06 + player)};
+                    send(*d, l, led, sizeof led, 40);
+                }
+                l.lightPlayer = player;
+            }
+            if (l.rumbleAsked.exchange(false)) {
+                const uint32_t v = l.rumble;
+                sendRumble(*d, l, static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v));
+            }
+            if (!queueIn(*d, l)) ++errors;
+        }
+        if (!waitIn(*d, 20)) ++errors;
+        for (size_t k = 0; k < d->links.size(); ++k) {
+            Link& l = *d->links[k];
+            if (!l.inDone) continue;
+            const int n = takeIn(*d, l, buf);
+            if (n < 0) {
+                ++errors;
+                continue;
+            }
+            errors = 0;
+            if (n > 0) handleReport(*d, l, static_cast<int>(k), buf, n);
+        }
+        if (errors >= 50) {
+            XC_LOGW("usb pad: %s: %d errors in a row (errno %d): closed", d->path.c_str(), errors, errno);
+            break;
+        }
+        if (errors) std::this_thread::sleep_for(std::chrono::milliseconds(4));
+    }
+    for (auto& l : d->links)
+        if (l->opened && l->rumble) sendRumble(*d, *l, 0, 0);  // not left turning
     usb_fs_uninit uninit{};
     ioctl(d->fd, USB_FS_UNINIT, &uninit);
     d->dead = true;
@@ -436,18 +554,14 @@ void readLoop(Device* d) {
 void closeDevice(Device& d) {
     d.stop = true;
     if (d.thread.joinable()) d.thread.join();
-    if (d.attached) usbPadDetached(d.slot);
+    for (auto& l : d.links) {
+        if (l->slot < 0) continue;
+        usbPadDetached(l->slot);
+        releaseSlot(l->slot);
+        l->slot = -1;
+    }
     if (d.fd >= 0) close(d.fd);
     d.fd = -1;
-}
-
-int freeSlot() {
-    for (int s = 0; s < kMaxUsbPads; ++s) {
-        bool used = false;
-        for (const auto& d : g_devices) used |= d->slot == s;
-        if (!used) return s;
-    }
-    return -1;
 }
 
 // A device seen for the first time: a pad gets a slot and its thread;
@@ -521,22 +635,37 @@ void probe(const std::string& path, ino_t ino) {
         g_ignored.insert(key);
         return;
     }
-    const int slot = freeSlot();
-    if (slot < 0) {
-        close(fd);  // tried again on the next scan, once a pad leaves
-        return;
-    }
     auto d = std::make_unique<Device>();
+    d->receiver = iface.wireless;
+    if (d->receiver) {
+        // An Xbox 360 wireless receiver: a channel for each device it can link, no player yet.
+        for (const UsbPadInterface& channel : findXInputWirelessInterfaces(config, configLen)) {
+            if (d->links.size() >= std::size(d->eps) / 2) break;
+            d->links.push_back(std::make_unique<Link>());
+            d->links.back()->iface = channel;
+        }
+        if (d->links.empty()) {  // no descriptor to read them from: the first channel
+            d->links.push_back(std::make_unique<Link>());
+            d->links.back()->iface = iface;
+        }
+    } else {
+        const int slot = takeSlot();
+        if (slot < 0) {
+            close(fd);  // tried again on the next scan, once a pad leaves
+            return;
+        }
+        d->links.push_back(std::make_unique<Link>());
+        d->links.back()->iface = iface;
+        d->links.back()->slot = slot;
+    }
     d->path = path;
     d->fd = fd;
-    d->slot = slot;
     d->vid = vid;
     d->pid = pid;
-    d->iface = iface;
     d->hid = hid;
     d->hidReady = hidReady;
     d->name = productName(fd, dd.iProduct);
-    if (d->name.empty()) d->name = protocolName(iface.protocol) + std::string(" pad");
+    if (d->name.empty()) d->name = d->receiver ? "Xbox 360 Wireless Receiver" : protocolName(iface.protocol) + std::string(" pad");
     d->thread = std::thread(readLoop, d.get());
     g_devices.push_back(std::move(d));
 }
@@ -592,12 +721,13 @@ void scanLoop() {
 
 void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    for (const auto& d : g_devices) {
-        if (d->slot != slot) continue;
-        const uint32_t v = static_cast<uint32_t>(large) << 8 | small;
-        if (d->rumble.exchange(v) != v) d->rumbleAsked = true;
-        return;
-    }
+    for (const auto& d : g_devices)
+        for (const auto& l : d->links) {
+            if (l->slot != slot) continue;
+            const uint32_t v = static_cast<uint32_t>(large) << 8 | small;
+            if (l->rumble.exchange(v) != v) l->rumbleAsked = true;
+            return;
+        }
 }
 
 void usbPadsStart() {

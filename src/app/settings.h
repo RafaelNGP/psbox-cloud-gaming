@@ -169,6 +169,7 @@ struct Settings {
     // account's (to be saved); Changed: other lists are live now (to be saved and shown).
     ListsSwitch useListsOf(const std::string& xuid);
     bool usbControllers = true;  // in-app USB controllers driver (OneFamily)
+    bool guitarStrum = false;    // USB guitars: a fret plays only with the strum bar
     bool soloInputRedirect = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
 

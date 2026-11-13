@@ -40,7 +40,7 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
                item == BitrateLimiterItem || item == VrrItem ||
                item == ReloadStreamItem || item == Leave;
     } else { // Controls
-        return item == PlayerItem || item == ConfirmItem || item == Triggers ||
+        return item == PlayerItem || item == StrumItem || item == ConfirmItem || item == Triggers ||
                item == DeadzoneItem || item == TouchpadShortcutsItem || item == GyroItem ||
                item == AudioHapticsItem || item == PadSpeakerVolumeItem;
     }
@@ -63,6 +63,7 @@ bool StreamMenu::itemShown(int item) const {
     case PadSpeakerVolumeItem: return caps_.triggerRumble || caps_.adaptiveTriggers;
     case TouchpadShortcutsItem: return caps_.touchpad;
     case PlayerItem: return usbOwnerPlayer_ >= 0;
+    case StrumItem: return usbOwnerPlayer_ >= 0 && usbOwnerGuitar_;
     default: return true;
     }
 }
@@ -270,6 +271,10 @@ MenuAction StreamMenu::handle(const NavInput& in) {
         usbOwnerPlayer_ = (usbOwnerPlayer_ + (in.left ? 3 : 1)) % 4;
         return MenuAction::Player;
     }
+    if (selected_ == StrumItem && (in.left || in.right || in.accept)) {
+        guitarStrum_ = !guitarStrum_;
+        return MenuAction::GuitarStrum;
+    }
     if (selected_ == Profile && (in.left || in.right || in.accept)) {
         hasCustomProfile_ = !hasCustomProfile_;
         return MenuAction::ProfileToggle;
@@ -417,6 +422,7 @@ const char* StreamMenu::itemDescription(int item) const {
         case Leave: return tr(homeConsole_ ? Str::MenuDescEndStream : Str::MenuDescLeave);
 
         case PlayerItem: return tr(Str::MenuDescPlayer);
+        case StrumItem: return tr(Str::MenuDescStrum);
         case ConfirmItem: return tr(Str::SettingDescConfirmButton);
         case Triggers: return tr(Str::SettingDescTriggerRumble);
         case DeadzoneItem: return tr(Str::SettingDescDeadzone);
@@ -663,6 +669,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
 
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
                             : i == PlayerItem          ? tr(Str::MenuPlayer)
+                            : i == StrumItem           ? tr(Str::MenuStrum)
                             : i == Profile             ? tr(Str::Profile)
                             : i == Stats               ? tr(Str::MenuStats)
                             : i == Resolution          ? tr(Str::MenuResolution)
@@ -688,6 +695,10 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
 
         if (i == PlayerItem) {
             value = std::to_string(usbOwnerPlayer_ + 1);
+            if (sel) value = "< " + value + " >";
+        }
+        if (i == StrumItem) {
+            value = tr(guitarStrum_ ? Str::On : Str::Off);
             if (sel) value = "< " + value + " >";
         }
         if (i == Profile) {

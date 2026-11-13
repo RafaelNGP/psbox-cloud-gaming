@@ -432,6 +432,7 @@ constexpr Column kGerman = {
     "Um kostenlose Spiele außer Fortnite ohne Game Pass zu streamen, aktivieren Sie 'Preview-Funktionen' in den App-Einstellungen und auf xbox.com/play.", // F2pPreviewRequiredDesc
     "Dieses Konto muss 'Preview-Funktionen' im Profil auf xbox.com/play aktivieren, um werbefinanziertes Free-to-Play-Streaming freizuschalten.", // F2pPreviewAccountNeededDesc
     "Spieler",                                   // MenuPlayer
+    "Anschlag", // MenuStrum
     "Ihre Xbox-Cloud-Spielzeit ist aufgebraucht, deshalb hat der Xbox-Dienst die Sitzung beendet. Seit November 2026 begrenzt Xbox das Cloud-Gaming pro Monat: 15 Std. mit Game Pass Ultimate, 10 Std. mit Premium und 5 Std. mit Essential. Mehr Zeit: Ihre Optionen finden Sie auf xbox.com, oder Sie warten auf die Stunden des nächsten Monats.", // CloudTimeUp
     "Die Sitzung wurde wegen Inaktivität beendet", // EndedIdle
     "%s verbleibend", // CloudTimeLeft
@@ -547,6 +548,7 @@ constexpr Column kGerman = {
     "Beendet das aktuelle Cloud-Spiel und kehrt zum Startbildschirm zurück.", // MenuDescLeave
     "Beendet das Remote Play von der Xbox-Konsole und kehrt zum Startbildschirm zurück.", // MenuDescEndStream
     "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
+    "Gitarre: Ein Bund erreicht das Spiel nur, wenn du ihn hältst und anschlägst (wie in Guitar Hero). Aus: Die Bünde allein spielen.", // MenuDescStrum
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
     "Lenkrad (Linker Stick)",                          // GyroSteering
     "Lenkrad (Gas R2)",                                // GyroSteeringDrive

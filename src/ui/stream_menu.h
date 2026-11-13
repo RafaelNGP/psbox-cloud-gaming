@@ -54,7 +54,7 @@ enum StatsIndicator : uint32_t {
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, GyroCalibrate, PadSpeakerVolume,
-    TouchpadShortcuts, Player, AudioHaptics, ReloadStream,
+    TouchpadShortcuts, Player, AudioHaptics, ReloadStream, GuitarStrum,
     VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
 };
 
@@ -223,6 +223,9 @@ public:
     // (0..3), which its Player item changes (MenuAction::Player); -1 when
     // the menu is player 1's own (no such item).
     void setUsbOwner(int player) { usbOwnerPlayer_ = player; }
+    // The menu was opened by a USB guitar: its strum option is offered.
+    void setUsbOwnerGuitar(bool guitar, bool strum) { usbOwnerGuitar_ = guitar, guitarStrum_ = strum; }
+    bool guitarStrum() const { return guitarStrum_; }
     int usbOwnerPlayer() const { return usbOwnerPlayer_; }
     // What the display and the pads can do (UiCaps, all by default as on
     // the PS5): the upscaler, sharpness and block smoothing need the
@@ -254,6 +257,7 @@ public:
 
         // Tab Controls
         PlayerItem,
+        StrumItem,
         ConfirmItem,
         Triggers,
         DeadzoneItem,
@@ -317,6 +321,7 @@ private:
     int padSpeakerVolume_ = 100;
     PadSlots pads_{};
     int usbOwnerPlayer_ = -1;
+    bool usbOwnerGuitar_ = false, guitarStrum_ = false;
     int audioHaptics_ = 0;
     mutable std::vector<float> frametimes_;
 

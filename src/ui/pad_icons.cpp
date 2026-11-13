@@ -3,6 +3,7 @@
 #include "ui/pad_icons.h"
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <utility>
 
@@ -42,6 +43,50 @@ void drawPhoneGlyph(Canvas& c, int x, int y, int w, Color color, Color backgroun
                background, std::max(1, border / 2));
     c.fillRect({px + pw / 3, py + std::max(1, topBar / 3), std::max(2, pw / 3), std::max(1, topBar / 3)}, background, 1);
     c.fillCircle(px + pw / 2.0f, py + ph - botBar / 2.0f, std::max(1.5f, pw / 10.0f), background);
+}
+
+void drawGuitarGlyph(Canvas& c, int x, int y, int w, Color color, Color background) {
+    const float W = static_cast<float>(w), H = W * 0.7f, X = static_cast<float>(x), Y = static_cast<float>(y);
+    // The neck, from the body up to the right, and its head.
+    c.line(X + W * 0.40f, Y + H * 0.62f, X + W * 0.80f, Y + H * 0.12f, std::max(2.0f, W * 0.07f), color);
+    c.fillRect({static_cast<int>(X + W * 0.74f), static_cast<int>(Y), static_cast<int>(W * 0.14f), static_cast<int>(H * 0.20f)},
+               color, std::max(1, w / 30));
+    // The body: two lobes, the sound hole and the bridge cut out.
+    c.fillCircle(X + W * 0.30f, Y + H * 0.72f, W * 0.20f, color);
+    c.fillCircle(X + W * 0.42f, Y + H * 0.52f, W * 0.14f, color);
+    c.fillCircle(X + W * 0.36f, Y + H * 0.62f, W * 0.055f, background);
+    c.line(X + W * 0.20f, Y + H * 0.86f, X + W * 0.30f, Y + H * 0.94f, std::max(1.5f, W * 0.035f), background);
+}
+
+void drawDrumsGlyph(Canvas& c, int x, int y, int w, Color color, Color background) {
+    const float W = static_cast<float>(w), H = W * 0.7f, X = static_cast<float>(x), Y = static_cast<float>(y);
+    const float t = std::max(2.0f, W * 0.055f);
+    // The sticks, crossed above the drum.
+    c.line(X + W * 0.20f, Y + H * 0.02f, X + W * 0.66f, Y + H * 0.44f, t, color);
+    c.line(X + W * 0.80f, Y + H * 0.02f, X + W * 0.34f, Y + H * 0.44f, t, color);
+    // The drum: its shell and, on top, its head (a filled oval, its rim cut out).
+    const float cx = X + W * 0.5f, cy = Y + H * 0.50f, a = W * 0.36f, b = H * 0.13f;
+    c.fillRect({static_cast<int>(cx - a), static_cast<int>(cy), static_cast<int>(2 * a), static_cast<int>(H * 0.46f)}, color,
+               std::max(2, w / 16));
+    for (float dy = -b; dy <= b; dy += 0.5f) {
+        const float hw = a * std::sqrt(std::max(0.0f, 1.0f - (dy / b) * (dy / b)));
+        c.line(cx - hw, cy + dy, cx + hw, cy + dy, 1.0f, color);
+    }
+    const float edge = std::max(1.0f, W * 0.03f);
+    float px = cx + a * 0.86f, py = cy;
+    for (int k = 1; k <= 36; ++k) {  // the rim, an oval just inside the head
+        const float ang = 6.2831853f * static_cast<float>(k) / 36.0f;
+        const float nx = cx + a * 0.86f * std::cos(ang), ny = cy + b * 0.70f * std::sin(ang);
+        c.line(px, py, nx, ny, edge, background);
+        px = nx, py = ny;
+    }
+    // The tension rods, a zigzag around the shell.
+    const float top = cy + b + H * 0.05f, bottom = Y + H * 0.88f;
+    for (int k = 0; k < 4; ++k) {
+        const float x0 = cx - a + 2 * a * (static_cast<float>(k) + 0.25f) / 4.0f, x1 = x0 + 2 * a / 8.0f;
+        c.line(x0, top, x1, bottom, edge, background);
+        if (k < 3) c.line(x1, bottom, x0 + 2 * a / 4.0f, top, edge, background);
+    }
 }
 
 int padIconHeight(int w) { return w * 7 / 10 + 4 + w * 3 / 10; }
@@ -94,6 +139,17 @@ void drawSlotIcon(Canvas& c, const Font& font, int x, int y, int w, int index, c
                   const Font* icons) {
     const bool isKb = slot.keyboard || slot.device == PadDevice::Keyboard;
     const bool isPhone = slot.device == PadDevice::Phone;
+    const bool isInstrument = slot.device == PadDevice::Guitar || slot.device == PadDevice::Drums;
+    if (isInstrument) {
+        Color col = slot.connected ? playerColor(index) : rgba(70, 70, 70);
+        if (slot.device == PadDevice::Guitar) drawGuitarGlyph(c, x, y, w, col, background);
+        else drawDrumsGlyph(c, x, y, w, col, background);
+        std::string n = std::to_string(index + 1);
+        int npx = w * 3 / 10;
+        font.draw(c, n, x + (w - font.measure(n, npx)) / 2, y + w * 7 / 10 + 4, npx,
+                  slot.connected ? rgba(255, 255, 255) : rgba(110, 110, 110));
+        return;
+    }
     if (!isKb && !isPhone && !icons) {
         drawPadIcon(c, font, x, y, w, index, slot.connected, background);
         return;

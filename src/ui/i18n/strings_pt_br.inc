@@ -432,6 +432,7 @@ constexpr Column kPortugueseBR = {
     "Para transmitir jogos gratuitos além de Fortnite em contas sem Game Pass, ative os 'Recursos Preview' nas Configurações do app e no site xbox.com/play.", // F2pPreviewRequiredDesc
     "Esta conta precisa habilitar os 'Recursos Preview' no perfil em xbox.com/play para liberar o streaming com anúncios de jogos gratuitos.", // F2pPreviewAccountNeededDesc
     "Jogador",                                   // MenuPlayer
+    "Palhetada", // MenuStrum
     "Seu tempo de jogo na nuvem do Xbox acabou, então o serviço do Xbox encerrou a sessão. Desde novembro de 2026, o Xbox limita o jogo na nuvem por mês: 15 h no Game Pass Ultimate, 10 h no Premium e 5 h no Essential. Para ter mais tempo, veja as opções em xbox.com, ou espere as horas do próximo mês.", // CloudTimeUp
     "O streaming foi encerrado por inatividade", // EndedIdle
     "%s restantes", // CloudTimeLeft
@@ -547,6 +548,7 @@ constexpr Column kPortugueseBR = {
     "Encerra a partida atual na nuvem e retorna para a tela inicial do aplicativo.", // MenuDescLeave
     "Encerra a transmissão do console Xbox e retorna para a tela inicial.", // MenuDescEndStream
     "Atribui qual entrada de controle físico corresponderá a este jogador virtual.", // MenuDescPlayer
+    "Guitarra: o traste só chega ao jogo quando você palheta segurando ele (como no Guitar Hero). Desligada: os trastes sozinhos tocam.", // MenuDescStrum
     "Ajusta o nível de volume do som emitido pelo alto-falante integrado do controle.", // MenuDescPadSpeakerVolume
     "Volante (Analógico Esq.)",                        // GyroSteering
     "Volante (Acelerar R2)",                           // GyroSteeringDrive

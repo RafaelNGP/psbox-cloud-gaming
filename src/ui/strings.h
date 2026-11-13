@@ -441,6 +441,7 @@ enum class Str {
     F2pPreviewRequiredDesc,
     F2pPreviewAccountNeededDesc,
     MenuPlayer,       // game menu, a USB controller's: the player it plays as
+    MenuStrum,        // game menu, a USB guitar's: frets only with the strum bar
     CloudTimeUp,      // the server ended the stream: the account's (or game's) cloud time ran out
     EndedIdle,        // toast: the server ended the stream after a while without input
     CloudTimeLeft,      // top bar / game menu: "%s" = the cloud time left ("4 h 10 min")
@@ -556,6 +557,7 @@ enum class Str {
     MenuDescLeave,
     MenuDescEndStream,
     MenuDescPlayer,
+    MenuDescStrum,
     MenuDescPadSpeakerVolume,
     GyroSteering,
     GyroSteeringDrive,

@@ -1121,6 +1121,14 @@ input:checked + .slider-sw:before { transform: translateX(20px); }
           <input type="color" id="inputLightBarColor" value="#0070dc" style="margin-left: 8px; height: 32px; width: 44px; border: none; border-radius: 6px; cursor: pointer; display: none;">
         </div>
 
+        <div class="toggle-row" id="rowGuitarStrum" style="display:none;">
+          <span class="toggle-label">Guitarra USB: palhetada (o traste só toca ao palhetar)</span>
+          <label class="switch">
+            <input type="checkbox" id="checkGuitarStrum">
+            <span class="slider-sw"></span>
+          </label>
+        </div>
+
         <div class="toggle-row" id="rowUsbControllers" style="display:none;">
           <span class="toggle-label">Controles USB (Driver OneFamily integrado)</span>
           <label class="switch">
@@ -1926,6 +1934,10 @@ function saveControllerSettings() {
   if (rowUsb && rowUsb.style.display !== 'none') {
     payload.usbControllers = document.getElementById('checkUsbControllers').checked;
   }
+  const rowStrum = document.getElementById('rowGuitarStrum');
+  if (rowStrum && rowStrum.style.display !== 'none') {
+    payload.guitarStrum = document.getElementById('checkGuitarStrum').checked;
+  }
   postSettings(payload);
 }
 
@@ -2390,6 +2402,12 @@ function applyLoadedSettings(s) {
   if (s.usbControllers !== undefined) {
     const el = document.getElementById('checkUsbControllers');
     if (el) el.checked = !!s.usbControllers;
+  }
+  {
+    const row = document.getElementById('rowGuitarStrum');
+    if (row) row.style.display = s.guitarConnected ? 'flex' : 'none';
+    const el = document.getElementById('checkGuitarStrum');
+    if (el && s.guitarStrum !== undefined) el.checked = !!s.guitarStrum;
   }
   if (s.videoDecoder !== undefined) {
     const el = document.getElementById('selectVideoDecoder');
