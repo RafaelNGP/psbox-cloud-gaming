@@ -63,6 +63,7 @@ struct Device {
     std::atomic<uint32_t> rumble{0};
     std::atomic<bool> rumbleAsked{false};
     uint8_t rumbleSequence = 0;
+    int subtype = -1;  // XInput device subtype, once a receiver's link report told it
     std::thread thread;
 };
 
@@ -393,6 +394,15 @@ void readLoop(Device* d) {
         errors = 0;
         if (d->iface.protocol == UsbPadProtocol::Gip)
             for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) send(*d, ack.data(), ack.size(), 40);
+        // The device's link report: what kind it is (a pad, a guitar, a drum kit...), logged whole.
+        if (d->iface.wireless) {
+            if (const int subtype = xinputWirelessSubtype(buf, static_cast<size_t>(n)); subtype >= 0) {
+                d->subtype = subtype;
+                XC_LOGI("usb pad %d: Xbox 360 receiver: device is a %s (subtype 0x%02x%s): %s", d->slot,
+                        xinputSubtypeName(subtype), subtype, (buf[25] & 0x80) ? ", motors flag" : "",
+                        hex(buf, n).c_str());
+            }
+        }
         // The receiver's pad connected (again): its light is set anew.
         if (d->iface.wireless && n >= 2 && buf[0] == 0x08) {
             XC_LOGI("usb pad %d: Xbox 360 receiver: pad %s", d->slot, (buf[1] & 0x80) ? "connected" : "gone");

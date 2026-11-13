@@ -1053,6 +1053,30 @@ std::array<uint8_t, 12> xinputWirelessLedPacket(int player) {
     return {0x00, 0x00, 0x08, static_cast<uint8_t>(0x40 + 6 + std::clamp(player, 0, 3)), 0, 0, 0, 0, 0, 0, 0, 0};
 }
 
+int xinputWirelessSubtype(const uint8_t* data, size_t len) {
+    if (!data || len < 26 || data[0] != 0x00 || data[1] != 0x0F || data[5] != 0xCC) return -1;
+    return data[25] & 0x7F;
+}
+
+const char* xinputSubtypeName(int subtype) {
+    switch (subtype) {
+        case 0x01: return "gamepad";
+        case 0x02: return "wheel";
+        case 0x03: return "arcade stick";
+        case 0x04: return "flight stick";
+        case 0x05: return "dance pad";
+        case 0x06: return "guitar";
+        case 0x07: return "guitar (alternate)";
+        case 0x08: return "drum kit";
+        case 0x0B: return "bass guitar";
+        case 0x0F: return "keyboard (Rock Band)";
+        case 0x13: return "arcade pad";
+        case 0x17: return "turntable";
+        case 0x19: return "pro guitar";
+        default: return "unknown";
+    }
+}
+
 std::array<uint8_t, 12> xinputWirelessPresenceQuery() {
     return {0x08, 0x00, 0x0F, 0xC0, 0, 0, 0, 0, 0, 0, 0, 0};
 }

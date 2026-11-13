@@ -153,6 +153,12 @@ size_t usbPadRumblePacket(UsbPadProtocol protocol, uint8_t large, uint8_t small,
 // (0..3), and the question "is a pad connected?" (it answers with a presence message).
 std::array<uint8_t, 12> xinputWirelessLedPacket(int player);
 std::array<uint8_t, 12> xinputWirelessPresenceQuery();
+// What kind of device an XInput pad is (XINPUT_DEVSUBTYPE): a pad, a guitar, a drum kit...
+// A receiver tells it in the link report a device sends as it connects (00 0F 00 F0 F0 CC ...,
+// byte 25, bit 7 the motors flag; layout after x360-research's "argon" notes and the Linux xpad
+// driver). -1 when `data` is not that report.
+int xinputWirelessSubtype(const uint8_t* data, size_t len);
+const char* xinputSubtypeName(int subtype);
 void setUsbPadRumble(int player, uint8_t large, uint8_t small);
 void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small);
 
