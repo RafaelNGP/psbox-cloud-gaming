@@ -43,6 +43,12 @@ struct GyroState {
 // Anchors the reference orientation (and initial gravity up vector if provided) for closed-loop posture tracking.
 void anchorGyroPosture(GyroState& s, const float* orientationQuat = nullptr, const float* accel = nullptr);
 
+// The same while the aim is already on and the thumb is turning the camera too: where the pad
+// is now becomes the reference (the thumb's turn isn't the hand's to make up), but the push the
+// hand is giving and the eased vertical stay. Anchoring afresh on every reading zeroed the eased
+// push each time, so the gyro gave only a fraction of its turn while the thumb was on the stick.
+void rebaseGyroPosture(GyroState& s, const float* orientationQuat = nullptr);
+
 // Resets posture tracking state when aiming ends.
 void resetGyroPosture(GyroState& s);
 
