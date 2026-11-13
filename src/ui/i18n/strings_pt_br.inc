@@ -294,6 +294,7 @@ constexpr Column kPortugueseBR = {
     "Tiroteio (Hair Trigger)", // TriggerProfileShooter
     "Corrida (ABS)", // TriggerProfileRacing
     "Armazenamento %s não permite gravação: login e ajustes não serão salvos", // StorageNotWritable
+    "Alguns arquivos do app não puderam ser lidos (%s). Ele funciona, mas instale de novo por segurança", // InstallIncomplete
     "FTP: use 'chmod 777 %s' ou exclua a pasta e reabra o app", // StorageFixHint
     "Personalizar indicadores",                       // StatsCustomize
     "FPS e resolução",                                // StatsIndicatorFps

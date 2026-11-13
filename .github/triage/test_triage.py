@@ -41,6 +41,15 @@ class Triage(unittest.TestCase):
         self.assertNotIn("Does it still happen there", comment)  # already asked to update
         self.assertTrue(comment.startswith(triage.MARKER))
 
+    def test_app_files_not_read(self):
+        labels, comment = self.run_triage(form("No text anywhere, only boxes", "v1.7.0", "13.60",
+                                               LOG + "10:00:01 [W] fonts: Inter-Bold.ttf not usable in /app0/assets/fonts; "
+                                               "the copy inside the app is used"), latest="1.7.1")
+        self.assertIn("area: install", labels)
+        self.assertIn("could not be read", comment)
+        labels, _ = self.run_triage(form("The picture stutters in every game", "v1.7.1", "13.60", LOG), latest="1.7.1")
+        self.assertNotIn("area: install", labels)
+
     def test_ps4_outdated_build_invites_redownload(self):
         log = LOG + "10:00:01 [I] firmware 13.520.001, PSBox 1.5.5 (build dbf2078-dirty, PlayStation 4)\n"
         labels, comment = self.run_triage(form("Low fps and the game freezes", "1.5.5", "13.52", log), latest="1.5.5")

@@ -294,6 +294,7 @@ constexpr Column kSpanish = {
     "Disparos (Hair Trigger)", // TriggerProfileShooter
     "Carreras (ABS)", // TriggerProfileRacing
     "El almacenamiento %s no permite escritura: la sesión y ajustes no se guardarán", // StorageNotWritable
+    "No se pudieron leer algunos archivos de la app (%s). Funciona, pero instálala de nuevo por seguridad", // InstallIncomplete
     "FTP: usa 'chmod 777 %s' o borra la carpeta y reinicia la app", // StorageFixHint
     "Personalizar indicadores",                       // StatsCustomize
     "FPS y resolución",                               // StatsIndicatorFps

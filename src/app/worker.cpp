@@ -192,6 +192,8 @@ void signInAndLoad(auth::AuthManager& am, xcloud::GssvClient& gssv) {
         platform::notify(ui::trf(ui::Str::StorageNotWritable, pathAndErr),
                          "storage not writable (notification)");
     }
+    if (g_installIncomplete.exchange(false))
+        platform::notify(ui::trf(ui::Str::InstallIncomplete, platform::assetDir()), "install incomplete (notification)");
     if (g_ui->screen() != ui::Screen::Home) {
         g_ui->showSplash(ui::tr(am.hasStoredAccount() ? ui::Str::SigningIn : ui::Str::RequestingCode));
     } else {

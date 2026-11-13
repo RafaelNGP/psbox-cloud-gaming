@@ -294,6 +294,7 @@ constexpr Column kItalian = {
     "Sparatutto (Hair Trigger)", // TriggerProfileShooter
     "Corsa (ABS)", // TriggerProfileRacing
     "La memoria %s non è scrivibile: accesso e impostazioni non verranno salvati", // StorageNotWritable
+    "Alcuni file dell'app non sono stati letti (%s). Funziona, ma reinstallala per sicurezza", // InstallIncomplete
     "FTP: esegui 'chmod 777 %s' o elimina la cartella e riavvia", // StorageFixHint
     "Personalizza indicatori",                        // StatsCustomize
     "FPS e risoluzione",                              // StatsIndicatorFps

@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
+#include <atomic>
 #include <cstdint>
 #include "app/settings_manager.h"
 #include "input/gyro.h"
@@ -16,6 +17,7 @@ namespace xc::app {
 
 // Legacy global settings state definitions shared across appcore and ui
 std::mutex g_settingsMutex;
+std::atomic<bool> g_installIncomplete{false};
 Settings g_settings;
 std::atomic<uint64_t> g_settingsVersion{1};
 

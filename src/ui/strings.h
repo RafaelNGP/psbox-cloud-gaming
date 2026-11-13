@@ -303,6 +303,7 @@ enum class Str {
     TriggerProfileShooter, // Shooter (Hair Trigger)
     TriggerProfileRacing,  // Racing (ABS)
     StorageNotWritable, // sign-in / notification: storage not writable (%s: path, %d: errno)
+    InstallIncomplete,  // notification at start: the app's own files (fonts, assets) not read (%s: the folder looked in)
     StorageFixHint,     // sign-in: hint to fix folder permissions (%s: path)
     StatsCustomize,     // in-game menu: customize stats indicators
     StatsIndicatorFps,
