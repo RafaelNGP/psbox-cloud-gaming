@@ -9,6 +9,7 @@
 // A thread looks for pads plugged in and unplugged every 1.5 s.
 #include <cstdint>
 #include "input/pad_usb.h"
+#include "input/pad_usb_hid.h"
 #include "util/log.h"
 
 #include <dev/usb/usb_ioctl.h>
@@ -54,6 +55,14 @@ struct Device {
     uint8_t rx[64]{}, tx[64]{};
     bool inPending = false, inDone = false, clearStall = false;
     std::atomic<bool> stop{false}, dead{false}, attached{false}, failed{false};
+    // A generic HID pad read as its own report descriptor says (hidReady); without one, the
+    // usual layout is guessed.
+    GenericHidContext hid{};
+    bool hidReady = false;
+    // The motors asked for (large << 8 | small) by any thread; the pad's own thread sends them.
+    std::atomic<uint32_t> rumble{0};
+    std::atomic<bool> rumbleAsked{false};
+    uint8_t rumbleSequence = 0;
     std::thread thread;
 };
 
@@ -281,6 +290,12 @@ void wakeUp(Device& d) {
         bool c = send(d, ledOn, sizeof ledOn);
         XC_LOGI("usb pad %d: GIP power on %s, init %s, light %s", d.slot, a ? "ok" : "failed", b ? "ok" : "failed",
                 c ? "ok" : "failed");
+    } else if (d.iface.wireless) {
+        // The Xbox 360 receiver: ask whether a pad is connected (a presence message comes back,
+        // and the pad's light is set then, in the read loop).
+        const auto query = xinputWirelessPresenceQuery();
+        bool ok = send(d, query.data(), query.size());
+        XC_LOGI("usb pad %d: Xbox 360 receiver: presence query %s", d.slot, ok ? "sent" : "not sent");
     } else if (d.iface.protocol == UsbPadProtocol::XInput) {
         // The player 1 light, which XInput hosts set as a pad connects: the
         // 8BitDo Ultimate dongle stays silent without it and drops off USB
@@ -289,6 +304,17 @@ void wakeUp(Device& d) {
         bool ok = send(d, led, sizeof led);
         XC_LOGI("usb pad %d: XInput light %s", d.slot, ok ? "sent" : "not sent");
     }
+}
+
+// The motors, when another thread asked: from the pad's own thread, as every transfer is.
+void sendRumble(Device& d, uint8_t large, uint8_t small) {
+    uint8_t packet[32];
+    const size_t n =
+        usbPadRumblePacket(d.iface.protocol, large, small, d.rumbleSequence, packet, sizeof packet, d.iface.wireless);
+    if (!n) return;
+    const bool ok = send(d, packet, n, 40);
+    static std::atomic<int> logged{0};
+    if (logged < 6 && ++logged) XC_LOGI("usb pad %d: motors %u / %u %s", d.slot, large, small, ok ? "sent" : "not sent");
 }
 
 unsigned buttonBits(const ControllerState& s) {
@@ -312,7 +338,7 @@ std::string buttonNames(unsigned bits) {
 void readLoop(Device* d) {
     // The XInput wake-up through the control endpoint some 2.4G dongles
     // want (OmniPad CE's handshake), before the transfers start.
-    if (d->iface.protocol == UsbPadProtocol::XInput) {
+    if (d->iface.protocol == UsbPadProtocol::XInput && !d->iface.wireless) {
         uint8_t buf[32];
         int r1 = controlRequest(d->fd, 0xc1, 0x01, 0x0100, d->iface.number, buf, 20);
         std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -341,9 +367,18 @@ void readLoop(Device* d) {
         // XInput pads show their player on their four lights (01 03 06..09).
         if (const int player = usbPadPlayer(d->slot);
             d->iface.protocol == UsbPadProtocol::XInput && player >= 0 && player != lightPlayer) {
-            const uint8_t led[] = {0x01, 0x03, static_cast<uint8_t>(0x06 + player)};
-            send(*d, led, sizeof led, 40);
+            if (d->iface.wireless) {
+                const auto led = xinputWirelessLedPacket(player);
+                send(*d, led.data(), led.size(), 40);
+            } else {
+                const uint8_t led[] = {0x01, 0x03, static_cast<uint8_t>(0x06 + player)};
+                send(*d, led, sizeof led, 40);
+            }
             lightPlayer = player;
+        }
+        if (d->rumbleAsked.exchange(false)) {
+            const uint32_t v = d->rumble;
+            sendRumble(*d, static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v));
         }
         const int n = receive(*d, buf, 20);
         if (n < 0) {
@@ -358,8 +393,15 @@ void readLoop(Device* d) {
         errors = 0;
         if (d->iface.protocol == UsbPadProtocol::Gip)
             for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) send(*d, ack.data(), ack.size(), 40);
+        // The receiver's pad connected (again): its light is set anew.
+        if (d->iface.wireless && n >= 2 && buf[0] == 0x08) {
+            XC_LOGI("usb pad %d: Xbox 360 receiver: pad %s", d->slot, (buf[1] & 0x80) ? "connected" : "gone");
+            lightPlayer = -1;
+        }
         if (shown < 6) XC_LOGI("usb pad %d: report %d: %d bytes: %s", d->slot, ++shown, n, hex(buf, n).c_str());
-        if (parseUsbPadReport(d->iface.protocol, buf, static_cast<size_t>(n), state)) {
+        const bool parsed = d->hidReady ? parseGenericHidReport(d->hid, buf, static_cast<size_t>(n), state)
+                                        : parseUsbPadReport(d->iface.protocol, buf, static_cast<size_t>(n), state);
+        if (parsed) {
             usbPadState(d->slot, state);
             // The first presses, to check the buttons from the log.
             const unsigned now = buttonBits(state);
@@ -375,6 +417,7 @@ void readLoop(Device* d) {
             XC_LOGD("usb pad %d: other report, %d bytes: %s", d->slot, n, hex(buf, n).c_str());
         }
     }
+    if (d->rumble) sendRumble(*d, 0, 0);  // not left turning
     usb_fs_uninit uninit{};
     ioctl(d->fd, USB_FS_UNINIT, &uninit);
     d->dead = true;
@@ -422,6 +465,8 @@ void probe(const std::string& path, ino_t ino) {
         return;
     }
     UsbPadInterface iface;
+    GenericHidContext hid{};
+    bool hidReady = false;
     uint8_t config[1024] = {};
     size_t configLen = 0;
     // Not the console's radios (class E0, or MediaTek's), not a hub.
@@ -449,6 +494,8 @@ void probe(const std::string& path, ino_t ino) {
                 }
                 if (controlRequest(fd, 0x81, 0x06, 0x2200, iface.number, report, want) == 0) {
                     iface = probeUsbPadPs5(vid, pid, config, configLen, report, want);
+                    if (iface.protocol == UsbPadProtocol::GenericHid)
+                        hidReady = parseHidDescriptor(hid, report, want, vid, pid);
                 } else if (!(vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC))) {
                     // Reject unverified generic HID devices so USB keyboards/mice are never claimed
                     iface = UsbPadInterface{};
@@ -476,6 +523,8 @@ void probe(const std::string& path, ino_t ino) {
     d->vid = vid;
     d->pid = pid;
     d->iface = iface;
+    d->hid = hid;
+    d->hidReady = hidReady;
     d->name = productName(fd, dd.iProduct);
     if (d->name.empty()) d->name = protocolName(iface.protocol) + std::string(" pad");
     d->thread = std::thread(readLoop, d.get());
@@ -530,6 +579,16 @@ void scanLoop() {
 }
 
 }  // namespace
+
+void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    for (const auto& d : g_devices) {
+        if (d->slot != slot) continue;
+        const uint32_t v = static_cast<uint32_t>(large) << 8 | small;
+        if (d->rumble.exchange(v) != v) d->rumbleAsked = true;
+        return;
+    }
+}
 
 void usbPadsStart() {
     if (g_running.exchange(true)) return;

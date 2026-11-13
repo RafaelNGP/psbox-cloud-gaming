@@ -2469,6 +2469,47 @@ static void testH264LossWaitFollowsRtt() {
     CHECK(rx.lossWaitMs() == 90);
 }
 
+// The motors of a USB pad: each kind's own packet, strengths in its own scale.
+static void testUsbPadRumblePacket() {
+    using namespace xc::input;
+    uint8_t out[32], seq = 0;
+    CHECK(usbPadRumblePacket(UsbPadProtocol::XInput, 200, 50, seq, out, sizeof out) == 8);
+    CHECK(out[0] == 0x00 && out[1] == 0x08 && out[3] == 200 && out[4] == 50);
+    CHECK(usbPadRumblePacket(UsbPadProtocol::Gip, 255, 128, seq, out, sizeof out) == 13);
+    CHECK(out[0] == 0x09 && out[2] == 1 && out[3] == 0x09 && out[5] == 0x0F && out[8] == 100 && out[9] == 50);
+    seq = 255;  // GIP never numbers a message 0
+    CHECK(usbPadRumblePacket(UsbPadProtocol::Gip, 0, 0, seq, out, sizeof out) == 13 && out[2] == 1 && out[8] == 0);
+    CHECK(usbPadRumblePacket(UsbPadProtocol::DualShock4, 10, 20, seq, out, sizeof out) == 32);
+    CHECK(out[0] == 0x05 && out[1] == 0x01 && out[4] == 20 && out[5] == 10);
+    CHECK(usbPadRumblePacket(UsbPadProtocol::GenericHid, 10, 20, seq, out, sizeof out) == 0);
+    CHECK(usbPadRumblePacket(UsbPadProtocol::XInput, 1, 1, seq, out, 4) == 0);  // no room: nothing written
+    CHECK(usbPadRumblePacket(UsbPadProtocol::XInput, 200, 50, seq, out, sizeof out, true) == 12);
+    CHECK(out[1] == 0x01 && out[3] == 0xC0 && out[5] == 200 && out[6] == 50);
+    CHECK(xinputWirelessLedPacket(0)[3] == 0x46 && xinputWirelessLedPacket(3)[3] == 0x49);
+
+    // The Xbox 360 wireless receiver's reports (layout of the Linux xpad driver).
+    ControllerState st;
+    const uint8_t connected[] = {0x08, 0x80};
+    CHECK(!parseXInputReport(connected, sizeof connected, st));
+    uint8_t in[29] = {0x00, 0x01, 0x00, 0xF0, 0x00, 0x13, 0x00, 0x10 /* A */, 0xFF /* LT */, 0x00};
+    in[10] = 0x00, in[11] = 0x80;  // left stick fully left
+    CHECK(parseXInputReport(in, sizeof in, st));
+    CHECK(st.btnA && !st.btnB && st.triggerL2 > 0.99f && st.rawLeftX < -0.9f && !st.dpadUp);
+    const uint8_t gone[] = {0x08, 0x00};
+    CHECK(parseXInputReport(gone, sizeof gone, st) && !st.btnA && st.triggerL2 == 0.0f);
+    // A wired report is unchanged: A, nothing else.
+    uint8_t wired[20] = {0x00, 0x14, 0x00, 0x10};
+    ControllerState w;
+    CHECK(parseXInputReport(wired, sizeof wired, w) && w.btnA && !w.dpadUp);
+    // The receiver's descriptor: interface FF/5D/81 is a wireless XInput pad.
+    const uint8_t cfg[] = {9, 2, 32, 0, 1, 1, 0, 0x80, 50,
+                           9, 4, 0, 0, 2, 0xFF, 0x5D, 0x81, 0,
+                           7, 5, 0x81, 3, 32, 0, 1,
+                           7, 5, 0x01, 3, 32, 0, 8};
+    const UsbPadInterface rx = findUsbPadInterface(cfg, sizeof cfg);
+    CHECK(rx.protocol == UsbPadProtocol::XInput && rx.wireless && rx.epIn == 0x81 && rx.epOut == 0x01);
+}
+
 // Hidden games, favourites and play time follow the Xbox account signed in: lists from before
 // they had an owner go to the first account, a second account starts empty, each finds its
 // own again, and all of it survives the settings file.
@@ -11622,6 +11663,7 @@ int main() {
     testH264LossWaitFollowsRtt();
     testH264Resync();
     testAccountLists();
+    testUsbPadRumblePacket();
     testH264PaddingPacket();
     testAudioDecoderEmptyPacket();
     testAudioDecoderPlc();

@@ -59,6 +59,9 @@ struct UsbPadInterface {
     UsbPadProtocol protocol = UsbPadProtocol::None;
     uint8_t number = 0;
     uint8_t epIn = 0, epOut = 0;  // endpoint addresses (epIn has bit 7); 0: none
+    // The Xbox 360 wireless receiver (XInput protocol 0x81): its reports carry a 4-byte header
+    // and presence messages, its lights and motors take 12-byte packets of their own.
+    bool wireless = false;
 };
 UsbPadInterface findUsbPadInterface(const uint8_t* configDesc, size_t len,
                                     const uint8_t* reportDesc = nullptr, size_t reportLen = 0);
@@ -84,6 +87,9 @@ std::vector<std::array<uint8_t, 13>> gipAcksFor(const uint8_t* data, size_t len)
 // report that carries only some of the buttons (GIP's Xbox button) leaves
 // the rest as they were. False for a report that is not input (LED,
 // rumble and status reports, GIP's announce / keep-alive...).
+// XInput takes both the wired report (00 14 ...) and the wireless receiver's: its presence
+// message (08 80: a pad connected; 08 00: gone, every button let go) and its input (00 01 00 F0
+// then the wired report).
 bool parseXInputReport(const uint8_t* data, size_t len, ControllerState& state);
 bool parseGipReport(const uint8_t* data, size_t len, ControllerState& state);
 bool parseDualShock3Report(const uint8_t* data, size_t len, ControllerState& state);
@@ -138,6 +144,15 @@ uint64_t usbPadActiveAt(int player);
 
 void setUsbPadsEnabled(bool enabled);
 bool usbPadsEnabled();
+// The packet that sets a pad's two motors (0..255 each), for its interrupt OUT endpoint: its
+// length, 0 when that kind of pad has none known. `sequence` is the pad's own counter (GIP
+// numbers its messages).
+size_t usbPadRumblePacket(UsbPadProtocol protocol, uint8_t large, uint8_t small, uint8_t& sequence, uint8_t* out,
+                          size_t capacity, bool wireless = false);
+// The Xbox 360 wireless receiver's packets (12 bytes): the pad's lights showing `player`
+// (0..3), and the question "is a pad connected?" (it answers with a presence message).
+std::array<uint8_t, 12> xinputWirelessLedPacket(int player);
+std::array<uint8_t, 12> xinputWirelessPresenceQuery();
 void setUsbPadRumble(int player, uint8_t large, uint8_t small);
 void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small);
 
