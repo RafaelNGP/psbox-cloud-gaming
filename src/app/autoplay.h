@@ -75,6 +75,8 @@ struct Autoplay {
     bool imgTest = false;        // imgtest: 25 s before the end, one picture drawn with each look (img_*.ppm)
     int64_t cloudLeft = -1;      // cloudleft=N: a stream counts down from N seconds left (the menu, the notices)
     int abCycleSec = 0;          // abcycle=N: A/B conditions in one stream, the next every N s (worker_stream.cpp)
+    int abImageSec = 0;          // abimage=N: the picture's colour and overlay as now / as before, swapped every N s,
+                                 // each span a BENCH window, the stats HUD off (worker_stream.cpp)
     bool cloudTimeTest = false;  // cloudtimetest: the cloud time line (4 h 10 of 15 h, 1 h 30, none, unlimited), the game menu with it, the time-up error
     bool cpuDisplay = false;     // the CPU display even where the GPU comes up
     int upscaler = -1;           // ai: Anime4K instead of the setting

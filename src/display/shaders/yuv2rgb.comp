@@ -22,6 +22,7 @@ layout(push_constant) uniform Constants {
     float grain;      // luma noise amplitude
     uint frame;       // moves the random pattern each frame
     uint quant8;      // measurements: rounded to 8 bits here, as before the 16-bit images
+    uint chromaGuide; // colour taken from the neighbours whose brightness is like this pixel's
 } pc;
 
 vec2 lumaSize, chromaSize;
@@ -33,6 +34,33 @@ vec3 yuvAt(vec2 q) {
     // 2j and 2j + 1: in chroma texels, luma (x, y) is at (x / 2, y / 2 - 0.25).
     vec2 c = (vec2(q.x * 0.5, q.y * 0.5 - 0.25) + 0.5) / chromaSize;
     return vec3(y, texture(chromaUTex, c).r, texture(chromaVTex, c).r);
+}
+
+// The colour of a pixel whose brightness is `y`, from the four colour samples around it.
+// The picture has one colour sample for every four pixels. Spread evenly (as yuvAt does),
+// a colour edge comes out twice as wide as the brightness edge it belongs to: a fringe
+// around text and outlines. Here each of the four samples also weighs by how close the
+// brightness at its own place is to this pixel's, so a pixel on the bright side of an edge
+// takes the colour of the samples on the bright side. Where the brightness is even it is
+// the same even spread; the result is always between the four samples (no new colours).
+vec2 guidedChroma(vec2 q, float y) {
+    vec2 c = vec2(q.x * 0.5, q.y * 0.5 - 0.25);
+    vec2 base = floor(c), f = c - base;
+    ivec2 last = ivec2(chromaSize) - 1;
+    vec2 sum = vec2(0.0);
+    float weights = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        ivec2 ci = clamp(ivec2(base) + o, ivec2(0), last);
+        // The brightness where this colour sample sits: luma column 2i, between rows 2j and 2j + 1.
+        float yc = texture(lumaTex, (vec2(2.0 * float(ci.x), 2.0 * float(ci.y) + 0.5) + 0.5) / lumaSize).r;
+        float spread = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        float d = y - yc;
+        float w = spread / (d * d + 0.002);
+        sum += w * vec2(texelFetch(chromaUTex, ci, 0).r, texelFetch(chromaVTex, ci, 0).r);
+        weights += w;
+    }
+    return sum / weights;
 }
 
 float hash(vec2 p) {
@@ -49,6 +77,7 @@ void main() {
     chromaSize = vec2(textureSize(chromaUTex, 0));
     vec2 q = vec2(p);
     vec3 yuv = yuvAt(q);
+    if (pc.chromaGuide != 0u) yuv.yz = guidedChroma(q, yuv.x);
     if (pc.iterations > 0u) {
         vec2 seed = q + float(pc.frame % 64u) * vec2(17.0, 31.0);
         for (uint i = 1u; i <= pc.iterations; ++i) {

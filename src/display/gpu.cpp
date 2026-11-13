@@ -175,6 +175,8 @@ std::atomic<int> g_sharpness{0};
 std::atomic<int> g_deband{1};
 std::atomic<int> g_upscaler{0};  // 0 FSR (EASU), 1 Anime4K
 std::atomic<bool> g_restore{false};  // Anime4K Restore before the upscale
+std::atomic<bool> g_chromaGuide{true};
+std::atomic<bool> g_overlayRefreshAlways{false};  // measurements: the hidden overlay cleared and sent again, as before  // colour edges follow the brightness edges (guidedChroma in the shaders)
 std::atomic<bool> g_legacy8{false};  // measurements: rounded to 8 bits between the passes, no dither
 // The picture between the passes: 16-bit float, rounded to the swapchain's 8
 // bits once, at the end (rcas.comp), with a dither.
@@ -746,8 +748,8 @@ bool createPipelines() {
     const VkDescriptorSetLayoutBinding nv12[] = {binding(0, sampled), binding(1, sampled), binding(2, storage)};
     const VkDescriptorSetLayoutBinding easu[] = {binding(0, sampled), binding(1, storage)};
     const VkDescriptorSetLayoutBinding rcas[] = {binding(0, storage), binding(1, sampled), binding(2, storage)};
-    if (!createPipeline(g.yuv, kShader_yuv2rgb, sizeof kShader_yuv2rgb, yuv, 4, 24) ||
-        !createPipeline(g.nv12, kShader_nv122rgb, sizeof kShader_nv122rgb, nv12, 3, 24) ||
+    if (!createPipeline(g.yuv, kShader_yuv2rgb, sizeof kShader_yuv2rgb, yuv, 4, 28) ||
+        !createPipeline(g.nv12, kShader_nv122rgb, sizeof kShader_nv122rgb, nv12, 3, 28) ||
         !createPipeline(g.easu, kShader_easu, sizeof kShader_easu, easu, 2, 68) ||
         !createPipeline(g.rcas, kShader_rcas, sizeof kShader_rcas, rcas, 3, 32)) {
         XC_LOGE("gpu: the FSR pipelines");
@@ -1249,9 +1251,9 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
     struct {
         uint32_t iterations;
         float threshold, radius, grain;
-        uint32_t frame, quant8;
+        uint32_t frame, quant8, chromaGuide;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            0.0f, ++g_frame, g_legacy8 ? 1u : 0u};
+            0.0f, ++g_frame, g_legacy8 ? 1u : 0u, g_chromaGuide ? 1u : 0u};
     vkCmdPushConstants(g.cmd, g.yuv.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
@@ -1292,9 +1294,9 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
     struct {
         uint32_t iterations;
         float threshold, radius, grain;
-        uint32_t frame, quant8;
+        uint32_t frame, quant8, chromaGuide;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
-            0.0f, ++g_frame, g_legacy8 ? 1u : 0u};
+            0.0f, ++g_frame, g_legacy8 ? 1u : 0u, g_chromaGuide ? 1u : 0u};
     vkCmdPushConstants(g.cmd, g.nv12.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
@@ -1357,8 +1359,13 @@ void present() {
 
 void setOverlay(const uint32_t* pixels, int x, int y, int w, int h, uint8_t opacity) {
     std::lock_guard<std::mutex> lock(g_overlayMutex);
+    const bool show = pixels && w > 0 && h > 0;
+    // Nothing shown and nothing to show: the pixels are already clear. The stream's screen
+    // says "no overlay" again every second, and each time 8 MB were cleared here and 8 MB
+    // more copied to the GPU by the video thread on its next picture.
+    if (!show && !g_overlayShown && !g_overlayRefreshAlways) return;
     std::fill(g_overlayPixels.begin(), g_overlayPixels.end(), 0u);
-    g_overlayShown = pixels && w > 0 && h > 0;
+    g_overlayShown = show;
     if (g_overlayShown) {
         // Alpha carries the opacity (times the pixel's own): RCAS mixes by it.
         for (int row = 0; row < h; ++row) {
@@ -1385,6 +1392,8 @@ void setUpscaler(int mode) { g_upscaler = std::clamp(mode, 0, 1); }
 void setRestore(bool on) { g_restore = on; }
 
 void setLegacyPrecision(bool on) { g_legacy8 = on; }
+void setChromaGuide(bool on) { g_chromaGuide = on; }
+void setOverlayRefreshAlways(bool on) { g_overlayRefreshAlways = on; }
 
 void setPresentWait(bool on) { g_noPresentWait = !on; }
 

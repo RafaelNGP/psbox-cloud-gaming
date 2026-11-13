@@ -148,6 +148,7 @@ void loadAutoplay() {
         if (opt == "cloudtimetest") g_autoplay.cloudTimeTest = true;
         if (opt.rfind("cloudleft=", 0) == 0) g_autoplay.cloudLeft = std::atoll(opt.c_str() + 10);
         if (opt.rfind("abcycle=", 0) == 0) g_autoplay.abCycleSec = std::atoi(opt.c_str() + 8);
+        if (opt.rfind("abimage=", 0) == 0) g_autoplay.abImageSec = std::atoi(opt.c_str() + 8);
         // Threads pinned by role (platform.h), to measure it again.
         if (opt == "pin") platform::setNoThreadPinning(false);
         if (opt == "handheld") platform::forceHandheld(true);  // the handheld profile on this machine (A/B)

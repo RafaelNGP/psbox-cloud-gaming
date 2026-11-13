@@ -284,6 +284,10 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     int abIndex = -1;
     bool abHardware = true;
     uint64_t abNext = started + 20000;
+    // abimage: the colour samples following the brightness and the overlay left alone while
+    // hidden ("image-new") against both as before ("image-old"), in turns.
+    uint64_t abImageNext = started + 15000;
+    bool abImageNew = false;
     while (player.running() && !g_cancel) {
         beat("loop");
         uint64_t elapsed = platform::nowMs() - started;
@@ -296,6 +300,13 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
             abHardware = c.hardware;
             abNext = started + elapsed + static_cast<uint64_t>(g_autoplay.abCycleSec) * 1000u;
             XC_LOGI("AUTOPLAY AB: condition %s", c.name);
+        }
+        if (g_autoplay.abImageSec > 0 && started + elapsed >= abImageNext) {
+            abImageNew = !abImageNew;
+            display::setChromaGuide(abImageNew);
+            display::setOverlayRefreshAlways(!abImageNew);
+            player.markBenchWindow(abImageNew ? "image-new" : "image-old");
+            abImageNext = started + elapsed + static_cast<uint64_t>(g_autoplay.abImageSec) * 1000u;
         }
         beat("the cloud time");
         cloudTimeStep(started + elapsed);

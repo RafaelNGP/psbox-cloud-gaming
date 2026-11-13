@@ -119,7 +119,7 @@ void StreamScreen::syncFromSettings() {
     touchpadMouse_ = prof.touchpadMouse;
 
     streamResolution_ = prof.resolution;
-    showStats_ = g_settings.streamStats;
+    showStats_ = g_settings.streamStats && g_autoplay.abImageSec <= 0;  // abimage measures with nothing over the picture
     menu_.setStatsOn(showStats_);
     menu_.setStatsMask(g_settings.statsMask);
     sharpness_ = g_autoplay.sharpness >= 0 ? g_autoplay.sharpness : prof.sharpness;
