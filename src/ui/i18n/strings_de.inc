@@ -294,6 +294,7 @@ constexpr Column kGerman = {
     "Shooter (Hair Trigger)", // TriggerProfileShooter
     "Rennen (ABS)", // TriggerProfileRacing
     "Speicher %s ist schreibgeschützt: Anmeldung und Einstellungen werden nicht gespeichert", // StorageNotWritable
+    "Einige Dateien der App konnten nicht gelesen werden (%s). Sie funktioniert, aber installiere sie zur Sicherheit neu", // InstallIncomplete
     "FTP: 'chmod 777 %s' ausführen oder Ordner löschen und neu starten", // StorageFixHint
     "Indikatoren anpassen",                           // StatsCustomize
     "FPS und Auflösung",                              // StatsIndicatorFps

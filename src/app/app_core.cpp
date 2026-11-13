@@ -342,6 +342,7 @@ bool coreStartup() {
     g_core = std::make_unique<Core>(haveDisplay);
     ui::Fonts& fonts = g_core->fonts;
     if (!fonts.load(platform::assetDir() + "/fonts")) XC_LOGE("fonts missing in %s", platform::assetDir().c_str());
+    if (fonts.usedBuiltin) g_installIncomplete = true;
     {
         // The console's icon font (keyboard and mouse...): read where the
         // system keeps it, not shipped with the app.

@@ -294,6 +294,7 @@ constexpr Column kEnglish = {
     "Shooter (Hair Trigger)", // TriggerProfileShooter
     "Racing (ABS)", // TriggerProfileRacing
     "Storage %s is not writable: sign-in and settings will not be saved", // StorageNotWritable
+    "Some of the app's files could not be read (%s). It still works, but install it again to be safe", // InstallIncomplete
     "FTP: run 'chmod 777 %s' or delete the folder and relaunch", // StorageFixHint
     "Customize indicators",                           // StatsCustomize
     "FPS & Resolution",                               // StatsIndicatorFps

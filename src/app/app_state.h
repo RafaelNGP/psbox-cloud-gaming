@@ -26,6 +26,9 @@ extern std::unique_ptr<ui::AppUi> g_ui;
 
 // User settings (settings.json); read by the worker, changed by the UI thread.
 extern std::mutex g_settingsMutex;
+// The app started on the copies inside the binary because its own files (the fonts in the assets
+// folder) could not be read: said once on the screen after start, not only in the log.
+extern std::atomic<bool> g_installIncomplete;
 extern Settings g_settings;
 extern std::atomic<uint64_t> g_settingsVersion;
 std::string settingsPath();

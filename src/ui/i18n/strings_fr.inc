@@ -294,6 +294,7 @@ constexpr Column kFrench = {
     "Tir (Hair Trigger)", // TriggerProfileShooter
     "Course (ABS)", // TriggerProfileRacing
     "Le stockage %s n'est pas accessible en écriture : connexion et réglages non enregistrés", // StorageNotWritable
+    "Certains fichiers de l'app n'ont pas pu être lus (%s). Elle fonctionne, mais réinstallez-la par sécurité", // InstallIncomplete
     "FTP : faites 'chmod 777 %s' ou supprimez le dossier et relancez", // StorageFixHint
     "Personnaliser les indicateurs",                  // StatsCustomize
     "IPS et résolution",                              // StatsIndicatorFps

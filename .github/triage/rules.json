@@ -180,6 +180,26 @@
       ]
     },
     {
+      "id": "install-incomplete",
+      "label": "area: install",
+      "patterns": [
+        "fonts: .* not usable",
+        "fonts missing",
+        "a font is missing",
+        "assets: not found",
+        "screen (has|with|shows) no text",
+        "no text (on|in) the (screen|app|menus?)",
+        "sem (texto|letras) na tela",
+        "tela sem (texto|letras)",
+        "(texto|letras) n[aã]o aparece",
+        "sin (texto|letras) en la pantalla"
+      ],
+      "fixed_in": "1.7.1",
+      "reply": "**The app's own files could not be read** (`fonts: … not usable` / `assets: not found` in the log, or a screen with boxes and no text): the app was started from a folder it could not reach, or the copy is incomplete. Since v1.7.1 the fonts are inside the app, so the text always shows, and a notice says so at start. Please update to the latest release; if the notice still appears, delete the app's folder, copy the whole `PPSA99810` folder from the release zip again (not only `eboot.bin`) and tell us the folder you installed it to (for example `/data/homebrew/PPSA99810` or a USB drive).",
+      "reply_pt": "**Os arquivos do próprio app não puderam ser lidos** (`fonts: … not usable` / `assets: not found` no log, ou tela com caixas e sem texto): o app foi iniciado de uma pasta que ele não alcança, ou a cópia está incompleta. Desde a v1.7.1 as fontes ficam dentro do app, então o texto sempre aparece, e um aviso informa isso ao iniciar. Atualize para a versão mais recente; se o aviso continuar, apague a pasta do app, copie de novo a pasta `PPSA99810` inteira do zip da release (não só o `eboot.bin`) e diga em que pasta você instalou (por exemplo `/data/homebrew/PPSA99810` ou um drive USB).",
+      "reply_es": "**No se pudieron leer los archivos de la propia app** (`fonts: … not usable` / `assets: not found` en el registro, o pantalla con cajas y sin texto): la app se inició desde una carpeta a la que no llega, o la copia está incompleta. Desde la v1.7.1 las fuentes están dentro de la app, así que el texto siempre aparece, y un aviso lo indica al iniciar. Actualiza a la última versión; si el aviso sigue, borra la carpeta de la app, copia de nuevo la carpeta `PPSA99810` completa del zip de la release (no solo `eboot.bin`) y dinos en qué carpeta la instalaste (por ejemplo `/data/homebrew/PPSA99810` o una unidad USB)."
+    },
+    {
       "id": "crash",
       "label": "crash",
       "patterns": [
