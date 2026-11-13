@@ -438,7 +438,6 @@ constexpr Column kEnglish = {
     "of %s", // CloudTimeOf
     "Unlimited cloud time", // CloudTimeUnlimited
     "Sessions of %s min (free with ads)", // CloudTimeFreeTier
-    "NOT SOLD ALONE", // NotSoldAloneBadge
     "%s of your Xbox cloud gaming time left this month", // CloudTimeWarn
     "Sync Trophies",                                  // SyncTrophies
     "Synchronizes all Xbox achievements from your account and awards matching trophies to your PlayStation profile.", // SettingDescSyncTrophies
