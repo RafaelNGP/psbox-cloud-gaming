@@ -122,6 +122,8 @@ constexpr Column kPortugueseBR = {
     "Escaneie para pegar grátis",
     "%s ainda não está na sua conta. É grátis: abra a página do jogo, escolha Obter e tente de novo (pode levar um minuto).",
     "Sua conta não pode jogar %s: não está na sua assinatura ou não foi comprado.",
+    "O Xbox só transmite %s em um console Xbox ou em uma TV Samsung.",
+    "O Xbox só transmite %s em: %s.",
     "Meus consoles",
     "Ligado",
     "Em espera",

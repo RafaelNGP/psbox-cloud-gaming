@@ -122,6 +122,8 @@ constexpr Column kGerman = {
     "Scannen, um es kostenlos zu holen",
     "%s ist noch nicht in deinem Konto. Es ist kostenlos: seine Seite öffnen, Abrufen wählen und erneut versuchen (kann eine Minute dauern).",
     "Dein Konto kann %s nicht spielen: nicht in deinem Abo oder nicht gekauft.",
+    "Xbox streamt %s nur auf einer Xbox-Konsole oder einem Samsung-TV.",
+    "Xbox streamt %s nur auf: %s.",
     "Meine Konsolen",
     "An",
     "Im Standby",

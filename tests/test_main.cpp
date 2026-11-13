@@ -909,6 +909,13 @@ static void testPlaytimeLimit() {
     CHECK(!auth::parseContentAccessPlaytime(std::string("\x0a\x05\x01", 3), t));  // length past the end
 }
 
+// A title refused for the device kind: recognised, and the Samsung TV identity is a well-formed TV.
+static void testDeviceTypeFallbacks() {
+    CHECK(xcloud::isDeviceTypeRefusal("session start failed: HTTP 400: code=DeviceTypeNotAllowed, message=User is not allowed to play title X."));
+    CHECK(!xcloud::isDeviceTypeRefusal("session start failed: HTTP 400: code=NoEntitlement, message=User is not allowed to play"));
+    CHECK(xcloud::isDeviceTypeRefusal("code=DeviceTypeNotAllowed Auth Status Code: DeviceTypeNotAllowed"));
+}
+
 // A page of the title list that fails for a moment is asked again with the same token; a list that
 // keeps failing leaves the library marked incomplete (the cache stays, another try is scheduled).
 static void testTitleListRetriesAndIncompleteLibrary() {
@@ -11543,6 +11550,7 @@ int main() {
     testPlayerSwitchAndUnresolvedTiles();
     testWebReportAndGamepadLayout();
     testCodSearchRomanAndSettingsReset();
+    testDeviceTypeFallbacks();
     testTitleListRetriesAndIncompleteLibrary();
     testFontsFallBackToBuiltin();
     testFreeAccountPlayability();

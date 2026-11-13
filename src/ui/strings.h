@@ -131,6 +131,8 @@ enum class Str {
     ScanToGet,
     NoEntitlementFree,  // "%s" = the game
     NoEntitlement,      // "%s" = the game
+    DeviceTypeRestricted, // "%s" = the game: Xbox limits it, kinds not known here
+    DeviceTypeRestrictedOn, // "%s" game, "%s" = the device kinds it is limited to
     TabConsoles,        // the third tab: the user's own Xbox consoles
     ConsoleOn,
     ConsoleSleeping,

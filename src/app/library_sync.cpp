@@ -47,6 +47,7 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
             if (t.mouseKeyboard) {
                 mouseKeyboard_.insert(t.productId);
             }
+            if (!t.allowedDeviceTypes.empty()) allowedDevices_[t.productId] = t.allowedDeviceTypes;
         }
     }
 
@@ -329,6 +330,7 @@ bool Library::load(xcloud::GssvClient& gssv, const std::string& language, const 
             // Its inputs come with it: the first cards show keyboard and
             // mouse without waiting for the whole list (or a cache that has it).
             if (t.mouseKeyboard) mouseKeyboard_.insert(t.productId);
+            if (!t.allowedDeviceTypes.empty()) allowedDevices_[t.productId] = t.allowedDeviceTypes;
             r.items.emplace_back(t.productId, t.titleId);
             if (!products_.count(t.productId)) ids.push_back(t.productId);
         }
@@ -525,6 +527,11 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
         registerCloudTitle(t.productId, t.titleId, t.xboxTitleId, t.isFreeInStore, t.mouseKeyboard);
         for (const auto& alt : t.alternateProductIds) {
             registerCloudTitle(alt, t.titleId, t.xboxTitleId, t.isFreeInStore, t.mouseKeyboard);
+        }
+        if (!t.allowedDeviceTypes.empty()) {
+            if (!t.productId.empty()) allowedDevices_[t.productId] = t.allowedDeviceTypes;
+            for (const auto& alt : t.alternateProductIds)
+                if (!alt.empty()) allowedDevices_[alt] = t.allowedDeviceTypes;
         }
 
         if (entitled) {

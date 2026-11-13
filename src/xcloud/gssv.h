@@ -51,6 +51,9 @@ struct Title {
     // The cloud streams it with native mouse and keyboard (its
     // supportedInputTypes has "MKB").
     bool mouseKeyboard = false;
+    // The device kinds Xbox licenses the title for (details.allowedDeviceTypes: XBOXONE, SCARLETT,
+    // SAMSUNGTV...). Empty = no restriction. A restricted title refuses a session from other kinds.
+    std::vector<std::string> allowedDeviceTypes;
 };
 
 // One of the user's own consoles (xhome offering), from /v6/servers/home.
@@ -83,6 +86,12 @@ struct IceCandidate {
 // P1080HQ: 1080p as a Samsung TV (Tizen) asks for it, which the service
 // streams at a higher bitrate (Better xCloud's "1080p (HQ)").
 enum class Resolution { P1080, P720, P1440, P1080HQ };
+
+// Some titles are licensed only for certain device kinds (allowedDeviceTypes without a PC/phone,
+// e.g. Killer Instinct 2 Classic): the play session is then refused with DeviceTypeNotAllowed. The
+// kind is set by the authenticated client (a real console or Samsung TV app), not by what we send,
+// so it can't be lifted from here; this only recognises the refusal, to explain it.
+bool isDeviceTypeRefusal(const std::string& sessionError);
 
 // "Sign in as another country": xCloud is offered by country, which the
 // login (/v2/login/user) decides from where the request comes from. With one
