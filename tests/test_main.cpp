@@ -2569,45 +2569,54 @@ static void testUsbInstruments() {
     CHECK(instrumentForGame(UsbPadKind::Guitar, in, st, false).triggerR2 == 1.0f);
     in.btnTouchpad = false;
 
-    // With strum: nothing until the bar moves, then held as long as the frets are.
+    // With strum: the frets reach the menus at once (A B Y X); the lanes (LT LB RB RT R3) only
+    // once the bar moves, then held as long as the frets are.
+    auto lane = [](const ControllerState& g, int i) {
+        return i == 0 ? g.triggerL2 > 0.5f : i == 1 ? g.btnL1 : i == 2 ? g.btnR1 : i == 3 ? g.triggerR2 > 0.5f : g.btnR3;
+    };
     InstrumentState ss;
     in.btnA = true, in.btnY = false;
     out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(!out.btnA);
+    CHECK(out.btnA && !lane(out, 0));  // green: A for the menus, its lane silent
     in.dpadDown = true;  // strum
     out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(out.btnA && out.dpadDown);
+    CHECK(lane(out, 0) && out.dpadDown && out.btnA);
     in.dpadDown = false;  // the bar back, green still held: the note goes on (a sustain)
-    CHECK(instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
-    in.btnY = true;  // yellow pressed later, no strum: not played
+    CHECK(lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
+    in.btnY = true;  // yellow pressed later, no strum: not played (Y for the menus)
     out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(out.btnA && !out.btnY);
+    CHECK(lane(out, 0) && !lane(out, 2) && out.btnY);
     in.btnA = false;  // green let go: off, and not back until strummed again
-    CHECK(!instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
+    CHECK(!lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
     in.btnA = true;
-    CHECK(!instrumentForGame(UsbPadKind::Guitar, in, ss, true).btnA);
+    CHECK(!lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
     in.dpadUp = true;
     out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(out.btnA && out.btnY);
+    CHECK(lane(out, 0) && lane(out, 2) && !out.btnL3);
+    in.btnTouchpad = true;  // star power: L3 with strum
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    CHECK(out.btnL3 && lane(out, 3) == false);
+    in.btnTouchpad = false;
+    in.dpadUp = false;
 
     // Held frets strummed again: let go for a moment, then down again (a new note each strum).
     {
         InstrumentState rs;
         ControllerState g;
         g.btnA = true, g.dpadDown = true;
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1000).btnA);
+        CHECK(lane(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1000), 0));
         g.dpadDown = false;
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1050).btnA);
+        CHECK(lane(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1050), 0));
         g.dpadUp = true;  // the bar again, green still held
         ControllerState again = instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1100);
-        CHECK(!again.btnA);
+        CHECK(!lane(again, 0) && again.btnA);
         ControllerState later = again;
-        later.btnA = true;
+        later.triggerL2 = 1.0f;
         applyStrumGaps(later, rs, 1100 + kStrumGapMs - 1);
-        CHECK(!later.btnA);
-        later.btnA = true;
+        CHECK(!lane(later, 0));
+        later.triggerL2 = 1.0f;
         applyStrumGaps(later, rs, 1100 + kStrumGapMs);
-        CHECK(later.btnA);
+        CHECK(lane(later, 0));
     }
     // Star power by raising the guitar: past the reading set, off again a little before it.
     {

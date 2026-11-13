@@ -561,6 +561,11 @@ enum class Str {
     MenuDescPlayer,
     MenuDescStrum,
     MenuDescTilt,
+    GuitarBindTitle,     // game menu, guitar tab: where to bind the lanes in Fortnite
+    GuitarBindLane,
+    GuitarBindOverdrive,
+    GuitarBindStrumOn,
+    GuitarBindStrumOff,
     MenuDescPadSpeakerVolume,
     GyroSteering,
     GyroSteeringDrive,

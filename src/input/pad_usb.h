@@ -172,11 +172,15 @@ UsbPadKind usbPadKindForSubtype(int subtype);  // -1 (not known): a gamepad
 const char* usbPadKindName(UsbPadKind kind);
 
 // Instruments in a game. The cloud only takes gamepads, so an instrument is passed on as one:
-//   guitar: the frets as they come (green A, red B, yellow Y, blue X, orange LB), the strum bar
-//           as the D-pad, Start and the Xbox button as they are, Back (star power) as RT, and
-//           nothing on the sticks (the whammy bar rests at full left and the tilt sensor moves
-//           all the time: they turned the camera). With `strum`, a fret reaches the game only
-//           once the bar is strummed while it is held, and stays down while it is held.
+//   guitar: the strum bar as the D-pad, Start and the Xbox button as they are, nothing on the
+//           sticks (the whammy bar rests at full left and the tilt sensor moves all the time:
+//           they turned the camera), and
+//           - without `strum`: the frets as they come (green A, red B, yellow Y, blue X, orange
+//             LB), star power (Back, or the guitar raised) as RT;
+//           - with `strum`: the frets as A B Y X at once, for the menus, and the five lanes on
+//             buttons of their own (kStrumLanes: LT LB RB RT R3) only once the bar is strummed
+//             while the fret is held, held while it is; star power as L3. In Fortnite Festival the
+//             lanes are bound to those, so the menus never wait for a strum.
 //   drums:  the buttons as they come, nothing on the sticks (the pads' strengths).
 // `prevStrum` / `armed` carry the strum state between reports.
 struct InstrumentState {
@@ -186,7 +190,15 @@ struct InstrumentState {
     // sees a new note: held frets can be strummed again and again.
     uint64_t gapUntil[5] = {};
     bool tiltUp = false;  // star power by raising the guitar, with some hysteresis
+    bool strumLayout = false;  // the last state was made with `strum` (the lanes on their own buttons)
 };
+// What to bind in the game, lane by lane (green .. orange) and then star power, for each layout.
+struct GuitarBinding {
+    const char* lanes[5];
+    const char* starPower;
+};
+constexpr GuitarBinding kFretLanes{{"A", "B", "Y", "X", "LB"}, "RT"};
+constexpr GuitarBinding kStrumLanes{{"LT", "LB", "RB", "RT", "R3"}, "L3"};
 constexpr uint64_t kStrumGapMs = 30;
 // `nowMs`: when the report came. The guitar's tilt (right stick Y, as read) past `tiltAt` (with
 // `tiltOn`) is star power too.

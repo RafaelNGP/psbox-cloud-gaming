@@ -552,6 +552,11 @@ constexpr Column kGerman = {
     "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
     "Gitarre: Ein Bund erreicht das Spiel nur, wenn du ihn hältst und anschlägst (wie in Guitar Hero). Aus: Die Bünde allein spielen.", // MenuDescStrum
     "Die Gitarre anheben (Hals nach oben) löst Star Power aus (Overdrive, RT), wie die Back-Taste.", // MenuDescTilt
+    "In Fortnite festlegen: Einstellungen > Controller > Fortnite Festival", // GuitarBindTitle
+    "Spur", // GuitarBindLane
+    "Overdrive", // GuitarBindOverdrive
+    "Anschlag an: Die Bünde bedienen auch die Menüs (A B Y X).", // GuitarBindStrumOn
+    "Anschlag aus: Ein Bund spielt beim Drücken.", // GuitarBindStrumOff
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
     "Lenkrad (Linker Stick)",                          // GyroSteering
     "Lenkrad (Gas R2)",                                // GyroSteeringDrive
