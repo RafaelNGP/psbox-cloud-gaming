@@ -34,6 +34,28 @@ constexpr uint8_t kStartCode[] = {0, 0, 0, 1};
 // NAL types that begin a decodable access unit after loss.
 bool isKeyNal(uint8_t type) { return type == 5 || type == 7; }
 
+// Whether an RTP payload is the first of an access unit a decoder can start at, told from the
+// payload alone: parameter sets or an access unit delimiter come first in a frame, and so does
+// the key slice whose first macroblock is 0 (first_mb_in_slice, ue(v): one set bit). A key
+// slice by itself is taken only once the parameter sets it needs have been through.
+bool startsKeyAccessUnit(const uint8_t* p, size_t n, bool paramSetsSeen) {
+    if (n < 2) return false;
+    const uint8_t type = p[0] & 0x1F;
+    auto firstNal = [&](uint8_t t, const uint8_t* body, size_t bodyLen) {
+        if (t == 7 || t == 9) return true;
+        return t == 5 && paramSetsSeen && bodyLen >= 1 && (body[0] & 0x80) != 0;
+    };
+    if (type >= 1 && type <= 23) return firstNal(type, p + 1, n - 1);
+    if (type == 24) {  // STAP-A: its first unit
+        if (n < 4) return false;
+        const size_t len = (static_cast<size_t>(p[1]) << 8) | p[2];
+        if (len == 0 || 3 + len > n) return false;
+        return firstNal(p[3] & 0x1F, p + 4, len - 1);
+    }
+    if (type == 28 && n > 2 && (p[1] & 0x80)) return firstNal(p[1] & 0x1F, p + 2, n - 2);  // FU-A, its start
+    return false;
+}
+
 void put16(std::vector<uint8_t>& b, uint16_t v) {
     b.push_back(static_cast<uint8_t>(v >> 8));
     b.push_back(static_cast<uint8_t>(v));
@@ -217,14 +239,21 @@ bool H264Receiver::assemble(int64_t first, int64_t last, std::vector<uint8_t>& o
 
 bool H264Receiver::resync(rtc::message_vector& out) {
     // Find a frame boundary (the packet before is present and is a marker, or
-    // carries another timestamp) followed by a complete key frame.
+    // carries another timestamp; or it is missing and this packet shows by itself
+    // that it begins a key frame) followed by a complete key frame. Without the
+    // second case a key frame right after a packet lost for good, and the first
+    // one of a session (nothing came before it), could never be resumed at: the
+    // picture stayed frozen until another key frame was asked for and sent.
     int64_t startSeq = std::max<int64_t>(0, highest_ - static_cast<int64_t>(kRingSize - 1));
     for (int64_t s = startSeq; s <= highest_; ++s) {
         const auto* cur = getPacket(s);
         if (!cur) continue;
         const auto* prev = getPacket(s - 1);
-        if (!prev) continue;
-        if (!prev->marker && prev->timestamp == cur->timestamp) continue;
+        if (!prev) {
+            if (!startsKeyAccessUnit(cur->payload, cur->length, paramSetsSeen_)) continue;
+        } else if (!prev->marker && prev->timestamp == cur->timestamp) {
+            continue;
+        }
 
         // Walk to the marker of this frame.
         int64_t end = s;
@@ -305,7 +334,7 @@ void H264Receiver::drain(uint64_t now, rtc::message_vector& out, const rtc::mess
             ++stats_.framesDropped;  // would decode against lost references
             continue;
         }
-        if (key) waitingKeyframe_ = false;
+        if (key) waitingKeyframe_ = false, paramSetsSeen_ = true;
         ++stats_.framesOut;
         if (lastFrameMs_) {
             const int64_t late = static_cast<int64_t>(now - lastFrameMs_) - static_cast<int32_t>(ts - lastFrameTs_) / 90;

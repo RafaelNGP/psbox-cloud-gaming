@@ -112,6 +112,7 @@ private:
     uint32_t lastFrameTs_ = 0;
     int64_t nextSeq_ = -1;    // first packet of the next frame to emit; -1 = resync
     bool waitingKeyframe_ = true;
+    bool paramSetsSeen_ = false;  // a key frame has gone to the decoder: it holds the parameter sets
     uint32_t mediaSsrc_ = 0;
     uint64_t lastKeyframeRequestMs_ = 0;
     uint64_t oversized_ = 0;  // payloads too large for a slot, dropped
