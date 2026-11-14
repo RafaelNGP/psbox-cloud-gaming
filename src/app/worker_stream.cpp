@@ -7,6 +7,7 @@
 #include "app/crash_guard.h"
 #include "app/shell.h"
 #include "app/stream_player.h"
+#include "app/web_server.h"
 #include "display/display.h"
 #include "input/controller.h"
 #include "input/gyro.h"
@@ -14,6 +15,8 @@
 #include "media/audio_queue.h"
 #include "media/hw_decoder.h"
 #include "platform/platform.h"
+#include "stream/net_diag.h"
+#include "stream/wifi_filler.h"
 #include "ui/cloud_time.h"
 #include "ui/strings.h"
 #include "util/log.h"
@@ -222,8 +225,17 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     bool degradedLogged = false;
     uint32_t reconnectsSeen = 0;
     struct {
-        uint64_t seconds = 0, badSeconds = 0, kbps = 0, rttSum = 0, rttCount = 0;
+        uint64_t seconds = 0, badSeconds = 0, kbps = 0, rttSum = 0, rttCount = 0, holds = 0;
     } session;
+    // Packets held and delivered at once (VideoReceiveStats::holds): when, over the last 2 minutes;
+    // three of them, and each new one is shown for a few seconds (most likely the Wi-Fi).
+    std::vector<uint64_t> holdTimes;
+    uint64_t wifiHoldUntil = 0;
+    // The Wi-Fi filler (stream/wifi_filler.h): armed for the session once such freezes are seen
+    // (2 in 2 minutes; a wired console never has them), it tops the stream up to ~600 packets a
+    // second while it is light. Its A/B (netdiag's abfiller=) logged as it turns.
+    bool wifiFlaky = false;
+    int fillerAb = -1;
     uint64_t prevPlaytime = 0;
     {
         std::lock_guard<std::mutex> lock(g_settingsMutex);
@@ -241,7 +253,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         XC_LOGI("resolution probe (%s): %dp at most", gssv.isHome() ? "own Xbox" : "cloud", tallest);
     };
     app::StreamPlayer::Stats last{};
-    uint64_t nextSnapCheck = 0;
+    uint64_t nextSnapCheck = 0, nextRequestCheck = 0;
     // A watch on this loop (issue #317: a PS4 stream froze for good with no
     // line logged, the "no video" check never firing): past 5 s without a
     // pass, which step it is stuck in goes into the log, once a stall.
@@ -288,8 +300,28 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     // hidden ("image-new") against both as before ("image-old"), in turns.
     uint64_t abImageNext = started + 15000;
     bool abImageNew = false;
+    uint64_t afkNext = 0;
+    int afkStep = 0;
+    stream::wifiFillerStart();  // finds the router to ask; idle until a rate is set
     while (player.running() && !g_cancel) {
         beat("loop");
+        // netdiag: R1 and, 3 s later, L1 (back to the same tab) every N
+        // seconds, so an idle lobby is not dropped; logged, to leave those
+        // moments out of the analysis.
+        if (stream::netdiag::enabled() && stream::netdiag::afkSeconds() > 0) {
+            const uint64_t t = platform::nowMs();
+            const uint64_t every = static_cast<uint64_t>(stream::netdiag::afkSeconds()) * 1000;
+            if (!afkNext) afkNext = t + every;
+            if (t >= afkNext) {
+                input::ControllerState tap{};
+                tap.btnR1 = afkStep == 0;
+                tap.btnL1 = afkStep == 2;
+                setVirtualGamepad(0, tap);  // steps 0 and 2 press, 1 and 3 let go
+                if (afkStep == 0 || afkStep == 2) XC_LOGI("netdiag: anti-AFK %s", afkStep == 0 ? "R1" : "L1");
+                afkStep = (afkStep + 1) % 4;
+                afkNext = t + (afkStep == 1 || afkStep == 3 ? 200 : afkStep == 2 ? 2800 : std::max<uint64_t>(every, 4200) - 3200);
+            }
+        }
         uint64_t elapsed = platform::nowMs() - started;
         if (g_autoplay.abCycleSec > 0 && started + elapsed >= abNext) {
             abIndex = (abIndex + 1) % static_cast<int>(std::size(kAb));
@@ -310,6 +342,29 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         }
         beat("the cloud time");
         cloudTimeStep(started + elapsed);
+        // Asked for from outside, in any mode (files in the data folder, checked every 500 ms):
+        // snap.req, the picture now (now.ppm); rec.req, the game's picture to rec.h264 for its
+        // seconds (300 if it says none), ended by rec.stop or the time (StreamPlayer::startRecording).
+        if (const uint64_t at = platform::nowMs() - started; at >= nextRequestCheck) {
+            nextRequestCheck = at + 500;
+            std::string text;
+            const std::string snap = platform::dataDir() + "/snap.req";
+            if (platform::readFile(snap, text)) {
+                std::remove(snap.c_str());
+                player.requestSnapshot(platform::dataDir() + "/now.ppm");
+            }
+            const std::string rec = platform::dataDir() + "/rec.req";
+            if (platform::readFile(rec, text)) {
+                std::remove(rec.c_str());
+                const int secs = std::atoi(text.c_str());
+                player.startRecording(secs > 0 ? secs : 300);
+            }
+            const std::string recStop = platform::dataDir() + "/rec.stop";
+            if (platform::readFile(recStop, text) || player.recordingExpired()) {
+                std::remove(recStop.c_str());
+                player.stopRecording();
+            }
+        }
         if (!g_autoplay.title.empty()) {
             if (elapsed >= static_cast<uint64_t>(g_autoplay.seconds) * 1000u) {
                 autoplayDone = true;
@@ -366,15 +421,9 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                 imageTested = true;
                 player.requestImageTest();
             }
-            // A capture asked for from outside (the file snap.req appears): now.ppm.
             if (elapsed >= nextSnapCheck) {
                 nextSnapCheck = elapsed + 500;
-                const std::string req = platform::dataDir() + "/snap.req";
                 std::string unused;
-                if (platform::readFile(req, unused)) {
-                    std::remove(req.c_str());
-                    player.requestSnapshot(platform::dataDir() + "/now.ppm");
-                }
                 // img.req: the image test now, on this picture (autoplay "bench").
                 const std::string img = platform::dataDir() + "/img.req";
                 if (g_autoplay.bench && platform::readFile(img, unused)) {
@@ -563,6 +612,34 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                         degradedLogged = false;
                     }
                     info.degraded = now < degradedUntil;
+                    const uint64_t newHolds = st.rtpHolds >= last.rtpHolds ? st.rtpHolds - last.rtpHolds : st.rtpHolds;
+                    for (uint64_t k = 0; k < newHolds; ++k) holdTimes.push_back(now);
+                    holdTimes.erase(std::remove_if(holdTimes.begin(), holdTimes.end(),
+                                                   [&](uint64_t t) { return now - t > 120000; }),
+                                    holdTimes.end());
+                    if (newHolds) {
+                        session.holds += newHolds;
+                        XC_LOGI("network: packets held %llu ms and then delivered at once (most likely the Wi-Fi); %zu in the last 2 min",
+                                static_cast<unsigned long long>(st.rtpHoldMs), holdTimes.size());
+                        if (holdTimes.size() >= 3) wifiHoldUntil = now + 4000;
+                    }
+                    info.wifiHolds = static_cast<int>(holdTimes.size());
+                    info.wifiHoldNow = now < wifiHoldUntil;
+                    if (!wifiFlaky && holdTimes.size() >= 2) {
+                        wifiFlaky = true;
+                        XC_LOGI("wifi filler: armed (packets held by the Wi-Fi %zu times in 2 min)", holdTimes.size());
+                    }
+                    const uint64_t videoPps = st.rtpPackets >= last.rtpPackets ? st.rtpPackets - last.rtpPackets : 0;
+                    const uint64_t audioPps = st.audioPackets >= last.audioPackets ? st.audioPackets - last.audioPackets : 0;
+                    const uint64_t pps = videoPps + audioPps;
+                    int fill = wifiFlaky && pps < 600 ? std::clamp(600 - static_cast<int>(pps), 100, stream::kWifiFillerMax) : 0;
+                    if (stream::netdiag::enabled() && stream::netdiag::abFillerSeconds() > 0) {
+                        const int on = (now / (static_cast<uint64_t>(stream::netdiag::abFillerSeconds()) * 1000)) % 2 == 0;
+                        if (on != fillerAb) XC_LOGI("wifi filler A/B: %s", on ? "filler-on" : "filler-off");
+                        fillerAb = on;
+                        if (!on) fill = 0;
+                    }
+                    stream::wifiFillerSetRate(fill);
                     lastTickAt = tickNow;
                     ++session.seconds;
                     session.kbps += st.rtpKbps;
@@ -593,6 +670,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
         beat("sleep");
         platform::sleepMs(100);
     }
+    stream::wifiFillerStop();
     watch.stop = true;
     if (watch.thread.joinable()) watch.thread.join();
     if (ask.thread.joinable()) ask.thread.join();  // 8 s at most
@@ -659,9 +737,11 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                       static_cast<unsigned long long>((session.seconds + 30) / 60), tallest,
                       session.kbps / 1000.0 / static_cast<double>(session.seconds), lossPct,
                       session.rttCount ? static_cast<int>(session.rttSum / session.rttCount) : -1);
-        XC_LOGI("session summary: %s; %llu s with a degraded connection, %llu frames lost, %llu recovered packets",
+        XC_LOGI("session summary: %s; %llu s with a degraded connection, %llu frames lost, %llu recovered packets, "
+                "%llu network holds",
                 details, static_cast<unsigned long long>(session.badSeconds),
-                static_cast<unsigned long long>(st.rtpDroppedFrames), static_cast<unsigned long long>(st.rtpRecovered));
+                static_cast<unsigned long long>(st.rtpDroppedFrames), static_cast<unsigned long long>(st.rtpRecovered),
+                static_cast<unsigned long long>(session.holds));
     }
 
     // Check trophies/achievements on stream exit (outside of gameplay to guarantee zero stutters)

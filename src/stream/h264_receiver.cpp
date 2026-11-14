@@ -3,12 +3,14 @@
 #include <cstdint>
 #include "stream/h264_receiver.h"
 
+#include "stream/net_diag.h"
 #include "stream/rtcp_reporter.h"
 
 #include "platform/platform.h"
 #include "util/log.h"
 
 #include <algorithm>
+#include <cstdio>
 #include <cstring>
 
 namespace xc::stream {
@@ -178,6 +180,10 @@ void H264Receiver::noteGap(int64_t from, int64_t to, uint64_t now, const rtc::me
     if (to - from > 512) {  // a huge jump: not worth NACKing, resynchronise
         stats_.lost += static_cast<uint64_t>(to - from);
         return;
+    }
+    if (pause_.active && pause_.holes.size() < 8) {
+        pause_.holes.emplace_back(from, to);
+        if (!pause_.holeFoundUs) pause_.holeFoundUs = platform::nowUs();
     }
     std::vector<int64_t> seqs;
     for (int64_t s = from; s < to; ++s) {
@@ -371,6 +377,7 @@ void H264Receiver::accept(const uint8_t* d, size_t n, uint64_t now, const rtc::m
     ++stats_.packets;
 
     int64_t seq = unwrap(rawSeq);
+    lastSeq_ = seq;
     if (nextSeq_ >= 0 && seq < nextSeq_) return;  // too late or duplicate
     if (hasPacket(seq)) return;
     // A frame's first packet (the first with its timestamp): when it came.
@@ -393,7 +400,16 @@ void H264Receiver::accept(const uint8_t* d, size_t n, uint64_t now, const rtc::m
                     kMaxPayload);
         return;
     }
-    if (missing_.erase(seq)) ++stats_.recovered;
+    if (missing_.erase(seq)) {
+        ++stats_.recovered;
+        if (pause_.active)
+            for (const auto& h : pause_.holes)
+                if (seq >= h.first && seq < h.second) {
+                    ++pause_.recovered;
+                    pause_.lastRecoverUs = platform::nowUs();
+                    break;
+                }
+    }
 
     bool marker = (d[1] & 0x80) != 0;
     putPacket(seq, ts, marker, d + off, end - off);
@@ -405,6 +421,9 @@ void H264Receiver::accept(const uint8_t* d, size_t n, uint64_t now, const rtc::m
 void H264Receiver::incoming(rtc::message_vector& messages, const rtc::message_callback& send) {
     rtc::message_vector out;
     uint64_t now = platform::nowMs();
+    const bool diag = netdiag::enabled();
+    const uint64_t callUs = diag ? platform::nowUs() : 0;
+    if (diag && pause_.active && callUs - pause_.t1Us > 600000) finishPause();
     for (auto it = redeliver_.begin(); it != redeliver_.end();) {
         if (it->first > now) {
             ++it;
@@ -417,8 +436,30 @@ void H264Receiver::incoming(rtc::message_vector& messages, const rtc::message_ca
     for (auto& message : messages) {
         if (message->type == rtc::Message::Control) continue;  // RTCP: handled down the chain
         if (lastPacketMs_) raiseMax(stats_.maxGapMs, now - lastPacketMs_);
+        // Held and then handed over at once: the pause, then a burst right after it.
+        if (lastPacketMs_ && now - lastPacketMs_ >= kHoldGapMs) holdStartMs_ = now, holdGapMs_ = now - lastPacketMs_, holdBurst_ = 0;
+        if (holdStartMs_ && now - holdStartMs_ < kHoldWindowMs && ++holdBurst_ == kHoldBurst) {
+            ++stats_.holds;
+            raiseMax(stats_.holdMs, holdGapMs_);
+        }
+        if (diag) {
+            if (lastPacketUs_ && callUs - lastPacketUs_ >= 120000 && !pause_.active) {
+                pause_ = PauseTrace{};
+                pause_.active = true;
+                pause_.t0Us = lastPacketUs_, pause_.t1Us = callUs;
+                pause_.prevCallUs = lastCallUs_;
+                pause_.idleUs = lastCallEndUs_ ? callUs - lastCallEndUs_ : 0;
+                pause_.highestBefore = highest_;
+                pause_.missingBefore = missing_.size();
+                for (const auto& [s, m] : missing_)
+                    pause_.oldestMissingMs = std::max(pause_.oldestMissingMs, now - m.sinceMs);
+            }
+            if (pause_.active && callUs - pause_.t1Us < 50000) ++pause_.burstPackets, pause_.burstLastUs = callUs;
+            lastPacketUs_ = callUs;
+        }
         lastPacketMs_ = now;
         accept(reinterpret_cast<const uint8_t*>(message->data()), message->size(), now, send);
+        if (diag && pause_.active && pause_.firstAfter < 0) pause_.firstAfter = lastSeq_;
     }
     resendNacks(now, send);
     drain(now, out, send);
@@ -433,7 +474,50 @@ void H264Receiver::incoming(rtc::message_vector& messages, const rtc::message_ca
         nextSeq_ = -1;
         askKeyframe(send);
     }
+    if (diag) {
+        const uint64_t endUs = platform::nowUs();
+        lastCallUs_ = endUs - callUs, lastCallEndUs_ = endUs;
+    }
     messages.swap(out);
+}
+
+void H264Receiver::finishPause() {
+    PauseTrace p = std::move(pause_);
+    pause_ = PauseTrace{};
+    const netdiag::Window w = netdiag::describeWindow(p.t0Us, p.t1Us);
+    const uint64_t pauseMs = (p.t1Us - p.t0Us) / 1000;
+    char holes[160] = "none";
+    if (!p.holes.empty()) {
+        int o = 0;
+        int count = 0;
+        for (const auto& h : p.holes) count += static_cast<int>(h.second - h.first);
+        o += std::snprintf(holes + o, sizeof holes - o, "%d packet(s) from %lld", count, static_cast<long long>(p.holes[0].first));
+        if (p.holes[0].first == p.highestBefore + 1) o += std::snprintf(holes + o, sizeof holes - o, " (right after the last one before)");
+        o += std::snprintf(holes + o, sizeof holes - o, ", seen at +%.1f ms, %d recovered", (p.holeFoundUs - p.t1Us) / 1000.0, p.recovered);
+        if (p.recovered) std::snprintf(holes + o, sizeof holes - o, " at +%.1f ms", (p.lastRecoverUs - p.t1Us) / 1000.0);
+    }
+    // Where the packets were: waiting in the console's socket (the app did
+    // not read them), or nowhere yet while the PC's beacons kept coming (held
+    // before the console's Wi-Fi), or nothing at all arrived.
+    const char* verdict;
+    uint64_t bestBeaconWait = UINT64_MAX;
+    for (int c = 0; c < 4; ++c)
+        if (w.beaconWaitMs[c]) bestBeaconWait = std::min(bestBeaconWait, w.beaconWaitMs[c]);
+    if (!w.samples)
+        verdict = "unknown (socket not watched)";
+    else if (w.withData * 2 > w.samples)
+        verdict = "APP: the packets were in the console and the app did not read them";
+    else if (!w.anyBeacons)
+        verdict = "OUTSIDE THE APP: nothing reached the console (no beacons to tell Wi-Fi from internet)";
+    else if (bestBeaconWait != UINT64_MAX && bestBeaconWait * 2 < pauseMs)
+        verdict = "BEFORE THE CONSOLE: nothing reached it for the stream while the PC's beacons kept coming";
+    else
+        verdict = "CONSOLE WI-FI OR ALL TRAFFIC: the PC's beacons stopped too";
+    XC_LOGI("netdiag: pause %llu ms, packets %lld then %lld; missing before it %zu (oldest %llu ms); holes after it: %s; "
+            "%d packets in the first 50 ms (%.1f ms); app: the packet before took %.2f ms, idle %.1f ms after it; %s; verdict %s",
+            static_cast<unsigned long long>(pauseMs), static_cast<long long>(p.highestBefore),
+            static_cast<long long>(p.firstAfter), p.missingBefore, static_cast<unsigned long long>(p.oldestMissingMs), holes,
+            p.burstPackets, (p.burstLastUs - p.t1Us) / 1000.0, p.prevCallUs / 1000.0, p.idleUs / 1000.0, w.text.c_str(), verdict);
 }
 
 uint64_t H264Receiver::firstPacketUs(uint32_t rtpTimestamp) const {

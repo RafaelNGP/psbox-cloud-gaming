@@ -103,6 +103,11 @@ private:
     std::map<int64_t, Missing> missing_;
     int64_t highest_ = -1;    // highest extended sequence number seen
     uint64_t lastPacketMs_ = 0;           // VideoReceiveStats::maxGapMs
+    // VideoReceiveStats::holds: a pause this long, then this many packets within this time.
+    static constexpr uint64_t kHoldGapMs = 150, kHoldWindowMs = 50;
+    static constexpr int kHoldBurst = 5;
+    uint64_t holdStartMs_ = 0, holdGapMs_ = 0;
+    int holdBurst_ = 0;
     static constexpr size_t kFirstPacketRing = 64;
     std::pair<uint32_t, uint64_t> firstPacket_[kFirstPacketRing] = {};  // RTP timestamp, its first packet (us)
     size_t firstPacketNext_ = 0;
@@ -116,6 +121,26 @@ private:
     uint32_t mediaSsrc_ = 0;
     uint64_t lastKeyframeRequestMs_ = 0;
     uint64_t oversized_ = 0;  // payloads too large for a slot, dropped
+    // netdiag (stream/net_diag.h): one pause of the packets, followed until
+    // its holes are recovered or 600 ms have passed, then logged.
+    struct PauseTrace {
+        bool active = false;
+        uint64_t t0Us = 0, t1Us = 0;        // last packet before, first after
+        uint64_t prevCallUs = 0, idleUs = 0;  // the app: the call before the pause, and since it ended
+        int64_t highestBefore = -1, firstAfter = -1;
+        size_t missingBefore = 0;
+        uint64_t oldestMissingMs = 0;
+        int burstPackets = 0;
+        uint64_t burstLastUs = 0;
+        std::vector<std::pair<int64_t, int64_t>> holes;  // [from, to) found after it
+        uint64_t holeFoundUs = 0;
+        int recovered = 0;
+        uint64_t lastRecoverUs = 0;
+    };
+    void finishPause();
+    PauseTrace pause_;
+    uint64_t lastPacketUs_ = 0, lastCallEndUs_ = 0, lastCallUs_ = 0;
+    int64_t lastSeq_ = -1;
     int simulatedLoss_ = 0;
     uint32_t lossState_ = 12345;
     std::map<uint16_t, std::vector<uint8_t>> held_;                     // simulated loss
