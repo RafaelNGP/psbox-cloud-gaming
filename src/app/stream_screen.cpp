@@ -391,7 +391,9 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             menuUsbOwner_ = menuCombo || swipeMenu_ ? -1 : usbMenu;
             menu_.setUsbOwner(menuUsbOwner_ >= 0 ? input::usbPadPlayer(menuUsbOwner_) : -1);
             menu_.setUsbOwnerGuitar(menuUsbOwner_ >= 0 && input::usbPadSlotKind(menuUsbOwner_) == input::UsbPadKind::Guitar,
-                                    input::guitarStrum(), input::guitarTilt());
+                                    input::guitarStrum(), input::guitarTilt(), input::guitarBinding(false),
+                                    input::guitarBinding(true));
+            menu_.setGuitarRaiseBy(input::guitarRaiseBy());
             if (menuUsbOwner_ >= 0)
                 XC_LOGI("menu_: opened by usb pad %d (player %d)", menuUsbOwner_, menu_.usbOwnerPlayer() + 1);
             swipeMenu_ = false;
@@ -498,7 +500,19 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             case ui::MenuAction::GuitarTilt: {
                 std::lock_guard<std::mutex> lock(g_settingsMutex);
                 g_settings.guitarTilt = menu_.guitarTilt();
-                input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarTiltAt);
+                if (menu_.guitarTilt()) g_settings.guitarRaiseBy = menu_.guitarRaiseBy();
+                input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarRaiseBy);
+                g_settings.save(settingsPath());  // warns itself
+                break;
+            }
+            case ui::MenuAction::GuitarBinding: {
+                const bool strum = menu_.guitarStrum();
+                const input::GuitarBinding& b = menu_.guitarBinding();
+                input::setGuitarBinding(strum, b);
+                std::lock_guard<std::mutex> lock(g_settingsMutex);
+                // The defaults are kept as nothing, so they follow the app's.
+                const bool isDefault = b == (strum ? input::kStrumLanes : input::kFretLanes);
+                (strum ? g_settings.guitarStrumLanes : g_settings.guitarLanes) = isDefault ? "" : input::guitarBindingText(b);
                 g_settings.save(settingsPath());  // warns itself
                 break;
             }
@@ -1305,8 +1319,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         } else if (showStats_ && seq) {
             ui::Canvas c = menu_.renderStats(info);
             display::setOverlay(c.data(), ui::StreamMenu::kStatsX, ui::StreamMenu::kStatsY, c.width(), c.height(), 200);
-        } else if (info.degraded) {
-            ui::Canvas c = menu_.renderWarning();
+        } else if (info.degraded || info.wifiHoldNow) {
+            ui::Canvas c = menu_.renderWarning(info.wifiHoldNow && !info.degraded);
             display::setOverlay(c.data(), ui::StreamMenu::kWarnRight - c.width(), ui::StreamMenu::kWarnY, c.width(),
                                 c.height(), 200);
         } else {

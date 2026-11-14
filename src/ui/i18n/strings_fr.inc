@@ -551,12 +551,21 @@ constexpr Column kFrench = {
     "Met fin à la diffusion depuis votre console Xbox et retourne à l'accueil.", // MenuDescEndStream
     "Assigne la manette physique correspondant à ce joueur virtuel.", // MenuDescPlayer
     "Guitare : une frette n'atteint le jeu que si tu grattes en la tenant (comme dans Guitar Hero). Désactivé : les frettes seules jouent.", // MenuDescStrum
-    "Lever la guitare (le manche vers le haut) active le Star Power (Overdrive, RT), comme le bouton Back.", // MenuDescTilt
+    "Lever la guitare (le manche vers le haut) active le Star Power (Overdrive), comme le bouton Back. S'il ne se déclenche pas en pleine chanson, rendez-le plus sensible.", // MenuDescTilt
     "À régler dans Fortnite : Paramètres > Manette > Fortnite Festival", // GuitarBindTitle
     "Piste", // GuitarBindLane
     "Overdrive", // GuitarBindOverdrive
-    "Grattage activé : les frettes servent aussi aux menus (A B Y X).", // GuitarBindStrumOn
+    "Grattage activé : dans les menus les frettes sont A B Y X ; la verte (A, Overdrive) seulement par une pression brève sans gratter.", // GuitarBindStrumOn
     "Grattage désactivé : la frette joue dès qu'elle est appuyée.", // GuitarBindStrumOff
+    "Choisissez le bouton envoyé par cette frette (A ou ◀ ▶ pour changer). Dans Fortnite, associez la piste au même bouton.", // MenuDescGuitarBind
+    "Rétablir les boutons par défaut", // GuitarBindReset
+    "Remet les pistes et l'Overdrive sur les boutons par défaut de ce mode de grattage (activé ou désactivé).", // MenuDescGuitarReset
+    "Le Wi-Fi retient des paquets", // WifiHoldPill
+    "Wi-Fi : paquets retenus %s× en 2 min. Changez le canal 5 GHz du routeur ou câblez.", // WifiHoldTip
+    "Manette USB non reconnue (%s) : appuyez une fois sur chaque bouton, lentement. Le journal l'enregistre pour l'ajouter.", // UsbXrayNotice
+    "Peu sensible", // TiltLess
+    "Normale", // TiltNormal
+    "Très sensible", // TiltMore
     "Ajuste le volume du son diffusé par le haut-parleur de la manette.", // MenuDescPadSpeakerVolume
     "Volant (Stick Gauche)",                           // GyroSteering
     "Volant (Accélérer R2)",                           // GyroSteeringDrive

@@ -551,12 +551,21 @@ constexpr Column kEnglish = {
     "Ends remote play from your Xbox console and returns to the home screen.", // MenuDescEndStream
     "Assigns which physical controller input operates this virtual player slot.", // MenuDescPlayer
     "Guitar: a fret reaches the game only when you strum while holding it (as in Guitar Hero). Off: the frets alone play.", // MenuDescStrum
-    "Raising the guitar (its neck up) turns on star power (Overdrive, RT), as Back does.", // MenuDescTilt
+    "Raising the guitar (its neck up) turns on star power (Overdrive), as Back does. If it does not fire mid-song, make it more sensitive.", // MenuDescTilt
     "Bind these in Fortnite: Settings > Controller > Fortnite Festival", // GuitarBindTitle
     "Lane", // GuitarBindLane
     "Overdrive", // GuitarBindOverdrive
-    "Strum on: the frets also work the menus (A B Y X).", // GuitarBindStrumOn
+    "Strum on: in menus the frets are A B Y X; green (A, Overdrive) only as a quick tap without strumming.", // GuitarBindStrumOn
     "Strum off: a fret plays as it is pressed.", // GuitarBindStrumOff
+    "Choose the button this fret sends (A or ◀ ▶ change it). In Fortnite, bind the lane to the same button.", // MenuDescGuitarBind
+    "Restore default buttons", // GuitarBindReset
+    "Puts the lanes and Overdrive back on the default buttons of this strum mode (on or off).", // MenuDescGuitarReset
+    "Wi-Fi holding packets", // WifiHoldPill
+    "Wi-Fi held packets %s× in 2 min: change the router's 5 GHz channel or use a cable.", // WifiHoldTip
+    "Unrecognised USB controller (%s): press each button once, slowly. It goes to the log so support can be added.", // UsbXrayNotice
+    "Less sensitive", // TiltLess
+    "Normal", // TiltNormal
+    "Very sensitive", // TiltMore
     "Adjusts the volume level for sound played through the controller's speaker.", // MenuDescPadSpeakerVolume
     "Steering wheel (Left Stick)",                     // GyroSteering
     "Steering wheel (R2)",                             // GyroSteeringDrive

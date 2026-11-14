@@ -50,6 +50,25 @@ class Triage(unittest.TestCase):
         labels, _ = self.run_triage(form("The picture stutters in every game", "v1.7.1", "13.60", LOG), latest="1.7.1")
         self.assertNotIn("area: install", labels)
 
+    def test_wifi_holding_packets(self):
+        log = LOG + ("10:05:00 [I] network: packets held 352 ms and then delivered at once (most likely the Wi-Fi); "
+                     "3 in the last 2 min\n10:20:00 [I] session summary: Fortnite; 0 s with a degraded connection, "
+                     "0 frames lost, 98 recovered packets, 27 network holds")
+        labels, comment = self.run_triage(form("The lobby stutters", "v1.7.1", "13.60", log), latest="1.7.1")
+        self.assertIn("area: network", labels)
+        self.assertIn("holding packets", comment)
+        quiet = LOG + "10:20:00 [I] session summary: Fortnite; 0 s with a degraded connection, 0 frames lost, 0 network holds"
+        labels, comment = self.run_triage(form("The lobby stutters", "v1.7.1", "13.60", quiet), latest="1.7.1")
+        self.assertNotIn("holding packets", comment or "")
+
+    def test_usb_xray_in_the_log(self):
+        log = LOG + ("10:01:00 [I] usb x-ray: 12ba:0100 release 0.05, class 00/00/00, maker \"RedOctane\", "
+                     "product \"Guitar Hero5 for PlayStation (R) 3\", at /dev/ugen1.3: not known\n"
+                     "10:01:00 [I] usb x-ray: /dev/ugen1.3: recording its reports for 120 s")
+        labels, comment = self.run_triage(form("My PS3 guitar is not recognised", "v1.7.1", "13.60", log), latest="1.7.1")
+        self.assertIn("area: controller", labels)
+        self.assertIn("X-ray", comment)
+
     def test_ps4_outdated_build_invites_redownload(self):
         log = LOG + "10:00:01 [I] firmware 13.520.001, PSBox 1.5.5 (build dbf2078-dirty, PlayStation 4)\n"
         labels, comment = self.run_triage(form("Low fps and the game freezes", "1.5.5", "13.52", log), latest="1.5.5")

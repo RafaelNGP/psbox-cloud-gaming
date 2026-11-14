@@ -171,7 +171,13 @@ struct Settings {
     bool usbControllers = true;  // in-app USB controllers driver (OneFamily)
     bool guitarStrum = false;    // USB guitars: a fret plays only with the strum bar
     bool guitarTilt = true;      // USB guitars: raising one is star power
-    float guitarTiltAt = -0.9f;  // the tilt reading (right stick Y as read) that counts as raised
+    // USB guitars: how far above the position it is played in the tilt reading (right stick Y as
+    // read) goes for one to count as raised (input/pad_usb.h). Saved as "guitarRaiseBy": the earlier
+    // "guitarTiltAt" / "guitarRaisedAt" (fixed readings) are left alone.
+    float guitarRaiseBy = 0.32f;
+    // USB guitars: the buttons of the lanes and star power ("A,B,Y,X,LB,RT", input/pad_usb.h),
+    // without and with strum; empty: the defaults.
+    std::string guitarLanes, guitarStrumLanes;
     bool soloInputRedirect = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
 
