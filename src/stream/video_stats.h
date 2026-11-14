@@ -23,6 +23,11 @@ struct VideoReceiveStats {
     // and how much later a frame was ready than its RTP time says (a pause
     // in delivery, or a frame held for a retransmission).
     mutable std::atomic<uint64_t> maxGapMs{0}, maxBurst{0}, maxLateMs{0};
+    // Packets held back and then handed over at once: no video for 150 ms or more, then a burst
+    // (what a Wi-Fi link does while one packet is late). How many, and the longest pause since
+    // the last read.
+    std::atomic<uint64_t> holds{0};
+    mutable std::atomic<uint64_t> holdMs{0};
 };
 
 }  // namespace xc::stream

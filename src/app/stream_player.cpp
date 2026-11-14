@@ -12,6 +12,7 @@
 #include "media/decoder.h"
 #include "media/hw_decoder.h"
 #include "platform/platform.h"
+#include "stream/net_diag.h"
 #include "stream/stream_session.h"
 #include "ui/strings.h"
 #include "util/log.h"
@@ -23,10 +24,12 @@
 #include <cstdlib>
 #include <cstdio>
 #include <condition_variable>
+#include <ctime>
 #include <deque>
 #include <mutex>
 #include <set>
 #include <thread>
+#include <utility>
 #include <vector>
 #if !defined(_WIN32)
 #include <sys/resource.h>
@@ -52,9 +55,16 @@ bool hasIdrSlice(const std::vector<uint8_t>& au) {
 }  // namespace
 
 void AudioLatency::reset() {
-    nextMs = 0, targetMs = 50, warm = false, lowNext = 0;
+    nextMs = 0, targetMs = 50, warm = false, lowNext = 0, holdUntilMs = 0, holds = 0;
     for (size_t& l : lows) l = SIZE_MAX;
     media::audioQueue().setRefill(0);
+}
+
+void AudioLatency::noteHold(uint64_t now, uint64_t gapMs) {
+    holdUntilMs = now + 2000;
+    if (++holds <= 5 || holds % 20 == 0)
+        XC_LOGI("audio: network hold of %llu ms (%llu so far)%s", static_cast<unsigned long long>(gapMs),
+                static_cast<unsigned long long>(holds), holdAware ? "" : ", counted as jitter (A/B: old)");
 }
 
 void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
@@ -70,6 +80,14 @@ void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
     }
     const uint64_t dry = q.takeUnderruns();
     lows[lowNext++ % 5] = q.takeLowWater();
+    if (holdAware && now <= holdUntilMs) {
+        // After a hold: the burst's excess goes now, rather than 20 ms a second over the next
+        // seconds; its dry grains leave the target (and the calm) as they were.
+        const size_t queued = q.queuedFrames(), target = static_cast<size_t>(targetMs) * 48;
+        if (queued > target + 960 && q.cutAhead(queued - target))
+            for (size_t& l : lows) l = SIZE_MAX;  // the seconds before the cut say nothing now
+        if (dry) return;
+    }
     if (dry) {
         if (targetMs < 100) {
             targetMs = std::min(targetMs + (dry == 1 ? 5 : 10), 100);
@@ -92,6 +110,96 @@ void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
             for (size_t& l : lows) l = l == SIZE_MAX ? l : l - std::min(l, cut);  // the queue is that much shorter
     }
 }
+
+namespace {
+// A recording of the game's picture as it arrives (the H.264 the cloud sends, as it is: nothing
+// re-encoded, no sound, none of the app's overlay), for diagnosis: rec.h264, and rec.idx with each
+// frame's number, its arrival (ms after the start) and the wall clock, to match the log's times.
+// Written by a thread of its own; frames beyond a backlog of 240 are dropped, not waited for.
+class StreamRecorder {
+public:
+    ~StreamRecorder() { stop(); }
+    bool start(const std::string& dir, int seconds) {
+        stop();
+        video_ = std::fopen((dir + "/rec.h264").c_str(), "wb");
+        index_ = std::fopen((dir + "/rec.idx").c_str(), "wb");
+        if (!video_ || !index_) {
+            XC_LOGW("recording: cannot open %s/rec.h264 or rec.idx", dir.c_str());
+            stop();
+            return false;
+        }
+        startMs_ = platform::nowMs(), untilMs_ = startMs_ + static_cast<uint64_t>(seconds) * 1000;
+        frames_ = bytes_ = dropped_ = 0;
+        running_ = true;
+        writer_ = std::thread([this] { writeLoop(); });
+        XC_LOGI("recording: started, %d s, into %s/rec.h264 (frame times in rec.idx)", seconds, dir.c_str());
+        return true;
+    }
+    void stop() {
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            if (!running_ && !writer_.joinable()) return;
+            running_ = false;
+        }
+        cv_.notify_all();
+        if (writer_.joinable()) writer_.join();
+        if (video_) std::fclose(video_), video_ = nullptr;
+        if (index_) std::fclose(index_), index_ = nullptr;
+        if (frames_ || dropped_)
+            XC_LOGI("recording: stopped, %llu frames, %llu MB, %llu dropped", static_cast<unsigned long long>(frames_),
+                    static_cast<unsigned long long>(bytes_ >> 20), static_cast<unsigned long long>(dropped_));
+        frames_ = dropped_ = 0;
+    }
+    bool active() const { return running_.load(std::memory_order_relaxed); }
+    bool expired() const { return active() && platform::nowMs() >= untilMs_; }
+    // From the receive thread: a complete access unit (Annex B).
+    void frame(const uint8_t* d, size_t n) {
+        if (!active()) return;
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (queue_.size() >= 240) {
+            ++dropped_;
+            return;
+        }
+        queue_.push_back({std::vector<uint8_t>(d, d + n), platform::nowMs() - startMs_});
+        cv_.notify_one();
+    }
+
+private:
+    struct Item {
+        std::vector<uint8_t> data;
+        uint64_t atMs;
+    };
+    void writeLoop() {
+        for (;;) {
+            Item item;
+            {
+                std::unique_lock<std::mutex> lock(mutex_);
+                cv_.wait(lock, [this] { return !running_ || !queue_.empty(); });
+                if (queue_.empty()) return;
+                item = std::move(queue_.front());
+                queue_.pop_front();
+            }
+            std::fwrite(item.data.data(), 1, item.data.size(), video_);
+            const std::time_t now = std::time(nullptr);
+            std::tm local{};
+            localtime_r(&now, &local);
+            char clock[16];
+            std::strftime(clock, sizeof clock, "%H:%M:%S", &local);
+            std::fprintf(index_, "%llu %llu %s\n", static_cast<unsigned long long>(frames_),
+                         static_cast<unsigned long long>(item.atMs), clock);
+            ++frames_, bytes_ += item.data.size();
+        }
+    }
+    std::FILE* video_ = nullptr;
+    std::FILE* index_ = nullptr;
+    std::thread writer_;
+    std::mutex mutex_;
+    std::condition_variable cv_;
+    std::deque<Item> queue_;
+    std::atomic<bool> running_{false};
+    uint64_t startMs_ = 0, untilMs_ = 0, frames_ = 0, bytes_ = 0, dropped_ = 0;
+};
+}  // namespace
 
 struct StreamPlayer::Impl {
     xcloud::GssvClient& gssv;
@@ -134,6 +242,7 @@ struct StreamPlayer::Impl {
     };
     std::mutex audioMutex_;
     std::deque<QueuedAudioPacket> audioPackets_;
+    uint64_t lastAudioArrivalMs_ = 0, pendingHoldMs_ = 0;  // under audioMutex_: AudioLatency::noteHold
     std::condition_variable audioCv;
 
     media::AudioDecoder audioDecoder;
@@ -225,6 +334,7 @@ struct StreamPlayer::Impl {
     uint64_t dumpUntilMs = 0;
     std::mutex snapshotMutex;
     std::string snapshotPath;
+    StreamRecorder recorder;  // rec.req: the game's picture to a file (diagnosis)
     std::string screenPath;  // video thread only
     uint64_t lastKeyframeRequestMs = 0;
     // The game's text requests not yet taken, and those it withdrew (mutex).
@@ -438,6 +548,7 @@ struct StreamPlayer::Impl {
         constexpr uint32_t kOpusFrameSamples = 960;  // 20 ms at 48 kHz
         while (running) {
             size_t remainingPackets = 0;
+            uint64_t holdMs = 0;
             {
                 std::unique_lock<std::mutex> lock(audioMutex_);
                 audioCv.wait(lock, [&] { return !running || !audioPackets_.empty(); });
@@ -465,6 +576,16 @@ struct StreamPlayer::Impl {
                 packet = std::move(audioPackets_.front());
                 audioPackets_.pop_front();
                 remainingPackets = audioPackets_.size();
+                holdMs = std::exchange(pendingHoldMs_, 0);
+            }
+            if (holdMs) audioLatency.noteHold(platform::nowMs(), holdMs);
+            if (stream::netdiag::enabled() && stream::netdiag::abAudioSeconds() > 0) {
+                const uint64_t half = static_cast<uint64_t>(stream::netdiag::abAudioSeconds()) * 1000;
+                const bool aware = (platform::nowMs() / half) % 2 == 0;
+                if (aware != audioLatency.holdAware) {
+                    audioLatency.holdAware = aware;
+                    XC_LOGI("audio A/B: %s", aware ? "audio-new (holds ignored)" : "audio-old (holds counted)");
+                }
             }
             if (lastRtpTimestamp != 0) {
                 int32_t diff = static_cast<int32_t>(packet.rtpTimestamp - lastRtpTimestamp);
@@ -990,6 +1111,7 @@ struct StreamPlayer::Impl {
                 return;
             }
             if (++videoFrames == 1) XC_LOGI("first video frame received: %zu bytes", n);
+            recorder.frame(d, n);
             static int lastProfile = -1, lastLevel = -1;
             if (lastProfile == -1) {
                 // The H.264 profile the server encodes with (from the first SPS).
@@ -1039,6 +1161,10 @@ struct StreamPlayer::Impl {
         cb.audio = [this](const uint8_t* d, size_t n, uint32_t rtpTimestamp) {
             if (++audioPackets == 1) XC_LOGI("first audio packet: %zu bytes (timestamp %u)", n, rtpTimestamp);
             std::lock_guard<std::mutex> lock(audioMutex_);
+            const uint64_t arrival = platform::nowMs();
+            if (lastAudioArrivalMs_ && arrival - lastAudioArrivalMs_ >= AudioLatency::kHoldMs)
+                pendingHoldMs_ = arrival - lastAudioArrivalMs_;
+            lastAudioArrivalMs_ = arrival;
             if (audioPackets_.size() < 50) {
                 auto it = audioPackets_.end();
                 while (it != audioPackets_.begin()) {
@@ -1592,6 +1718,14 @@ void StreamPlayer::dumpVideo(const std::string& path, int seconds) {
 
 void StreamPlayer::requestImageTest() { impl_->imageTestWanted = true; }
 
+bool StreamPlayer::startRecording(int seconds) {
+    if (!impl_->recorder.start(platform::dataDir(), std::clamp(seconds, 5, 3600))) return false;
+    impl_->keyframeWanted = true;  // the file starts at a picture that decodes on its own
+    return true;
+}
+void StreamPlayer::stopRecording() { impl_->recorder.stop(); }
+bool StreamPlayer::recordingExpired() const { return impl_->recorder.expired(); }
+
 void StreamPlayer::requestSnapshot(const std::string& path) {
     std::lock_guard<std::mutex> lock(impl_->snapshotMutex);
     impl_->snapshotPath = path;
@@ -1663,6 +1797,7 @@ StreamPlayer::Stats StreamPlayer::stats() const {
         st.rtpNacks = v.nacks;
         st.rtpDroppedFrames = v.framesDropped;
         st.rtpGapMs = v.maxGapMs.exchange(0), st.rtpBurst = v.maxBurst.exchange(0), st.rtpLateMs = v.maxLateMs.exchange(0);
+        st.rtpHolds = v.holds, st.rtpHoldMs = v.holdMs.exchange(0);
         st.keyframeRequests += v.keyframeRequests;
         st.rtpKbps = v.receiveRate / 1000;
         st.rttMs = s->rttMs();

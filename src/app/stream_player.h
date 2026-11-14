@@ -28,6 +28,14 @@ struct AudioLatency {
     bool warm = false;  // past the first 3 s, while the queue fills
     size_t lows[5] = {SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX, SIZE_MAX};  // each second's lowest
     size_t lowNext = 0;
+    // A network hold: no packet for longer than any target, then all of them at once (a Wi-Fi
+    // link holding them). Its dry grains say nothing about the jitter, so until holdUntilMs they
+    // don't raise the target, and what the burst left queued past the target is cut at once.
+    // `holdAware` false: as before 2026-11-13 (A/B, netdiag's abaudio=).
+    bool holdAware = true;
+    uint64_t holdUntilMs = 0, holds = 0;
+    static constexpr uint64_t kHoldMs = 120;  // a gap this long between packets is one
+    void noteHold(uint64_t now, uint64_t gapMs);
     void reset();
     void update(uint64_t now, media::AudioQueue* queue = nullptr);
 };
@@ -79,6 +87,11 @@ public:
     void dumpVideo(const std::string& path, int seconds);
     // Writes the next decoded picture, half size, as a binary PPM.
     void requestSnapshot(const std::string& path);
+    // The game's picture as it arrives, to <dataDir>/rec.h264 (+ rec.idx: each frame's time), for
+    // `seconds` or until stopRecording(): for diagnosis, asked for with rec.req (worker_stream).
+    bool startRecording(int seconds);
+    void stopRecording();
+    bool recordingExpired() const;
     // Measurements: the next picture drawn with each look, crops saved (autoplay "imgtest").
     void requestImageTest();
     // Voice chat / microphone controls
@@ -136,6 +149,7 @@ public:
         // RTP: packets lost, recovered by NACK, frames the jitter buffer dropped.
         uint64_t rtpPackets = 0, rtpLost = 0, rtpRecovered = 0, rtpNacks = 0, rtpDroppedFrames = 0;
         uint64_t rtpGapMs = 0, rtpBurst = 0, rtpLateMs = 0;  // VideoReceiveStats::maxGapMs..., this interval
+        uint64_t rtpHolds = 0, rtpHoldMs = 0;  // VideoReceiveStats::holds (this session), holdMs (this interval)
         uint64_t rtpKbps = 0, rembKbps = 0, vibrations = 0;
         uint64_t lateFrames = 0;  // decoded, not drawn: both flips still queued
         int rttMs = -1;  // to the stream server

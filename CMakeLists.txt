@@ -89,6 +89,8 @@ endif()
 add_library(xcloud_stream STATIC
     src/stream/h264_receiver.cpp
     src/stream/input_packet.cpp
+    src/stream/net_diag.cpp
+    src/stream/wifi_filler.cpp
     src/stream/rtcp_reporter.cpp
     src/stream/stream_session.cpp
 )

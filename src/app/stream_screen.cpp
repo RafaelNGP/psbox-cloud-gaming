@@ -1312,6 +1312,26 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             } else {
                 ui::Canvas c = menu_.renderMenu(info);
                 display::setOverlay(c.data(), ui::StreamMenu::kMenuX, ui::StreamMenu::kMenuY, c.width(), c.height(), 235);
+                // A capture of the game menu as drawn, asked for from outside (the file menu.req
+                // appears in the data folder): menu_now.ppm, to check its layout on the console.
+                static uint64_t menuReqCheckedAt = 0;
+                if (nowMs - menuReqCheckedAt >= 500) {
+                    menuReqCheckedAt = nowMs;
+                    const std::string req = platform::dataDir() + "/menu.req";
+                    std::string unused;
+                    if (platform::readFile(req, unused)) {
+                        std::remove(req.c_str());
+                        std::string ppm = "P6\n" + std::to_string(c.width()) + " " + std::to_string(c.height()) + "\n255\n";
+                        ppm.reserve(ppm.size() + static_cast<size_t>(c.width()) * c.height() * 3);
+                        for (size_t i = 0; i < static_cast<size_t>(c.width()) * c.height(); ++i) {
+                            const uint32_t px = c.data()[i];
+                            ppm += static_cast<char>(px & 0xFF), ppm += static_cast<char>((px >> 8) & 0xFF),
+                                ppm += static_cast<char>((px >> 16) & 0xFF);
+                        }
+                        XC_LOGI("menu snapshot: %s",
+                                platform::writeFileAtomic(platform::dataDir() + "/menu_now.ppm", ppm) ? "ok" : "failed");
+                    }
+                }
             }
         } else if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);

@@ -4,6 +4,7 @@
 #include "stream/stream_session.h"
 
 #include "stream/h264_receiver.h"
+#include "stream/net_diag.h"
 #include "stream/rtcp_reporter.h"
 
 #include "platform/platform.h"
@@ -475,6 +476,24 @@ struct StreamSession::Impl {
         pc->onIceStateChange([](rtc::PeerConnection::IceState s) { XC_LOGI("webrtc: ICE state %s", named(s).c_str()); });
         pc->onStateChange([this](rtc::PeerConnection::State s) {
             XC_LOGI("peer connection state: %d (%s)", static_cast<int>(s), named(s).c_str());
+            if (s == rtc::PeerConnection::State::Connected && netdiag::enabled()) {
+                // The pair is read off this thread: the ICE agent may be busy on it.
+                std::thread([w = std::weak_ptr<rtc::PeerConnection>(pc)] {
+                    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+                    auto p = w.lock();
+                    if (!p) return;
+                    rtc::Candidate local, remote;
+                    if (!p->getSelectedCandidatePair(&local, &remote)) {
+                        XC_LOGW("netdiag: no selected candidate pair");
+                        return;
+                    }
+                    // The local side by port only: a reflexive candidate would be the home's address.
+                    XC_LOGI("netdiag: stream path: local port %u -> server %s:%u",
+                            static_cast<unsigned>(local.port().value_or(0)), remote.address().value_or("?").c_str(),
+                            static_cast<unsigned>(remote.port().value_or(0)));
+                    if (auto port = local.port()) netdiag::watchSocket(*port);
+                }).detach();
+            }
             if (s == rtc::PeerConnection::State::Failed) fail("WebRTC connection failed");
             if (s == rtc::PeerConnection::State::Disconnected) fail("WebRTC connection lost");
         });
@@ -605,6 +624,7 @@ struct StreamSession::Impl {
     }
 
     bool start(std::string& err) {
+        netdiag::refresh();
         XC_LOGI("webrtc: start() calling createPeer");
         createPeer();
         if (!pc || failed) {
@@ -784,6 +804,7 @@ struct StreamSession::Impl {
 
     void close() {
         open = false;
+        netdiag::stopWatch();
         if (pc) {
             try {
                 pc->close();

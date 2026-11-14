@@ -11618,6 +11618,34 @@ static void testMilestone5TransmissionQualityAndStreamReload() {
         CHECK(!lat.warm);
     }
 
+    // 2b. A network hold (no packet for longer than any target, then all at once): its dry
+    //     grains leave the target and the calm as they were, and the burst's excess is cut at
+    //     once; counted as jitter (holdAware off, the A/B's old side), as before.
+    for (bool aware : {true, false}) {
+        xc::app::AudioLatency lat;
+        xc::media::AudioQueue q;
+        q.open();
+        lat.reset();
+        lat.holdAware = aware;
+        lat.update(1000, &q);
+        lat.update(4000, &q);  // warm
+        float sample[2] = {0.0f, 0.0f}, buf[256 * 2];
+        q.push(sample, 1);
+        q.pull(buf, 256);  // ran dry during the hold
+        lat.noteHold(4500, 350);
+        std::vector<float> burst(48 * 200 * 2, 0.0f);  // then 200 ms at once
+        q.push(burst.data(), 48 * 200);
+        lat.update(5000, &q);
+        if (aware) {
+            CHECK(lat.targetMs == 50 && lat.calmSinceMs == 4000);
+            CHECK(q.queuedFrames() <= 50 * 48 + 48);  // down to the target
+        } else {
+            CHECK(lat.targetMs == 55 && lat.calmSinceMs == 5000);
+            CHECK(q.queuedFrames() > 150 * 48);  // left to the slow trim
+        }
+        CHECK(lat.holds == 1);
+    }
+
     // 3. StreamPlayer::requestReconnect() sets reconnecting state
     {
         xc::xcloud::GssvClient gssv;
