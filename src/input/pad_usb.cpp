@@ -1199,16 +1199,20 @@ uint64_t usbPadActiveAt(int player) {
 void setUsbPadsEnabled(bool enabled) {
     bool was = g_usbPadsEnabled.exchange(enabled);
     if (was && !enabled) {
-        std::lock_guard<std::mutex> lock(g_mutex);
-        for (int s = 0; s < kMaxUsbPads; ++s) {
-            Slot& slot = g_slots[s];
-            if (slot.attached) {
-                if (slot.player >= 0) {
-                    g_events.push_back({UsbPadEvent::Kind::Disconnected, slot.player, slot.name, s});
+        {
+            std::lock_guard<std::mutex> lock(g_mutex);
+            for (int s = 0; s < kMaxUsbPads; ++s) {
+                Slot& slot = g_slots[s];
+                if (slot.attached) {
+                    if (slot.player >= 0) {
+                        g_events.push_back({UsbPadEvent::Kind::Disconnected, slot.player, slot.name, s});
+                    }
+                    slot = Slot{};
                 }
-                slot = Slot{};
             }
         }
+        // Outside the lock: stopping joins the pads' threads, and closing each one detaches it
+        // (usbPadDetached takes g_mutex), as their last reports do (usbPadState).
         usbPadsStop();
     } else if (!was && enabled) {
         usbPadsStart();
