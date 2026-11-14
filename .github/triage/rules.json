@@ -155,6 +155,28 @@
       ]
     },
     {
+      "id": "wifi-hold",
+      "label": "area: network",
+      "patterns": [
+        "network: packets held [0-9]+ ms",
+        "[1-9][0-9]* network holds"
+      ],
+      "reply": "**The Wi-Fi is holding packets** (`network: packets held … then delivered at once` in the log): every so often one packet arrives late on the Wi-Fi between the router and the console, and the Wi-Fi holds the ones after it until it gives up waiting; then they all arrive at once. The picture freezes for a moment and jumps, most visibly where the image is light (menus, lobbies), less in action. It is not the app or the internet connection, and the app cannot remove it: changing the router's 5 GHz channel (one the neighbours don't use), lowering its channel width from 80 to 40 MHz, restarting the router or updating its firmware usually helps; a network cable or a powerline adapter removes it. Recent releases show in the game menu how often it happens, and keep the sound from drifting later after each one.",
+      "reply_pt": "**O Wi-Fi está segurando pacotes** (`network: packets held … then delivered at once` no log): de vez em quando um pacote chega atrasado no Wi-Fi entre o roteador e o console, e o Wi-Fi segura os seguintes até desistir de esperar; aí todos chegam de uma vez. A imagem congela por um instante e pula, mais visível onde a imagem é leve (menus, lobby), menos na ação. Não é o app nem a conexão de internet, e o app não consegue eliminar isso: trocar o canal de 5 GHz do roteador (um que os vizinhos não usem), reduzir a largura do canal de 80 para 40 MHz, reiniciar o roteador ou atualizar o firmware dele costuma ajudar; cabo de rede ou adaptador powerline eliminam o problema. As versões recentes mostram no menu do jogo com que frequência isso acontece, e o som não fica mais atrasado depois de cada travada.",
+      "reply_es": "**El Wi-Fi está reteniendo paquetes** (`network: packets held … then delivered at once` en el registro): de vez en cuando un paquete llega tarde por el Wi-Fi entre el router y la consola, y el Wi-Fi retiene los siguientes hasta dejar de esperarlo; luego llegan todos de golpe. La imagen se congela un instante y salta, sobre todo donde la imagen es ligera (menús, lobby), menos en la acción. No es la app ni la conexión a internet, y la app no puede eliminarlo: cambiar el canal de 5 GHz del router (uno que no usen los vecinos), bajar el ancho de canal de 80 a 40 MHz, reiniciar el router o actualizar su firmware suele ayudar; un cable de red o un adaptador powerline lo eliminan. Las versiones recientes muestran en el menú del juego con qué frecuencia ocurre, y el sonido ya no se retrasa tras cada congelación."
+    },
+    {
+      "id": "usb-xray",
+      "label": "area: controller",
+      "patterns": [
+        "usb x-ray: [0-9a-f]{4}:[0-9a-f]{4} release",
+        "usb x-ray: .*recording its reports"
+      ],
+      "reply": "**Thanks: the log has the X-ray of your USB controller** (`usb x-ray:` lines: its identity, descriptors and the reports it sent), which is what is needed to add it. If you pressed each button once (and moved the sticks, triggers, whammy or tilt) while the notice was on the screen, nothing else is needed. If not, please plug it in again with the app open, press each button once, slowly, and attach the new log here. Tell us too what it is (for example: a PS3 Guitar Hero guitar) and the game you want to use it in.",
+      "reply_pt": "**Obrigado: o log tem o raio-X do seu controle USB** (linhas `usb x-ray:`: a identidade, os descritores e os relatórios que ele enviou), que é o que precisamos para adicioná-lo. Se você apertou cada botão uma vez (e mexeu nos analógicos, gatilhos, alavanca ou inclinação) enquanto o aviso estava na tela, não precisa de mais nada. Se não, conecte-o de novo com o app aberto, aperte cada botão uma vez, devagar, e anexe o novo log aqui. Diga também o que ele é (por exemplo: guitarra de Guitar Hero de PS3) e em que jogo você quer usá-lo.",
+      "reply_es": "**Gracias: el registro tiene la radiografía de tu mando USB** (líneas `usb x-ray:`: su identidad, sus descriptores y los informes que envió), que es lo que hace falta para añadirlo. Si pulsaste cada botón una vez (y moviste los sticks, gatillos, palanca o inclinación) mientras el aviso estaba en pantalla, no hace falta nada más. Si no, conéctalo de nuevo con la app abierta, pulsa cada botón una vez, despacio, y adjunta aquí el nuevo registro. Dinos también qué es (por ejemplo: una guitarra de Guitar Hero de PS3) y en qué juego quieres usarlo."
+    },
+    {
       "id": "controller",
       "label": "area: controller",
       "patterns": [

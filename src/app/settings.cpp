@@ -174,7 +174,11 @@ bool Settings::load(const std::string& path) {
     usbControllers = (*j)["usbControllers"].asBool((*j)["usb_controllers"].asBool((*j)["enable_onefamily"].asBool(usbControllers)));
     guitarStrum = (*j)["guitarStrum"].asBool(guitarStrum);
     guitarTilt = (*j)["guitarTilt"].asBool(guitarTilt);
-    guitarTiltAt = static_cast<float>(std::clamp((*j)["guitarTiltAt"].asNumber(guitarTiltAt), -1.0, 1.0));
+    // "guitarLiftBy": chosen in the guitar's menu (its sensitivity). The earlier "guitarRaiseBy",
+    // "guitarRaisedAt" and "guitarTiltAt" were never the player's choice: left alone.
+    guitarRaiseBy = static_cast<float>(std::clamp((*j)["guitarLiftBy"].asNumber(guitarRaiseBy), 0.1, 1.5));
+    guitarLanes = (*j)["guitarLanes"].str(guitarLanes);
+    guitarStrumLanes = (*j)["guitarStrumLanes"].str(guitarStrumLanes);
     soloInputRedirect = (*j)["soloInputRedirect"].asBool((*j)["solo_input_redirect"].asBool(soloInputRedirect));
     titlePlaytime.clear();
     for (const auto& [id, sec] : (*j)["titlePlaytime"].members())
@@ -406,7 +410,9 @@ bool Settings::save(const std::string& path) const {
     v.set("soloInputRedirect", soloInputRedirect);
     v.set("guitarStrum", guitarStrum);
     v.set("guitarTilt", guitarTilt);
-    v.set("guitarTiltAt", static_cast<double>(guitarTiltAt));
+    v.set("guitarLiftBy", static_cast<double>(guitarRaiseBy));
+    v.set("guitarLanes", guitarLanes);
+    v.set("guitarStrumLanes", guitarStrumLanes);
     json::Value pt = json::Value::object();
     for (const auto& [id, sec] : titlePlaytime)
         if (sec > 0) pt.set(id, static_cast<int64_t>(sec));

@@ -30,6 +30,7 @@
 #include "input/keyboard_nav.h"
 #include "input/pad_map.h"
 #include "input/pad_usb.h"
+#include "input/usb_xray.h"
 #include "ui/input_mode.h"
 #include "ui/pad_glyphs.h"
 #include "input/tuning.h"
@@ -116,7 +117,14 @@ void applyControllerSettings() {
     media::setAudioHapticsLevel(g_settings.audioHaptics);
     input::setUsbPadsEnabled(g_settings.usbControllers);
     input::setGuitarStrum(g_settings.guitarStrum);
-    input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarTiltAt);
+    input::setGuitarTilt(g_settings.guitarTilt, g_settings.guitarRaiseBy);
+    for (bool strum : {false, true}) {
+        input::GuitarBinding b = strum ? input::kStrumLanes : input::kFretLanes;
+        const std::string& text = strum ? g_settings.guitarStrumLanes : g_settings.guitarLanes;
+        if (!text.empty() && !input::guitarBindingFromText(text, b))
+            XC_LOGW("settings: guitar buttons \"%s\" not understood, defaults kept", text.c_str());
+        input::setGuitarBinding(strum, b);
+    }
     if (g_ui) g_ui->setCircleConfirms(g_settings.circleConfirms);
 }
 
@@ -1349,6 +1357,8 @@ bool Core::frame() {
     input::ControllerState usbPad;
     if (input::pollUsbPadsFor(0, usbPad, usbMenuOwner)) input::mergePads(player1, usbPad);
     if (input::pollUsbPad(usbPad)) input::mergePads(pad, usbPad);
+    for (const std::string& name : input::takeUsbXrayNotices())
+        platform::notify(ui::trf(ui::Str::UsbXrayNotice, name), "usb x-ray: recording " + name);
     for (const input::UsbPadEvent& e : input::takeUsbPadEvents()) {
         if (e.kind == input::UsbPadEvent::Kind::MenuButton) {
             if (streaming) streamScreen->usbMenuButton(e.slot);

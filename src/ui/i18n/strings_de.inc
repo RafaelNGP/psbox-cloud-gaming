@@ -551,12 +551,21 @@ constexpr Column kGerman = {
     "Beendet das Remote Play von der Xbox-Konsole und kehrt zum Startbildschirm zurück.", // MenuDescEndStream
     "Weist den physischen Controller diesem virtuellen Spielerplatz zu.", // MenuDescPlayer
     "Gitarre: Ein Bund erreicht das Spiel nur, wenn du ihn hältst und anschlägst (wie in Guitar Hero). Aus: Die Bünde allein spielen.", // MenuDescStrum
-    "Die Gitarre anheben (Hals nach oben) löst Star Power aus (Overdrive, RT), wie die Back-Taste.", // MenuDescTilt
+    "Die Gitarre anheben (Hals nach oben) löst Star Power aus (Overdrive), wie die Back-Taste. Löst es mitten im Song nicht aus, mach es empfindlicher.", // MenuDescTilt
     "In Fortnite festlegen: Einstellungen > Controller > Fortnite Festival", // GuitarBindTitle
     "Spur", // GuitarBindLane
     "Overdrive", // GuitarBindOverdrive
-    "Anschlag an: Die Bünde bedienen auch die Menüs (A B Y X).", // GuitarBindStrumOn
+    "Anschlag an: In Menüs sind die Bünde A B Y X; Grün (A, Overdrive) nur kurz angetippt, ohne Anschlag.", // GuitarBindStrumOn
     "Anschlag aus: Ein Bund spielt beim Drücken.", // GuitarBindStrumOff
+    "Wähle die Taste, die dieser Bund sendet (A oder ◀ ▶ wechseln). Weise in Fortnite die Spur derselben Taste zu.", // MenuDescGuitarBind
+    "Standardtasten wiederherstellen", // GuitarBindReset
+    "Setzt die Spuren und Overdrive auf die Standardtasten dieses Anschlag-Modus (an oder aus) zurück.", // MenuDescGuitarReset
+    "WLAN hält Pakete zurück", // WifiHoldPill
+    "WLAN hielt %s× in 2 Min. Pakete zurück: 5-GHz-Kanal wechseln oder Kabel nutzen.", // WifiHoldTip
+    "Unbekannter USB-Controller (%s): Drücke jede Taste einmal, langsam. Das Protokoll hält es fest, damit er unterstützt werden kann.", // UsbXrayNotice
+    "Wenig empfindlich", // TiltLess
+    "Normal", // TiltNormal
+    "Sehr empfindlich", // TiltMore
     "Passt die Lautstärke des integrierten Controller-Lautsprechers an.", // MenuDescPadSpeakerVolume
     "Lenkrad (Linker Stick)",                          // GyroSteering
     "Lenkrad (Gas R2)",                                // GyroSteeringDrive

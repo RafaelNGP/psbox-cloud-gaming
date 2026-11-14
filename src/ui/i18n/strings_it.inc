@@ -551,12 +551,21 @@ constexpr Column kItalian = {
     "Termina la riproduzione remota dalla console Xbox e torna alla home.", // MenuDescEndStream
     "Assegna quale controller fisico corrisponde a questo giocatore virtuale.", // MenuDescPlayer
     "Chitarra: un tasto arriva al gioco solo se plettri tenendolo premuto (come in Guitar Hero). Disattivata: i tasti da soli suonano.", // MenuDescStrum
-    "Alzare la chitarra (il manico in su) attiva lo Star Power (Overdrive, RT), come il tasto Back.", // MenuDescTilt
+    "Alzare la chitarra (il manico in su) attiva lo Star Power (Overdrive), come il tasto Back. Se non si attiva a metà canzone, rendilo più sensibile.", // MenuDescTilt
     "Imposta in Fortnite: Impostazioni > Controller > Fortnite Festival", // GuitarBindTitle
     "Corsia", // GuitarBindLane
     "Overdrive", // GuitarBindOverdrive
-    "Plettrata attiva: i tasti funzionano anche nei menu (A B Y X).", // GuitarBindStrumOn
+    "Plettrata attiva: nei menu i tasti sono A B Y X; il verde (A, Overdrive) solo con un tocco rapido senza plettrare.", // GuitarBindStrumOn
     "Plettrata disattivata: il tasto suona appena premuto.", // GuitarBindStrumOff
+    "Scegli il pulsante inviato da questo tasto (A o ◀ ▶ per cambiarlo). In Fortnite, assegna la corsia allo stesso pulsante.", // MenuDescGuitarBind
+    "Ripristina pulsanti predefiniti", // GuitarBindReset
+    "Riporta le corsie e l'Overdrive ai pulsanti predefiniti di questa modalità di plettrata (attiva o disattivata).", // MenuDescGuitarReset
+    "Il Wi-Fi trattiene pacchetti", // WifiHoldPill
+    "Wi-Fi: pacchetti trattenuti %s× in 2 min. Cambia canale 5 GHz del router o usa il cavo.", // WifiHoldTip
+    "Controller USB non riconosciuto (%s): premi ogni tasto una volta, lentamente. Resta nel log per aggiungerne il supporto.", // UsbXrayNotice
+    "Poco sensibile", // TiltLess
+    "Normale", // TiltNormal
+    "Molto sensibile", // TiltMore
     "Regola il livello del volume dell'altoparlante integrato nel controller.", // MenuDescPadSpeakerVolume
     "Volante (Levetta Sin.)",                          // GyroSteering
     "Volante (Accellera R2)",                          // GyroSteeringDrive

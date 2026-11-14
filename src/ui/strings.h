@@ -566,6 +566,15 @@ enum class Str {
     GuitarBindOverdrive,
     GuitarBindStrumOn,
     GuitarBindStrumOff,
+    MenuDescGuitarBind,  // game menu, guitar tab: a lane's button, chosen by the player
+    GuitarBindReset,
+    MenuDescGuitarReset,
+    WifiHoldPill,        // in a game: packets held and delivered at once, again and again (most likely the Wi-Fi)
+    WifiHoldTip,         // game menu, under the statistics: how many in 2 minutes (%s), and what helps
+    UsbXrayNotice,       // a USB controller not known: its reports are being logged (%s: its name)
+    TiltLess,            // game menu, guitar tab: star power by raising, how sensitive
+    TiltNormal,
+    TiltMore,
     MenuDescPadSpeakerVolume,
     GyroSteering,
     GyroSteeringDrive,

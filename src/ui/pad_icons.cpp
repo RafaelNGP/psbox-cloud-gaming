@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "ui/pad_icons.h"
+#include "ui/svg_icon.h"
 
 #include <algorithm>
 #include <cmath>
@@ -46,6 +47,9 @@ void drawPhoneGlyph(Canvas& c, int x, int y, int w, Color color, Color backgroun
 }
 
 void drawGuitarGlyph(Canvas& c, int x, int y, int w, Color color, Color background) {
+    // assets/icons/guitar.svg (its box is w by 0.7 w, as this glyph's); drawn by hand below only
+    // when it can't be read.
+    if (drawSvgIcon(c, SvgIcon::Guitar, x, y, w, color)) return;
     const float W = static_cast<float>(w), H = W * 0.7f, X = static_cast<float>(x), Y = static_cast<float>(y);
     // The neck, from the body up to the right, and its head.
     c.line(X + W * 0.40f, Y + H * 0.62f, X + W * 0.80f, Y + H * 0.12f, std::max(2.0f, W * 0.07f), color);

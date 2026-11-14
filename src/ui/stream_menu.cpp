@@ -35,7 +35,8 @@ std::string fmt(const char* f, double v) {
 
 bool StreamMenu::itemInTab(int item, MenuTab tab) const {
     if (tab == MenuTab::Guitar)
-        return item == XboxButton || item == PlayerItem || item == StrumItem || item == TiltItem || item == Leave;
+        return item == XboxButton || item == PlayerItem || item == StrumItem || item == TiltItem || item == Leave ||
+               (item >= GuitarLane0 && item <= GuitarReset);
     if (tab == MenuTab::General) {
         return item == XboxButton || item == Stats ||
                item == Upscaler || item == Sharpness || item == Deband ||
@@ -246,6 +247,29 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         return MenuAction::None;
     }
 
+    // The list of buttons for a lane: the cursor up and down (the strum bar), accept takes it,
+    // back leaves the lane as it was; nothing else meanwhile.
+    if (pickOpen_) {
+        constexpr int n = static_cast<int>(input::GuitarOut::Count);
+        if (!(selected_ >= GuitarLane0 && selected_ <= GuitarOverdrive) || activeTab_ != MenuTab::Guitar) {
+            pickOpen_ = false;
+        } else if (in.up || in.down) {
+            pickIndex_ = (pickIndex_ + (in.up ? n - 1 : 1)) % n;
+            return MenuAction::None;
+        } else if (in.accept) {
+            input::GuitarBinding& b = guitarBind_[guitarStrum_ ? 1 : 0];
+            (selected_ == GuitarOverdrive ? b.starPower : b.lanes[selected_ - GuitarLane0]) =
+                static_cast<input::GuitarOut>(pickIndex_);
+            pickOpen_ = false;
+            return MenuAction::GuitarBinding;
+        } else if (in.back) {
+            pickOpen_ = false;
+            return MenuAction::None;
+        } else {
+            return MenuAction::None;
+        }
+    }
+
     if (in.back || in.options) {
         open_ = false;
         return MenuAction::Close;
@@ -269,7 +293,16 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         return MenuAction::None;
     }
 
-    // Up / down within active tab
+    // Up / down within active tab; the guitar's rows in the order they are drawn.
+    if (activeTab_ == MenuTab::Guitar && (in.up || in.down)) {
+        constexpr int n = static_cast<int>(std::size(kGuitarOrder));
+        int pos = 0;
+        for (int k = 0; k < n; ++k)
+            if (kGuitarOrder[k] == selected_) pos = k;
+        do pos = (pos + (in.up ? n - 1 : 1)) % n; while (!itemShown(kGuitarOrder[pos]));
+        selected_ = kGuitarOrder[pos];
+        in.up = in.down = false;
+    }
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
     if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
 
@@ -282,8 +315,31 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         return MenuAction::GuitarStrum;
     }
     if (selected_ == TiltItem && (in.left || in.right || in.accept)) {
-        guitarTilt_ = !guitarTilt_;
+        // Off, less sensitive, normal, very sensitive: forward, or back with left.
+        int at = guitarTilt_ ? guitarTiltLevel_ : 0;
+        at = (at + (in.left ? 3 : 1)) % 4;
+        guitarTilt_ = at > 0;
+        if (at > 0) guitarTiltLevel_ = at;
         return MenuAction::GuitarTilt;
+    }
+    // A lane's (or star power's) button: accept opens the list of them; left and right go to
+    // the one before and the next.
+    if (selected_ >= GuitarLane0 && selected_ <= GuitarOverdrive && in.accept) {
+        const input::GuitarBinding& b = guitarBind_[guitarStrum_ ? 1 : 0];
+        pickIndex_ = static_cast<int>(selected_ == GuitarOverdrive ? b.starPower : b.lanes[selected_ - GuitarLane0]);
+        pickOpen_ = true;
+        return MenuAction::None;
+    }
+    if (selected_ >= GuitarLane0 && selected_ <= GuitarOverdrive && (in.left || in.right)) {
+        input::GuitarBinding& b = guitarBind_[guitarStrum_ ? 1 : 0];
+        input::GuitarOut& o = selected_ == GuitarOverdrive ? b.starPower : b.lanes[selected_ - GuitarLane0];
+        constexpr int n = static_cast<int>(input::GuitarOut::Count);
+        o = static_cast<input::GuitarOut>((static_cast<int>(o) + (in.left ? n - 1 : 1)) % n);
+        return MenuAction::GuitarBinding;
+    }
+    if (selected_ == GuitarReset && in.accept) {
+        guitarBind_[guitarStrum_ ? 1 : 0] = guitarStrum_ ? input::kStrumLanes : input::kFretLanes;
+        return MenuAction::GuitarBinding;
     }
     if (selected_ == Profile && (in.left || in.right || in.accept)) {
         hasCustomProfile_ = !hasCustomProfile_;
@@ -416,6 +472,125 @@ std::string StreamMenu::formatBitrateLabel(int mbps) {
     return std::to_string(mbps) + (mbps > 15 ? " Mbps (experimental)" : " Mbps");
 }
 
+// The guitar's tab: its settings, then what to bind in Fortnite Festival, one lane per row in the
+// frets' colours (each button the player's choice), star power, back to the defaults, and Leave
+// at the foot as in the other tabs.
+void StreamMenu::drawGuitarTab(Canvas& c) const {
+    constexpr int kPad = 40;  // as renderMenu
+    constexpr int kTop = 128, kRowH = 38, kPx = 18, kBindH = 34, kBindPx = 17;
+    const Color frets[5] = {rgba(40, 180, 70), rgba(220, 50, 50), rgba(235, 200, 40), rgba(40, 110, 230),
+                            rgba(240, 130, 30)};
+    auto rowRect = [](int y, int h) { return Rect{kPad - 16, y, kMenuW - 2 * (kPad - 16), h}; };
+    auto drawValue = [&](const Rect& row, std::string value, bool sel) {
+        if (sel) value = "< " + value + " >";
+        const int w = fonts_.semibold.measure(value, kPx);
+        fonts_.semibold.draw(c, value, row.x + row.w - 16 - w, fonts_.semibold.centeredY(row.y, row.h, kPx), kPx,
+                             sel ? kDark : kGray);
+    };
+    int y = kTop;
+    for (int i : {static_cast<int>(XboxButton), static_cast<int>(PlayerItem), static_cast<int>(StrumItem),
+                  static_cast<int>(TiltItem)}) {
+        if (!itemShown(i)) continue;
+        const Rect row = rowRect(y, kRowH - 4);
+        const bool sel = i == selected_;
+        if (sel) c.fillRect(row, kWhite, 8);
+        const char* label = i == XboxButton   ? tr(Str::MenuXboxButton)
+                            : i == PlayerItem ? tr(Str::MenuPlayer)
+                            : i == StrumItem  ? tr(Str::MenuStrum)
+                                              : tr(Str::MenuTilt);
+        fonts_.semibold.draw(c, label, row.x + 16, fonts_.semibold.centeredY(row.y, row.h, kPx), kPx, sel ? kDark : kWhite);
+        if (i == PlayerItem) drawValue(row, std::to_string(usbOwnerPlayer_ + 1), sel);
+        if (i == StrumItem) drawValue(row, tr(guitarStrum_ ? Str::On : Str::Off), sel);
+        if (i == TiltItem)
+            drawValue(row, tr(!guitarTilt_ ? Str::Off : guitarTiltLevel_ == 1 ? Str::TiltLess : guitarTiltLevel_ == 3 ? Str::TiltMore : Str::TiltNormal), sel);
+        y += kRowH;
+    }
+
+    y += 6;
+    c.fillRect({kPad, y, kMenuW - 2 * kPad, 1}, rgba(60, 60, 60));
+    y += 12;
+    for (const auto& l : fonts_.semibold.wrap(tr(Str::GuitarBindTitle), 16, kMenuW - 2 * kPad, 2)) {
+        fonts_.semibold.draw(c, l, kPad, y, 16, kGray);
+        y += 22;
+    }
+    y += 6;
+    const input::GuitarBinding& b = guitarBind_[guitarStrum_ ? 1 : 0];
+    int pickRowY = -1;
+    for (int item = GuitarLane0; item <= GuitarReset; ++item) {
+        const Rect row = rowRect(y, kBindH - 4);
+        const bool sel = item == selected_;
+        if (sel) c.fillRect(row, kWhite, 8);
+        const int ty = fonts_.semibold.centeredY(row.y, row.h, kBindPx);
+        if (item == GuitarReset) {
+            fonts_.semibold.draw(c, tr(Str::GuitarBindReset), row.x + 16, ty, kBindPx, sel ? kDark : kWhite);
+        } else {
+            const int k = item - GuitarLane0;
+            const bool lane = k < 5;
+            c.fillCircle(static_cast<float>(row.x + 25), static_cast<float>(row.y + row.h / 2), 8.0f,
+                         lane ? frets[k] : rgba(80, 200, 230));
+            const std::string label =
+                lane ? std::string(tr(Str::GuitarBindLane)) + " " + std::to_string(k + 1) : tr(Str::GuitarBindOverdrive);
+            fonts_.semibold.draw(c, label, row.x + 44, ty, kBindPx, sel ? kDark : kWhite);
+            const std::string name = input::guitarOutName(lane ? b.lanes[k] : b.starPower);
+            const std::string shown = sel ? "< " + name + " >" : name;
+            const int bw = fonts_.bold.measure(shown, 15) + 18, bx = row.x + row.w - 12 - bw;
+            c.fillRect({bx, row.y + 3, bw, row.h - 6}, sel ? rgba(0, 0, 0, 30) : rgba(255, 255, 255, 30), 5);
+            fonts_.bold.draw(c, shown, bx + 9, fonts_.bold.centeredY(row.y, row.h, 15), 15, sel ? kDark : kWhite);
+        }
+        if (pickOpen_ && item == selected_) pickRowY = row.y;
+        y += kBindH;
+    }
+    y += 6;
+    for (const auto& l : fonts_.regular.wrap(tr(guitarStrum_ ? Str::GuitarBindStrumOn : Str::GuitarBindStrumOff), 15,
+                                             kMenuW - 2 * kPad, 2)) {
+        fonts_.regular.draw(c, l, kPad, y, 15, kGray);
+        y += 20;
+    }
+
+    const Rect leave = rowRect(704 - 18 - (kRowH - 4), kRowH - 4);  // where the other tabs put it
+    const bool sel = selected_ == Leave;
+    if (sel) c.fillRect(leave, kWhite, 8);
+    fonts_.semibold.draw(c, homeConsole_ ? tr(Str::MenuEndStream) : tr(Str::MenuLeave), leave.x + 16,
+                         fonts_.semibold.centeredY(leave.y, leave.h, kPx), kPx, sel ? kDark : kWhite);
+    if (pickRowY >= 0) drawGuitarPicker(c, pickRowY);
+}
+
+// The list of buttons for the lane being chosen, over the right of its row: each button, the
+// lane (or Overdrive) that has it already, the one under the cursor lit.
+void StreamMenu::drawGuitarPicker(Canvas& c, int rowY) const {
+    constexpr int kPad = 40, kItemH = 28, kW = 250, kPx = 16;
+    constexpr int n = static_cast<int>(input::GuitarOut::Count);
+    const int h = n * kItemH + 12;
+    const int x = kMenuW - kPad - kW + 8;
+    const int y = std::clamp(rowY - 6, 120, 700 - h);
+    c.fillRect({x - 2, y - 2, kW + 4, h + 4}, rgba(0, 0, 0, 120), 10);  // a shadow's edge
+    c.fillRect({x, y, kW, h}, rgba(34, 34, 38), 9);
+    c.strokeRect({x, y, kW, h}, rgba(255, 255, 255, 50), 1, 9);
+    const input::GuitarBinding& b = guitarBind_[guitarStrum_ ? 1 : 0];
+    const int self = selected_ == GuitarOverdrive ? 5 : selected_ - GuitarLane0;
+    for (int i = 0; i < n; ++i) {
+        const auto out = static_cast<input::GuitarOut>(i);
+        const Rect r{x + 6, y + 6 + i * kItemH, kW - 12, kItemH - 2};
+        const bool lit = i == pickIndex_;
+        if (lit) c.fillRect(r, kWhite, 6);
+        if ((self < 5 ? b.lanes[self] : b.starPower) == out)  // what it has now
+            c.fillCircle(static_cast<float>(r.x + 8), static_cast<float>(r.y + r.h / 2), 3.5f, kGreen);
+        fonts_.bold.draw(c, input::guitarOutName(out), r.x + 18, fonts_.bold.centeredY(r.y, r.h, kPx), kPx, lit ? kDark : kWhite);
+        // Who has it already (another lane, Overdrive): shown, not forbidden.
+        std::string owner;
+        for (int k = 0; k < 6; ++k) {
+            if (k == self || (k < 5 ? b.lanes[k] : b.starPower) != out) continue;
+            owner = k < 5 ? std::string(tr(Str::GuitarBindLane)) + " " + std::to_string(k + 1) : tr(Str::GuitarBindOverdrive);
+            break;
+        }
+        if (!owner.empty()) {
+            const int w = fonts_.regular.measure(owner, 13);
+            fonts_.regular.draw(c, owner, r.x + r.w - 10 - w, fonts_.regular.centeredY(r.y, r.h, 13), 13,
+                                lit ? rgba(70, 70, 70) : kGray);
+        }
+    }
+}
+
 const char* StreamMenu::itemDescription(int item) const {
     switch (item) {
         case XboxButton: return tr(Str::MenuDescXboxButton);
@@ -434,6 +609,9 @@ const char* StreamMenu::itemDescription(int item) const {
         case PlayerItem: return tr(Str::MenuDescPlayer);
         case StrumItem: return tr(Str::MenuDescStrum);
         case TiltItem: return tr(Str::MenuDescTilt);
+        case GuitarLane0: case GuitarLane1: case GuitarLane2: case GuitarLane3: case GuitarLane4:
+        case GuitarOverdrive: return tr(Str::MenuDescGuitarBind);
+        case GuitarReset: return tr(Str::MenuDescGuitarReset);
         case ConfirmItem: return tr(Str::SettingDescConfirmButton);
         case Triggers: return tr(Str::SettingDescTriggerRumble);
         case DeadzoneItem: return tr(Str::SettingDescDeadzone);
@@ -671,7 +849,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
     int visibleCount = std::min(totalShown, kMaxVisible);
 
-    for (int v = 0; v < visibleCount; ++v) {
+    for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {  // the guitar's: drawGuitarTab
         int i = shownList[startIdx + v];
         constexpr int kStatsSepY = 704;
         constexpr int kLeaveMarginBottom = 18;
@@ -852,43 +1030,18 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         c.fillRect({trackX, thumbY, 4, thumbH}, kGray, 2);
     }
 
-    // A guitar's menu: what to bind in Fortnite Festival for the layout in use, lane by lane in
-    // the frets' colours, and star power.
-    if (activeTab_ == MenuTab::Guitar) {
-        const input::GuitarBinding& b = guitarStrum_ ? input::kStrumLanes : input::kFretLanes;
-        const Color frets[5] = {rgba(40, 180, 70), rgba(220, 50, 50), rgba(235, 200, 40), rgba(40, 110, 230),
-                                rgba(240, 130, 30)};
-        int y = 128 + 5 * 38 + 14;
-        c.fillRect({kPad, y, kMenuW - 2 * kPad, 1}, rgba(60, 60, 60));
-        y += 14;
-        fonts_.semibold.draw(c, tr(Str::GuitarBindTitle), kPad, y, 16, kGray);
-        y += 32;
-        const int colW = (kMenuW - 2 * kPad) / 2;
-        for (int i = 0; i < 6; ++i) {
-            const int x = kPad + (i % 2) * colW, rowY = y + (i / 2) * 34;
-            std::string label, button;
-            if (i < 5) {
-                c.fillCircle(static_cast<float>(x + 9), static_cast<float>(rowY + 11), 8.0f, frets[i]);
-                label = std::string(tr(Str::GuitarBindLane)) + " " + std::to_string(i + 1);
-                button = b.lanes[i];
-            } else {
-                label = tr(Str::GuitarBindOverdrive);
-                button = b.starPower;
-                c.fillCircle(static_cast<float>(x + 9), static_cast<float>(rowY + 11), 8.0f, rgba(80, 200, 230));
-            }
-            fonts_.semibold.draw(c, label, x + 26, fonts_.semibold.centeredY(rowY, 22, 17), 17, kWhite);
-            const int bw = fonts_.bold.measure(button, 15) + 18, bx = x + colW - 24 - bw;
-            c.fillRect({bx, rowY, bw, 24}, rgba(255, 255, 255, 30), 5);
-            fonts_.bold.draw(c, button, bx + 9, fonts_.bold.centeredY(rowY, 24, 15), 15, kWhite);
-        }
-        y += 3 * 34 + 10;
-        fonts_.regular.draw(c, tr(guitarStrum_ ? Str::GuitarBindStrumOn : Str::GuitarBindStrumOff), kPad, y, 15, kGray);
-    }
+    if (activeTab_ == MenuTab::Guitar) drawGuitarTab(c);
 
     // LOWER SECTION (Utilizing lower empty third):
     // 1. Connection Statistics: 2 Columns at y = 716
     c.fillRect({kPad, 704, kMenuW - 2 * kPad, 2}, rgba(60, 60, 60));
     telemetry_.drawTwoColumnStats(c, fonts_, kPad, 716, kMenuW - 2 * kPad, 85, info);
+    // Packets held by the Wi-Fi, again and again: what helps, on one line under the statistics.
+    if (info.wifiHolds >= 3) {
+        const std::string tip = trf(Str::WifiHoldTip, std::to_string(info.wifiHolds));
+        const auto lines = fonts_.regular.wrap(tip, 14, kMenuW - 2 * kPad, 1);
+        if (!lines.empty()) fonts_.regular.draw(c, lines[0], kPad, 795, 14, kWarnColor);
+    }
 
     // 2. Controllers Header & Microphone VU Meter at y = 824
     c.fillRect({kPad, 812, kMenuW - 2 * kPad, 1}, rgba(50, 50, 50));
@@ -1082,8 +1235,8 @@ Canvas StreamMenu::renderStats(const StreamInfo& info) const {
     return c;
 }
 
-Canvas StreamMenu::renderWarning() const {
-    const char* text = tr(Str::ConnectionUnstable);
+Canvas StreamMenu::renderWarning(bool wifi) const {
+    const char* text = tr(wifi ? Str::WifiHoldPill : Str::ConnectionUnstable);
     constexpr int kPx = 20, kH = 36, kDot = 6;
     int w = fonts_.semibold.measure(text, kPx) + 28 + 2 * kDot + 10;
     Canvas c(w, kH);

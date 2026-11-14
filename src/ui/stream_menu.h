@@ -11,6 +11,7 @@
 #include "ui/font.h"
 #include "ui/pad_icons.h"
 #include "input/gyro.h"
+#include "input/pad_usb.h"
 #include "ui/components/gyro_wheel_dialog.h"
 #include "ui/components/stick_tester_dialog.h"
 #include "ui/components/trigger_tester_dialog.h"
@@ -33,6 +34,8 @@ struct StreamInfo {
     int width = 0, height = 0;  // of the decoded picture
     double qp = -1;             // the pictures' average quantiser (lower: finer); -1 unknown
     bool degraded = false;      // frames lost / video stalled / round trip far up, in the last seconds
+    int wifiHolds = 0;          // packets held and then delivered at once (most likely the Wi-Fi), last 2 min
+    bool wifiHoldNow = false;   // one in the last seconds, with wifiHolds at 3 or more
     int64_t cloudTimeSeconds = -1;  // the account's cloud time left (-1: no limit, or not known)
     uint64_t playtimeSeconds = 0; // total playtime for this title in seconds
     std::vector<float> frametimes;  // presentation frametimes (ms)
@@ -54,7 +57,7 @@ enum StatsIndicator : uint32_t {
 enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, GyroCalibrate, PadSpeakerVolume,
-    TouchpadShortcuts, Player, AudioHaptics, ReloadStream, GuitarStrum, GuitarTilt,
+    TouchpadShortcuts, Player, AudioHaptics, ReloadStream, GuitarStrum, GuitarTilt, GuitarBinding,
     VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
 };
 
@@ -224,12 +227,23 @@ public:
     // (0..3), which its Player item changes (MenuAction::Player); -1 when
     // the menu is player 1's own (no such item).
     void setUsbOwner(int player) { usbOwnerPlayer_ = player; }
-    // The menu was opened by a USB guitar: its strum option is offered.
-    void setUsbOwnerGuitar(bool guitar, bool strum, bool tilt) {
+    // The menu was opened by a USB guitar: its strum option is offered, and the buttons of its
+    // lanes for each strum setting (`fretLayout` without, `strumLayout` with), to choose.
+    void setUsbOwnerGuitar(bool guitar, bool strum, bool tilt, const input::GuitarBinding& fretLayout = input::kFretLanes,
+                           const input::GuitarBinding& strumLayout = input::kStrumLanes) {
         usbOwnerGuitar_ = guitar, guitarStrum_ = strum, guitarTilt_ = tilt;
+        guitarBind_[0] = fretLayout, guitarBind_[1] = strumLayout;
     }
+    // After MenuAction::GuitarBinding: the buttons of the strum setting in use (guitarStrum()).
+    const input::GuitarBinding& guitarBinding() const { return guitarBind_[guitarStrum_ ? 1 : 0]; }
     bool guitarStrum() const { return guitarStrum_; }
     bool guitarTilt() const { return guitarTilt_; }
+    // Star power by raising: how sensitive (how far above the position played in it counts,
+    // input/pad_usb.h): Off, then less sensitive, normal and very sensitive in turns.
+    void setGuitarRaiseBy(float by) { guitarTiltLevel_ = by >= 0.4f ? 1 : by <= 0.26f ? 3 : 2; }
+    float guitarRaiseBy() const {
+        return guitarTiltLevel_ == 1 ? input::kGuitarRaiseLess : guitarTiltLevel_ == 3 ? input::kGuitarRaiseMore : input::kGuitarRaiseBy;
+    }
     int usbOwnerPlayer() const { return usbOwnerPlayer_; }
     // What the display and the pads can do (UiCaps, all by default as on
     // the PS5): the upscaler, sharpness and block smoothing need the
@@ -241,8 +255,9 @@ public:
     Canvas renderMenu(const StreamInfo& info) const;
     Canvas renderStats(const StreamInfo& info) const;
     void recordFrametime(float ms) const;
-    // "Unstable connection", on its own (when the statistics line is off).
-    Canvas renderWarning() const;
+    // "Unstable connection", on its own (when the statistics line is off); `wifi`: "Wi-Fi
+    // holding packets" instead.
+    Canvas renderWarning(bool wifi = false) const;
 
     enum Item {
         // Tab General
@@ -263,6 +278,14 @@ public:
         PlayerItem,
         StrumItem,
         TiltItem,
+        // Tab Guitar: the lanes' buttons, star power's, and back to the defaults
+        GuitarLane0,
+        GuitarLane1,
+        GuitarLane2,
+        GuitarLane3,
+        GuitarLane4,
+        GuitarOverdrive,
+        GuitarReset,
         ConfirmItem,
         Triggers,
         DeadzoneItem,
@@ -327,6 +350,17 @@ private:
     PadSlots pads_{};
     int usbOwnerPlayer_ = -1;
     bool usbOwnerGuitar_ = false, guitarStrum_ = false, guitarTilt_ = true;
+    int guitarTiltLevel_ = 2;  // 1 less sensitive, 2 normal, 3 very sensitive
+    input::GuitarBinding guitarBind_[2] = {input::kFretLanes, input::kStrumLanes};
+    // A lane's (or star power's) button chosen from a list: open on its row (accept), the one
+    // under the cursor (pickIndex_), taken with accept, left as it was with back.
+    bool pickOpen_ = false;
+    int pickIndex_ = 0;
+    // The guitar's tab: its rows in order (navigation and drawing), and the drawing.
+    static constexpr int kGuitarOrder[] = {XboxButton, PlayerItem, StrumItem, TiltItem, GuitarLane0, GuitarLane1,
+                                           GuitarLane2, GuitarLane3, GuitarLane4, GuitarOverdrive, GuitarReset, Leave};
+    void drawGuitarTab(Canvas& c) const;
+    void drawGuitarPicker(Canvas& c, int rowY) const;
     int audioHaptics_ = 0;
     mutable std::vector<float> frametimes_;
 

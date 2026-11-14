@@ -39,7 +39,7 @@ void setSticks(ControllerState& s, const uint8_t* p) {
 
 std::atomic<bool> g_guitarStrum{false};
 std::atomic<bool> g_guitarTilt{true};
-std::atomic<float> g_guitarTiltAt{-0.9f};
+std::atomic<float> g_guitarTiltAt{kGuitarRaiseBy};
 
 struct Slot {
     bool attached = false;
@@ -91,6 +91,13 @@ ControllerState shown(const Slot& slot) {
     applyPadSettings(s);
     if (slot.guideHeld) s.btnL1 = s.btnR1 = false;
     s.btnNexus = false;
+    // An instrument's sticks are a guitar's whammy bar and tilt sensor, a drum kit's pad strengths:
+    // never a stick in the app's menus, which scrolled as the guitar moved. Its buttons and the
+    // strum bar (the D-pad) work them.
+    if (slot.kind != UsbPadKind::Gamepad) {
+        s.leftStickX = s.leftStickY = s.rightStickX = s.rightStickY = 0.0f;
+        s.rawLeftX = s.rawLeftY = s.rawRightX = s.rawRightY = 0.0f;
+    }
     return s;
 }
 
@@ -104,7 +111,9 @@ void movePlayer(Slot& s, int slot, int player) {
 ControllerState shownInGame(const Slot& slot) {
     if (slot.kind == UsbPadKind::Gamepad) return shown(slot);
     ControllerState s = slot.game;
-    applyStrumGaps(s, slot.instrument, platform::nowMs());
+    const uint64_t now = platform::nowMs();
+    applyStrumGaps(s, slot.instrument, now);
+    applyGuitarTaps(s, slot.instrument, now);
     applyPadSettings(s);
     if (slot.guideHeld) s.btnL1 = s.btnR1 = false;
     s.btnNexus = false;
@@ -546,9 +555,102 @@ const char* usbPadProtocolName(UsbPadProtocol p) {
         case UsbPadProtocol::SwitchInputOnly: return "Switch";
         case UsbPadProtocol::Stadia: return "Stadia";
         case UsbPadProtocol::GenericHid: return "Generic HID";
+        case UsbPadProtocol::Ps3Instrument: return "PS3 instrument";
         case UsbPadProtocol::None: break;
     }
     return "none";
+}
+
+Ps3Instrument ps3InstrumentFor(uint16_t vid, uint16_t pid) {
+    if (vid == 0x1430 && pid == 0x474C) return Ps3Instrument::GhGuitar;  // World Tour, its PC dongle
+    if (vid != 0x12BA) return Ps3Instrument::None;
+    if (pid == 0x0100) return Ps3Instrument::GhGuitar;
+    if (pid == 0x0120) return Ps3Instrument::GhDrums;
+    if (pid == 0x0140) return Ps3Instrument::Turntable;
+    if (pid == 0x074B) return Ps3Instrument::GhLiveGuitar;
+    if (pid >= 0x0200 && pid <= 0x020F) return Ps3Instrument::RbGuitar;
+    if (pid >= 0x0210 && pid <= 0x021F) return Ps3Instrument::RbDrums;
+    return Ps3Instrument::None;  // the Rock Band 3 keyboard and pro guitars want an enable: not yet
+}
+
+UsbPadKind ps3InstrumentKind(Ps3Instrument instrument) {
+    switch (instrument) {
+        case Ps3Instrument::GhGuitar: case Ps3Instrument::GhLiveGuitar: case Ps3Instrument::RbGuitar: return UsbPadKind::Guitar;
+        case Ps3Instrument::GhDrums: case Ps3Instrument::RbDrums: return UsbPadKind::Drums;
+        case Ps3Instrument::Turntable: return UsbPadKind::Other;
+        case Ps3Instrument::None: break;
+    }
+    return UsbPadKind::Gamepad;
+}
+
+const char* ps3InstrumentName(Ps3Instrument instrument) {
+    switch (instrument) {
+        case Ps3Instrument::GhGuitar: return "PS3 Guitar Hero guitar";
+        case Ps3Instrument::GhLiveGuitar: return "PS3 Guitar Hero Live guitar";
+        case Ps3Instrument::RbGuitar: return "PS3 Rock Band guitar";
+        case Ps3Instrument::GhDrums: return "PS3 Guitar Hero drums";
+        case Ps3Instrument::RbDrums: return "PS3 Rock Band drums";
+        case Ps3Instrument::Turntable: return "PS3 DJ Hero turntable";
+        case Ps3Instrument::None: break;
+    }
+    return "PS3 instrument";
+}
+
+bool parsePs3InstrumentReport(Ps3Instrument instrument, const uint8_t* d, size_t len, ControllerState& s) {
+    if (!d || len < 7 || instrument == Ps3Instrument::None) return false;
+    ControllerState o;
+    o.connected = true;
+    const uint8_t b0 = d[0], b1 = d[1];
+    // Select (Back: star power on a guitar), Start, PS (the Xbox button); the hat (the strum bar).
+    o.btnTouchpad = b1 & 0x01, o.btnOptions = b1 & 0x02, o.btnNexus = b1 & 0x10;
+    const int hat = d[2] & 0x0F;  // 0 up, clockwise to 7; anything else (8, 0x0F, 0x1F's) at rest
+    if (hat <= 7) {
+        o.dpadUp = hat == 7 || hat == 0 || hat == 1, o.dpadRight = hat >= 1 && hat <= 3;
+        o.dpadDown = hat >= 3 && hat <= 5, o.dpadLeft = hat >= 5 && hat <= 7;
+    }
+    auto axis = [](float v) { return std::clamp(v, -1.0f, 1.0f); };
+    switch (instrument) {
+        case Ps3Instrument::GhGuitar: {
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnY = b0 & 0x01, o.btnX = b0 & 0x08, o.btnL1 = b0 & 0x10;
+            o.btnTouchpad = o.btnTouchpad || (b0 & 0x20);  // the star power pedal
+            o.rawRightX = axis((static_cast<float>(d[5]) - 127.0f) / 64.0f - 1.0f);  // whammy: 0x7f at rest, 0xff down
+            if (len >= 21) {  // the tilt: 10 bits, ~475..512 level, toward 384 as the neck goes up
+                const int tilt = d[19] | (d[20] & 0x03) << 8;
+                o.rawRightY = axis((512.0f - static_cast<float>(tilt)) / 128.0f);
+            }
+            break;
+        }
+        case Ps3Instrument::GhLiveGuitar: {
+            // Black frets B1..B3 (A, B, Y) and white W1..W3 (X, LB, RB); strum on byte 4.
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnY = b0 & 0x08, o.btnX = b0 & 0x01, o.btnL1 = b0 & 0x10,
+            o.btnR1 = b0 & 0x20;
+            if (len > 4) o.dpadUp = o.dpadUp || d[4] == 0x00, o.dpadDown = o.dpadDown || d[4] == 0xFF;
+            o.rawRightX = axis((static_cast<float>(d[6]) - 128.0f) / 64.0f - 1.0f);
+            if (len > 19) o.rawRightY = axis((static_cast<float>(d[19]) - 128.0f) / 64.0f);
+            break;
+        }
+        case Ps3Instrument::RbGuitar: {
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnY = b0 & 0x08, o.btnX = b0 & 0x01, o.btnL1 = b0 & 0x10;
+            o.rawRightX = axis(static_cast<float>(d[5]) / 127.5f - 1.0f);  // whammy: 0 at rest
+            o.rawRightY = (b0 & 0x20) ? 1.0f : -1.0f;                      // the tilt switch
+            break;
+        }
+        case Ps3Instrument::GhDrums:
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnY = b0 & 0x08, o.btnX = b0 & 0x01, o.btnR1 = b0 & 0x20,
+            o.btnL1 = b0 & 0x10;
+            break;
+        case Ps3Instrument::RbDrums:
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnY = b0 & 0x08, o.btnX = b0 & 0x01, o.btnL1 = b0 & 0x30;
+            o.btnL3 = b1 & 0x04, o.btnR3 = b1 & 0x08;  // the pad and cymbal flags
+            break;
+        case Ps3Instrument::Turntable:
+            o.btnA = b0 & 0x02, o.btnB = b0 & 0x04, o.btnX = b0 & 0x01, o.btnY = b0 & 0x08;  // Euphoria: Y
+            break;
+        case Ps3Instrument::None: return false;
+    }
+    o.rightStickX = o.rawRightX, o.rightStickY = o.rawRightY;
+    s = o;
+    return true;
 }
 
 bool parseDualShock3Report(const uint8_t* data, size_t len, ControllerState& s) {
@@ -915,6 +1017,7 @@ bool parseUsbPadReport(UsbPadProtocol protocol, const uint8_t* data, size_t len,
         case UsbPadProtocol::SwitchInputOnly: return parseSwitchInputOnlyReport(data, len, state);
         case UsbPadProtocol::Stadia: return parseStadiaReport(data, len, state);
         case UsbPadProtocol::GenericHid: return parseGenericHidFallback(data, len, state);
+        case UsbPadProtocol::Ps3Instrument: break;  // parsePs3InstrumentReport: its kind is needed
         case UsbPadProtocol::None: break;
     }
     return false;
@@ -979,31 +1082,107 @@ bool guitarStrum() { return g_guitarStrum.load(std::memory_order_relaxed); }
 
 void setGuitarTilt(bool on, float at) {
     g_guitarTilt = on;
-    g_guitarTiltAt = std::clamp(at, -1.0f, 1.0f);
+    g_guitarTiltAt = std::clamp(at, 0.1f, 1.5f);
 }
 bool guitarTilt() { return g_guitarTilt.load(std::memory_order_relaxed); }
+float guitarRaiseBy() { return g_guitarTiltAt.load(std::memory_order_relaxed); }
 
 namespace {
-// Lane i of the strum layout down or up (kStrumLanes: LT LB RB RT R3).
-void setStrumLane(ControllerState& g, int i, bool on) {
-    switch (i) {
-        case 0: g.triggerL2 = on ? 1.0f : 0.0f; break;
-        case 1: g.btnL1 = on; break;
-        case 2: g.btnR1 = on; break;
-        case 3: g.triggerR2 = on ? 1.0f : 0.0f; break;
-        default: g.btnR3 = on; break;
+constexpr const char* kGuitarOutKey[] = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "L3", "R3", "DL", "DR"};
+constexpr const char* kGuitarOutName[] = {"A", "B", "X", "Y", "LB", "RB", "LT", "RT", "L3", "R3",
+                                          "D-pad \u2190", "D-pad \u2192"};
+static_assert(std::size(kGuitarOutKey) == static_cast<size_t>(GuitarOut::Count));
+static_assert(std::size(kGuitarOutName) == static_cast<size_t>(GuitarOut::Count));
+
+// A binding in one word (4 bits a button), for the input thread to read while the menu writes.
+uint32_t packBinding(const GuitarBinding& b) {
+    uint32_t v = 0;
+    for (int i = 0; i < 5; ++i) v |= static_cast<uint32_t>(b.lanes[i]) << (4 * i);
+    return v | static_cast<uint32_t>(b.starPower) << 20;
+}
+GuitarBinding unpackBinding(uint32_t v) {
+    GuitarBinding b{};
+    for (int i = 0; i < 5; ++i) b.lanes[i] = static_cast<GuitarOut>((v >> (4 * i)) & 0xF);
+    b.starPower = static_cast<GuitarOut>((v >> 20) & 0xF);
+    return b;
+}
+std::atomic<uint32_t> g_guitarBinding[2] = {packBinding(kFretLanes), packBinding(kStrumLanes)};
+
+// Presses (or lets go) one of the buttons a guitar sends.
+void setGuitarOut(ControllerState& g, GuitarOut b, bool on) {
+    switch (b) {
+        case GuitarOut::A: g.btnA = on; break;
+        case GuitarOut::B: g.btnB = on; break;
+        case GuitarOut::X: g.btnX = on; break;
+        case GuitarOut::Y: g.btnY = on; break;
+        case GuitarOut::LB: g.btnL1 = on; break;
+        case GuitarOut::RB: g.btnR1 = on; break;
+        case GuitarOut::LT: g.triggerL2 = on ? 1.0f : 0.0f; break;
+        case GuitarOut::RT: g.triggerR2 = on ? 1.0f : 0.0f; break;
+        case GuitarOut::L3: g.btnL3 = on; break;
+        case GuitarOut::R3: g.btnR3 = on; break;
+        case GuitarOut::DLeft: g.dpadLeft = on; break;
+        case GuitarOut::DRight: g.dpadRight = on; break;
+        default: break;
     }
 }
 }  // namespace
 
+const char* guitarOutName(GuitarOut b) {
+    const size_t i = static_cast<size_t>(b);
+    return i < std::size(kGuitarOutName) ? kGuitarOutName[i] : "?";
+}
+
+void setGuitarBinding(bool strum, const GuitarBinding& b) {
+    if (g_guitarBinding[strum ? 1 : 0].exchange(packBinding(b)) != packBinding(b))
+        XC_LOGI("usb pad: guitar buttons with strum %s: %s", strum ? "on" : "off", guitarBindingText(b).c_str());
+}
+GuitarBinding guitarBinding(bool strum) { return unpackBinding(g_guitarBinding[strum ? 1 : 0].load(std::memory_order_relaxed)); }
+
+std::string guitarBindingText(const GuitarBinding& b) {
+    std::string s;
+    for (int i = 0; i < 6; ++i) {
+        if (i) s += ',';
+        s += kGuitarOutKey[static_cast<size_t>(i < 5 ? b.lanes[i] : b.starPower)];
+    }
+    return s;
+}
+
+bool guitarBindingFromText(const std::string& text, GuitarBinding& b) {
+    GuitarBinding out{};
+    size_t pos = 0;
+    for (int i = 0; i < 6; ++i) {
+        const size_t end = std::min(text.find(',', pos), text.size());
+        const std::string key = text.substr(pos, end - pos);
+        int found = -1;
+        for (size_t k = 0; k < std::size(kGuitarOutKey); ++k)
+            if (key == kGuitarOutKey[k]) found = static_cast<int>(k);
+        if (found < 0) return false;
+        (i < 5 ? out.lanes[i] : out.starPower) = static_cast<GuitarOut>(found);
+        if (i < 5 && end >= text.size()) return false;  // fewer than six
+        pos = end + 1;
+    }
+    b = out;
+    return true;
+}
+
+void applyGuitarTaps(ControllerState& g, const InstrumentState& st, uint64_t nowMs) {
+    if (nowMs < st.starTapUntil) setGuitarOut(g, st.binding.starPower, true);
+    if (!st.strumLayout) return;
+    // Orange has no menu use; a button a lane uses is not one either, or a fret would play it.
+    constexpr GuitarOut kMenu[4] = {GuitarOut::A, GuitarOut::B, GuitarOut::Y, GuitarOut::X};
+    for (int i = 0; i < 4; ++i)
+        if (nowMs < st.menuTapUntil[i] && !st.binding.usesForLane(kMenu[i])) setGuitarOut(g, kMenu[i], true);
+}
+
 void applyStrumGaps(ControllerState& g, const InstrumentState& st, uint64_t nowMs) {
     if (!st.strumLayout) return;
     for (int i = 0; i < 5; ++i)
-        if (nowMs < st.gapUntil[i]) setStrumLane(g, i, false);
+        if (nowMs < st.gapUntil[i]) setGuitarOut(g, st.binding.lanes[i], false);
 }
 
 ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, InstrumentState& st, bool strum,
-                                  uint64_t nowMs, bool tiltOn, float tiltAt) {
+                                  uint64_t nowMs, bool tiltOn, float tiltBy) {
     if (kind == UsbPadKind::Gamepad || kind == UsbPadKind::Other) return in;
     ControllerState out;
     out.connected = in.connected;
@@ -1021,6 +1200,7 @@ ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, In
     const bool bar = in.dpadUp || in.dpadDown;
     const bool strummed = bar && !st.prevStrum;
     st.prevStrum = bar;
+    if (strummed) st.lastStrumMs = nowMs + 1;  // + 1: 0 is "never"
     bool lanes[5];
     for (int i = 0; i < 5; ++i) {
         if (!strum) {
@@ -1036,24 +1216,75 @@ ControllerState instrumentForGame(UsbPadKind kind, const ControllerState& in, In
         lanes[i] = st.armed[i];
     }
     st.strumLayout = strum;
-    // Star power: Back, or the guitar raised (its tilt past `tiltAt`, let go a little before it).
-    if (tiltOn && tiltAt != 0.0f) {
-        const float v = in.rawRightY, margin = 0.15f;
-        if (tiltAt < 0) st.tiltUp = st.tiltUp ? v < tiltAt + margin : v <= tiltAt;
-        else st.tiltUp = st.tiltUp ? v > tiltAt - margin : v >= tiltAt;
+    // Star power: Back, or the guitar raised: its tilt `tiltBy` or more above the position it is
+    // played in (learnt as it goes: the reading's slow average while not raised) for kTiltHoldMs
+    // (a jolt while strumming is not), let go once back within 0.15 of that.
+    if (tiltOn) {
+        const float v = in.rawRightY;
+        if (!st.tiltRestKnown) st.tiltRest = v, st.tiltRestKnown = true, st.tiltLastMs = nowMs, st.tiltSettleUntil = nowMs + kTiltSettleMs;
+        const float dt = static_cast<float>(nowMs - std::min(nowMs, st.tiltLastMs));
+        st.tiltLastMs = nowMs;
+        // At first only the position is learnt (quickly): the guitar may be being picked up.
+        if (nowMs < st.tiltSettleUntil) {
+            st.tiltRest += (v - st.tiltRest) * std::min(1.0f, dt / 500.0f);
+            st.tiltUp = false, st.tiltAboveSinceMs = 0;
+        }
+        const float over = v - st.tiltRest;
+        if (nowMs < st.tiltSettleUntil) {
+        } else if (st.tiltUp) {
+            st.tiltUp = over >= tiltBy - 0.15f;
+            st.tiltAboveSinceMs = 0;
+            // Up for longer than a raise: the guitar is held another way now, that is its position.
+            if (st.tiltUp && nowMs - std::min(nowMs, st.tiltUpSinceMs) > kTiltMaxMs) st.tiltRest = v, st.tiltUp = false;
+        } else if (over >= tiltBy) {
+            if (!st.tiltAboveSinceMs) st.tiltAboveSinceMs = nowMs + 1;  // + 1: 0 is "not above"
+            st.tiltUp = nowMs + 1 - st.tiltAboveSinceMs >= kTiltHoldMs;
+            if (st.tiltUp) st.tiltUpSinceMs = nowMs;
+        } else {
+            st.tiltAboveSinceMs = 0;
+        }
+        // The position played in follows: in kTiltRestMs while the guitar is near it, far more slowly
+        // (kTiltFarRestMs) when not, so a slow lift does not drag it up and a wrong start mends.
+        if (nowMs >= st.tiltSettleUntil && !st.tiltUp && !st.tiltAboveSinceMs)
+            st.tiltRest += (v - st.tiltRest) * std::min(1.0f, dt / (std::abs(v - st.tiltRest) < 0.2f ? kTiltRestMs : kTiltFarRestMs));
     } else {
-        st.tiltUp = false;
+        st.tiltUp = false, st.tiltAboveSinceMs = 0, st.tiltRestKnown = false;
     }
     const bool starPower = in.btnTouchpad || st.tiltUp;
-    if (!strum) {
-        out.btnA = lanes[0], out.btnB = lanes[1], out.btnY = lanes[2], out.btnX = lanes[3], out.btnL1 = lanes[4];
-        out.triggerR2 = starPower ? 1.0f : 0.0f;  // Overdrive (RT by default in Fortnite Festival)
-        return out;
+    if (starPower != st.starPower) {  // logged (the first 200 times): when, and why
+        static std::atomic<int> logged{0};
+        if (logged.fetch_add(1) < 200)
+            XC_LOGI("usb guitar: star power %s%s (tilt %.2f, played at %.2f)", starPower ? "on" : "off",
+                    starPower ? (in.btnTouchpad ? " by Back" : " by raising it") : "", in.rawRightY, st.tiltRest);
+        st.starPower = starPower;
     }
-    // The menus: the frets at once (orange has no menu use: it is LB, a lane, here).
-    out.btnA = frets[0], out.btnB = frets[1], out.btnY = frets[2], out.btnX = frets[3];
-    for (int i = 0; i < 5; ++i) setStrumLane(out, i, lanes[i]);
-    out.btnL3 = starPower;
+    const GuitarBinding b = guitarBinding(strum);
+    st.binding = b;
+    if (strum) {
+        // The menus: each fret its button, held as it is (but not one a lane uses: a fret would
+        // play it without the strum); star power's (A, Overdrive) only as a tap, so a held,
+        // strummed fret (a note) does not fire it (applyGuitarTaps).
+        constexpr GuitarOut kMenu[4] = {GuitarOut::A, GuitarOut::B, GuitarOut::Y, GuitarOut::X};
+        for (int i = 0; i < 4; ++i)
+            if (frets[i] && kMenu[i] != b.starPower && !b.usesForLane(kMenu[i])) setGuitarOut(out, kMenu[i], true);
+        for (int i = 0; i < 4; ++i) {
+            if (kMenu[i] != b.starPower) continue;
+            if (frets[i] && !st.fretDown[i]) {
+                st.fretDown[i] = true, st.fretDownMs[i] = nowMs;
+                st.fretStrummed[i] = st.lastStrumMs && nowMs + 1 - st.lastStrumMs <= kStrumBeforeFretMs;
+            }
+            if (frets[i] && strummed) st.fretStrummed[i] = true;
+            if (!frets[i] && st.fretDown[i]) {
+                st.fretDown[i] = false;
+                if (!st.fretStrummed[i] && nowMs - st.fretDownMs[i] <= kMenuTapMs) st.menuTapUntil[i] = nowMs + kMenuTapHoldMs;
+            }
+        }
+    }
+    for (int i = 0; i < 5; ++i)
+        if (lanes[i]) setGuitarOut(out, b.lanes[i], true);
+    // Star power (Overdrive in Fortnite Festival): a tap as it begins (applyGuitarTaps).
+    if (starPower && !st.starPowerTapped) st.starTapUntil = nowMs + kStarPowerTapMs;
+    st.starPowerTapped = starPower;
     applyStrumGaps(out, st, nowMs);
     return out;
 }
@@ -1231,6 +1462,19 @@ std::array<uint8_t, 12> xinputWirelessLedPacket(int player) {
 int xinputWirelessSubtype(const uint8_t* data, size_t len) {
     if (!data || len < 26 || data[0] != 0x00 || data[1] != 0x0F || data[5] != 0xCC) return -1;
     return data[25] & 0x7F;
+}
+
+int xinputSubtypeFromCapabilities(const uint8_t* data, size_t len) {
+    if (!data || len < 14 || data[0] != 0x00 || data[1] != 0x05) return -1;
+    const unsigned vendor = data[10] | data[11] << 8, product = data[12] | data[13] << 8;
+    if (vendor == 0x1430) {
+        const int subtype = static_cast<int>(product >> 8);
+        const UsbPadKind kind = usbPadKindForSubtype(subtype);
+        return kind == UsbPadKind::Guitar || kind == UsbPadKind::Drums || kind == UsbPadKind::Other ? subtype : -1;
+    }
+    if (vendor == 0x1BAD && product == 0x0002) return 0x06;  // Rock Band guitar
+    if (vendor == 0x1BAD && product == 0x0003) return 0x08;  // Rock Band drums
+    return -1;
 }
 
 const char* xinputSubtypeName(int subtype) {

@@ -51,6 +51,7 @@ add_library(xcloud_core STATIC
     src/input/keyboard_nav.cpp
     src/input/pad_usb.cpp
     src/input/pad_usb_hid.cpp
+    src/input/usb_xray.cpp
     src/input/sdl_mapping.cpp
     src/xcloud/social.cpp
     src/xcloud/achievements.cpp
@@ -119,8 +120,23 @@ foreach(face Regular SemiBold Bold)
     list(APPEND XC_BUILTIN_FONTS "${out}")
 endforeach()
 
+# The icons drawn from SVG (src/ui/svg_icon.h), inside the binary as well.
+set(XC_BUILTIN_ICONS)
+foreach(icon guitar)
+    set(out "${CMAKE_CURRENT_BINARY_DIR}/generated/icon_${icon}_svg.cpp")
+    add_custom_command(
+        OUTPUT "${out}"
+        COMMAND ${CMAKE_COMMAND} -DIN=${CMAKE_CURRENT_SOURCE_DIR}/assets/icons/${icon}.svg -DOUT=${out}
+                -DNAME=xc_icon_${icon}_svg -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_file.cmake
+        DEPENDS assets/icons/${icon}.svg cmake/embed_file.cmake
+        COMMENT "Embedding assets/icons/${icon}.svg")
+    list(APPEND XC_BUILTIN_ICONS "${out}")
+endforeach()
+
 add_library(xcloud_ui STATIC
     ${XC_BUILTIN_FONTS}
+    ${XC_BUILTIN_ICONS}
+    src/ui/svg_icon.cpp
     src/ui/strings.cpp
     src/ui/canvas.cpp
     src/ui/font.cpp
@@ -159,7 +175,7 @@ add_library(xcloud_ui STATIC
     extern/qrcodegen/qrcodegen.c
 )
 target_compile_definitions(xcloud_ui PUBLIC XC_APP_VERSION="${PROJECT_VERSION}")
-target_include_directories(xcloud_ui PUBLIC extern/stb extern/qrcodegen)
+target_include_directories(xcloud_ui PUBLIC extern/stb extern/qrcodegen PRIVATE extern/nanosvg)
 target_link_libraries(xcloud_ui PUBLIC xcloud_core)
 
 # --- The app: start-up, main loop, worker thread, streaming --------------------

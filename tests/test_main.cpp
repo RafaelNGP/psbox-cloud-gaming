@@ -25,6 +25,7 @@
 #include "input/gyro.h"
 #include "input/tuning.h"
 #include "input/pad_usb.h"
+#include "input/usb_xray.h"
 #include "input/pad_usb_hid.h"
 #include "net/http.h"
 #include "platform/platform.h"
@@ -2553,6 +2554,69 @@ static void testUsbInstruments() {
     CHECK(usbPadKindForSubtype(0x07) == UsbPadKind::Guitar && usbPadKindForSubtype(0x06) == UsbPadKind::Guitar);
     CHECK(usbPadKindForSubtype(0x08) == UsbPadKind::Drums && usbPadKindForSubtype(0x01) == UsbPadKind::Gamepad);
     CHECK(usbPadKindForSubtype(-1) == UsbPadKind::Gamepad && usbPadKindForSubtype(0x02) == UsbPadKind::Other);
+    // Linked before the app started: the capabilities report names the maker and product
+    // (a Guitar Hero 5 guitar, as read on the console: 1430:0705).
+    {
+        const uint8_t gh5[29] = {0x00, 0x05, 0x00, 0xf0, 0x00, 0x12, 0x3f, 0xff, 0x00, 0x00, 0x30, 0x14, 0x05, 0x07, 0x01,
+                                 0x00, 0xc0, 0xff, 0x00, 0x00, 0x03};
+        CHECK(xinputSubtypeFromCapabilities(gh5, sizeof gh5) == 0x07);
+        CHECK(usbPadKindForSubtype(xinputSubtypeFromCapabilities(gh5, sizeof gh5)) == UsbPadKind::Guitar);
+        uint8_t pad[29];
+        std::memcpy(pad, gh5, sizeof pad);
+        pad[10] = 0x5e, pad[11] = 0x04, pad[12] = 0x8e, pad[13] = 0x02;  // 045e:028e, a pad
+        CHECK(xinputSubtypeFromCapabilities(pad, sizeof pad) == -1);
+        pad[10] = 0xad, pad[11] = 0x1b, pad[12] = 0x03, pad[13] = 0x00;  // 1bad:0003, Rock Band drums
+        CHECK(usbPadKindForSubtype(xinputSubtypeFromCapabilities(pad, sizeof pad)) == UsbPadKind::Drums);
+        CHECK(xinputSubtypeFromCapabilities(gh5, 8) == -1);
+    }
+
+    // PlayStation 3 instruments (PlasticBand's layouts), read into the Xbox 360 instruments' layout.
+    {
+        CHECK(ps3InstrumentFor(0x12BA, 0x0100) == Ps3Instrument::GhGuitar && ps3InstrumentFor(0x1430, 0x474C) == Ps3Instrument::GhGuitar);
+        CHECK(ps3InstrumentFor(0x12BA, 0x0203) == Ps3Instrument::RbGuitar && ps3InstrumentFor(0x12BA, 0x0218) == Ps3Instrument::RbDrums);
+        CHECK(ps3InstrumentFor(0x12BA, 0x0120) == Ps3Instrument::GhDrums && ps3InstrumentFor(0x12BA, 0x0140) == Ps3Instrument::Turntable);
+        CHECK(ps3InstrumentFor(0x12BA, 0x2330) == Ps3Instrument::None && ps3InstrumentFor(0x054C, 0x0268) == Ps3Instrument::None);
+        CHECK(ps3InstrumentKind(Ps3Instrument::GhLiveGuitar) == UsbPadKind::Guitar && ps3InstrumentKind(Ps3Instrument::RbDrums) == UsbPadKind::Drums);
+
+        uint8_t gh[27] = {};
+        gh[2] = 0x1F, gh[5] = 0x7F, gh[19] = 0xDB, gh[20] = 0x01;  // at rest: hat 0x1f, whammy 0x7f, tilt 475 (level)
+        ControllerState g;
+        CHECK(parsePs3InstrumentReport(Ps3Instrument::GhGuitar, gh, sizeof gh, g));
+        CHECK(!g.btnA && !g.dpadUp && !g.dpadDown && g.rawRightX < -0.9f && g.rawRightY > 0.2f && g.rawRightY < 0.35f);
+        gh[0] = 0x02 | 0x01;  // green and yellow
+        gh[2] = 0x04;         // strummed down
+        gh[1] = 0x02;         // Start
+        CHECK(parsePs3InstrumentReport(Ps3Instrument::GhGuitar, gh, sizeof gh, g));
+        CHECK(g.btnA && g.btnY && !g.btnB && !g.btnX && g.dpadDown && !g.dpadUp && g.btnOptions);
+        // Through the guitar's own logic: raised (tilt 384) for long enough, star power on A.
+        InstrumentState is;
+        gh[0] = 0, gh[1] = 0, gh[2] = 0x1F;
+        parsePs3InstrumentReport(Ps3Instrument::GhGuitar, gh, sizeof gh, g);
+        for (uint64_t t = 1000; t <= 1000 + kTiltSettleMs; t += 100)  // picked up: its position learnt
+            instrumentForGame(UsbPadKind::Guitar, g, is, false, t, true, kGuitarRaiseBy);
+        gh[19] = 0x80, gh[20] = 0x01;  // 384: the neck up
+        parsePs3InstrumentReport(Ps3Instrument::GhGuitar, gh, sizeof gh, g);
+        CHECK(g.rawRightY > 0.95f);
+        const uint64_t at = 1100 + kTiltSettleMs;
+        instrumentForGame(UsbPadKind::Guitar, g, is, false, at, true, kGuitarRaiseBy);
+        ControllerState up = instrumentForGame(UsbPadKind::Guitar, g, is, false, at + kTiltHoldMs, true, kGuitarRaiseBy);
+        applyGuitarTaps(up, is, at + kTiltHoldMs);
+        CHECK(is.tiltUp && up.btnA);
+
+        uint8_t rb[27] = {};
+        rb[0] = 0x08 | 0x01 | 0x20;  // yellow, blue, the tilt switch
+        rb[2] = 0x08;
+        CHECK(parsePs3InstrumentReport(Ps3Instrument::RbGuitar, rb, sizeof rb, g));
+        CHECK(g.btnY && g.btnX && !g.btnA && g.rawRightY == 1.0f && g.rawRightX < -0.9f && !g.dpadUp);
+        uint8_t drums[27] = {};
+        drums[0] = 0x02 | 0x10 | 0x20, drums[2] = 0x0F;  // green, kick, orange cymbal
+        CHECK(parsePs3InstrumentReport(Ps3Instrument::GhDrums, drums, sizeof drums, g));
+        CHECK(g.btnA && g.btnL1 && g.btnR1 && !g.btnB);
+        drums[0] = 0x08, drums[1] = 0x08;  // Rock Band: yellow, the cymbal flag
+        CHECK(parsePs3InstrumentReport(Ps3Instrument::RbDrums, drums, sizeof drums, g));
+        CHECK(g.btnY && g.btnR3 && !g.btnL3 && !g.btnL1);
+        CHECK(!parsePs3InstrumentReport(Ps3Instrument::GhGuitar, gh, 4, g));
+    }
 
     // The guitar at rest, as seen on the console: whammy at full left, the tilt sensor moving.
     ControllerState in;
@@ -2565,39 +2629,80 @@ static void testUsbInstruments() {
     in.btnA = in.btnY = true;  // green and yellow held: without strum, at once
     out = instrumentForGame(UsbPadKind::Guitar, in, st, false);
     CHECK(out.btnA && out.btnY && !out.btnB && out.rightStickX == 0.0f);
-    in.btnTouchpad = true;  // Back: star power
-    CHECK(instrumentForGame(UsbPadKind::Guitar, in, st, false).triggerR2 == 1.0f);
+    in.btnA = in.btnY = false;
+    in.btnTouchpad = true;  // Back: star power, on A (Fortnite Festival's Overdrive), as a tap
+    {
+        ControllerState sp = instrumentForGame(UsbPadKind::Guitar, in, st, false, 3000);
+        applyGuitarTaps(sp, st, 3000);
+        CHECK(sp.btnA);
+        sp = instrumentForGame(UsbPadKind::Guitar, in, st, false, 3000 + kStarPowerTapMs);
+        applyGuitarTaps(sp, st, 3000 + kStarPowerTapMs);
+        CHECK(!sp.btnA);  // held on: let go after the tap (Fortnite fires as it is let go)
+    }
     in.btnTouchpad = false;
 
-    // With strum: the frets reach the menus at once (A B Y X); the lanes (LT LB RB RT R3) only
-    // once the bar moves, then held as long as the frets are.
+    // With strum: a fret tapped (down briefly, no strum) is its menu button (A B Y X) as it is let
+    // go, for kMenuTapHoldMs; the lanes (LT LB RB RT R3) only once the bar moves, then held as long
+    // as the frets are. A fret held and strummed is a note and no button (A is Overdrive in Fortnite).
     auto lane = [](const ControllerState& g, int i) {
         return i == 0 ? g.triggerL2 > 0.5f : i == 1 ? g.btnL1 : i == 2 ? g.btnR1 : i == 3 ? g.triggerR2 > 0.5f : g.btnR3;
     };
+    auto game = [](ControllerState g, const InstrumentState& st, uint64_t t) {
+        applyStrumGaps(g, st, t);
+        applyGuitarTaps(g, st, t);
+        return g;
+    };
     InstrumentState ss;
     in.btnA = true, in.btnY = false;
-    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(out.btnA && !lane(out, 0));  // green: A for the menus, its lane silent
-    in.dpadDown = true;  // strum
-    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(lane(out, 0) && out.dpadDown && out.btnA);
-    in.dpadDown = false;  // the bar back, green still held: the note goes on (a sustain)
-    CHECK(lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
-    in.btnY = true;  // yellow pressed later, no strum: not played (Y for the menus)
-    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(lane(out, 0) && !lane(out, 2) && out.btnY);
-    in.btnA = false;  // green let go: off, and not back until strummed again
-    CHECK(!lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 1000);
+    CHECK(!game(out, ss, 1000).btnA && !lane(out, 0));  // green down: nothing yet
+    in.btnA = false;
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 1100);  // let go after 100 ms: a tap
+    CHECK(game(out, ss, 1100).btnA && game(out, ss, 1100 + kMenuTapHoldMs - 1).btnA);
+    CHECK(!game(out, ss, 1100 + kMenuTapHoldMs).btnA);  // let go again by the time the game reads it
     in.btnA = true;
-    CHECK(!lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true), 0));
+    instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2000);
+    in.dpadDown = true;  // strum
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2010);
+    CHECK(lane(out, 0) && out.dpadDown && !game(out, ss, 2010).btnA);
+    in.dpadDown = false;  // the bar back, green still held: the note goes on (a sustain)
+    CHECK(lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2050), 0));
+    in.btnY = true;  // yellow pressed later, no strum: not played, Y held for the menus (hold Y to start)
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2100);
+    CHECK(lane(out, 0) && !lane(out, 2) && game(out, ss, 2100).btnY && game(out, ss, 2900).btnY);
+    in.btnA = false;  // green let go after a strum: a note, not a tap (no Overdrive)
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2200);
+    CHECK(!lane(out, 0) && !game(out, ss, 2200).btnA);
+    in.btnA = true;
+    CHECK(!lane(instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2300), 0));  // not back until strummed
     in.dpadUp = true;
-    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2310);
     CHECK(lane(out, 0) && lane(out, 2) && !out.btnL3);
-    in.btnTouchpad = true;  // star power: L3 with strum
-    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true);
-    CHECK(out.btnL3 && lane(out, 3) == false);
+    in.btnA = false;
+    in.btnTouchpad = true;  // star power: A, a tap at once
+    out = instrumentForGame(UsbPadKind::Guitar, in, ss, true, 2400);
+    CHECK(game(out, ss, 2400).btnA && !game(out, ss, 2400 + kStarPowerTapMs).btnA && lane(out, 3) == false);
+    in.btnA = true;
     in.btnTouchpad = false;
     in.dpadUp = false;
+    // A fret down just after a strum (late) and let go: a note, not a tap.
+    {
+        InstrumentState ls;
+        ControllerState g;
+        g.dpadDown = true;
+        instrumentForGame(UsbPadKind::Guitar, g, ls, true, 5000);
+        g.dpadDown = false;
+        instrumentForGame(UsbPadKind::Guitar, g, ls, true, 5040);
+        g.btnA = true;  // green, 80 ms after the strum
+        instrumentForGame(UsbPadKind::Guitar, g, ls, true, 5080);
+        g.btnA = false;
+        const ControllerState r = instrumentForGame(UsbPadKind::Guitar, g, ls, true, 5180);
+        CHECK(!game(r, ls, 5180).btnA);
+        g.btnA = true;  // and a slow press (a held fret, 600 ms): not a tap either
+        instrumentForGame(UsbPadKind::Guitar, g, ls, true, 7000);
+        g.btnA = false;
+        CHECK(!game(instrumentForGame(UsbPadKind::Guitar, g, ls, true, 7600), ls, 7600).btnA);
+    }
 
     // Held frets strummed again: let go for a moment, then down again (a new note each strum).
     {
@@ -2609,7 +2714,7 @@ static void testUsbInstruments() {
         CHECK(lane(instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1050), 0));
         g.dpadUp = true;  // the bar again, green still held
         ControllerState again = instrumentForGame(UsbPadKind::Guitar, g, rs, true, 1100);
-        CHECK(!lane(again, 0) && again.btnA);
+        CHECK(!lane(again, 0) && !again.btnA);  // a held, strummed fret: no A (Overdrive)
         ControllerState later = again;
         later.triggerL2 = 1.0f;
         applyStrumGaps(later, rs, 1100 + kStrumGapMs - 1);
@@ -2618,20 +2723,84 @@ static void testUsbInstruments() {
         applyStrumGaps(later, rs, 1100 + kStrumGapMs);
         CHECK(lane(later, 0));
     }
-    // Star power by raising the guitar: past the reading set, off again a little before it.
+    // Star power by raising the guitar: kGuitarRaiseBy above the position it is played in, which
+    // is learnt (a Guitar Hero 5 guitar read -0.95 held one way, -0.4 held another), for
+    // kTiltHoldMs; off once back near it. A jolt shorter than that is not.
+    for (float rest : {-0.95f, -0.4f}) {
+        InstrumentState ts;
+        ControllerState g;
+        auto rt = [&](float v, uint64_t t, bool on = true) {
+            g.rawRightY = v;
+            instrumentForGame(UsbPadKind::Guitar, g, ts, false, t, on, kGuitarRaiseBy);
+            return ts.tiltUp ? 1.0f : 0.0f;
+        };
+        uint64_t t = 1000;
+        for (int k = 0; k < 100; ++k, t += 100) CHECK(rt(rest + (k % 2 ? 0.05f : -0.05f), t) == 0.0f);  // played: never
+        CHECK(rt(rest + 0.5f, t) == 0.0f);  // raised, not for long yet
+        CHECK(rt(rest + 0.5f, t + kTiltHoldMs) == 1.0f);
+        CHECK(rt(rest + 0.3f, t + kTiltHoldMs + 10) == 1.0f);  // a little down: still on
+        CHECK(rt(rest, t + kTiltHoldMs + 20) == 0.0f);         // back to playing
+        t += 1000;
+        CHECK(rt(rest + 0.6f, t) == 0.0f);  // a jolt...
+        CHECK(rt(rest, t + 10) == 0.0f);    // ...gone before it counts
+        CHECK(rt(rest + 0.6f, t + 20, false) == 0.0f);
+        CHECK(rt(rest + 0.6f, t + 20 + kTiltHoldMs, false) == 0.0f);  // tilt off: nothing
+    }
+    // Held a new way for a while: that becomes the position (no star power stuck on).
     {
         InstrumentState ts;
         ControllerState g;
-        g.rawRightY = -0.5f;
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 0.0f);
         g.rawRightY = -0.95f;
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 1.0f);
-        g.rawRightY = -0.8f;  // within the margin: still on
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 1.0f);
-        g.rawRightY = -0.6f;
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, true, -0.9f).triggerR2 == 0.0f);
-        g.rawRightY = -0.99f;  // tilt off: nothing
-        CHECK(instrumentForGame(UsbPadKind::Guitar, g, ts, false, 0, false, -0.9f).triggerR2 == 0.0f);
+        instrumentForGame(UsbPadKind::Guitar, g, ts, false, 1000, true, kGuitarRaiseBy);
+        g.rawRightY = -0.4f;  // the strap moved: 0.55 above, like a raise for a moment...
+        bool onAfter = false;
+        for (uint64_t t = 1010; t < 30000; t += 50) {
+            instrumentForGame(UsbPadKind::Guitar, g, ts, false, t, true, kGuitarRaiseBy);
+            const bool on = ts.tiltUp;
+            if (t > 1010 + kTiltMaxMs + 500) onAfter = onAfter || on;
+        }
+        CHECK(!onAfter);  // ...then its position: off, and off it stays
+        g.rawRightY = 0.1f;  // and a raise from there counts
+        instrumentForGame(UsbPadKind::Guitar, g, ts, false, 30000, true, kGuitarRaiseBy);
+        instrumentForGame(UsbPadKind::Guitar, g, ts, false, 30000 + kTiltHoldMs, true, kGuitarRaiseBy);
+        CHECK(ts.tiltUp);
+    }
+    // Buttons of the player's choosing, for each layout, kept as text in the settings.
+    {
+        GuitarBinding mine{{GuitarOut::DLeft, GuitarOut::DRight, GuitarOut::X, GuitarOut::B, GuitarOut::RB}, GuitarOut::Y};
+        CHECK(guitarBindingText(mine) == "DL,DR,X,B,RB,Y");
+        GuitarBinding back{};
+        CHECK(guitarBindingFromText("DL,DR,X,B,RB,Y", back) && back == mine);
+        CHECK(!guitarBindingFromText("DL,DR,X,B,RB", back) && !guitarBindingFromText("A,B,Y,X,LB,ZZ", back));
+        CHECK(guitarBindingText(kStrumLanes) == "LT,LB,RB,RT,R3,A");
+        CHECK(std::string(guitarOutName(GuitarOut::DLeft)) == "D-pad ←");
+
+        setGuitarBinding(false, mine);
+        InstrumentState cs;
+        ControllerState g;
+        g.btnA = g.btnX = true;  // green and blue, no strum: their buttons, not A and X
+        ControllerState o = instrumentForGame(UsbPadKind::Guitar, g, cs, false);
+        CHECK(o.dpadLeft && o.btnB && !o.btnA && !o.btnX && !o.dpadRight);
+        g = ControllerState{};
+        g.btnTouchpad = true;  // star power on Y (a tap)
+        o = instrumentForGame(UsbPadKind::Guitar, g, cs, false, 100);
+        applyGuitarTaps(o, cs, 100);
+        CHECK(o.btnY && o.triggerR2 == 0.0f);
+
+        // With strum, a lane on A: green no longer sends A without the strum (the menus' A
+        // would play it); the other frets still reach the menus.
+        GuitarBinding onA{{GuitarOut::A, GuitarOut::LB, GuitarOut::RB, GuitarOut::RT, GuitarOut::R3}, GuitarOut::L3};
+        setGuitarBinding(true, onA);
+        InstrumentState ms;
+        g = ControllerState{};
+        g.btnA = g.btnB = true;
+        o = instrumentForGame(UsbPadKind::Guitar, g, ms, true, 100);
+        CHECK(!o.btnA && !o.btnL1 && o.btnB);  // red's B for the menus, green's A not (a lane's)
+        g.btnA = g.btnB = true, g.dpadDown = true;  // strummed: green plays A, red its lane
+        o = instrumentForGame(UsbPadKind::Guitar, g, ms, true, 1000);
+        CHECK(o.btnA && o.btnL1);
+        setGuitarBinding(false, kFretLanes);
+        setGuitarBinding(true, kStrumLanes);
     }
     // A guitar at rest (whammy at full left, tilt moving) is not "in use": after a menu it goes
     // back to the game at once.
@@ -6576,6 +6745,21 @@ static void testUsbPadSlots() {
     input::usbPadDetached(1);
     input::takeUsbPadEvents();
     CHECK(!input::pollUsbPad(out) && input::usbPadCount() == 0);
+    // A guitar in the app's menus: its frets and strum bar, never its whammy and tilt as a stick
+    // (the list scrolled as the guitar moved).
+    {
+        input::usbPadAttached(3, "Xbox 360 Wireless", input::UsbPadKind::Guitar);
+        input::ControllerState g;
+        g.connected = true;
+        g.btnA = g.dpadDown = true;
+        g.rawRightX = g.rightStickX = 1.0f;   // the whammy pressed
+        g.rawRightY = g.rightStickY = -0.9f;  // the tilt
+        input::usbPadState(3, g);
+        CHECK(input::pollUsbPad(out) && out.btnA && out.dpadDown);
+        CHECK(out.rightStickX == 0.0f && out.rightStickY == 0.0f && out.rawRightX == 0.0f && out.rawRightY == 0.0f);
+        input::usbPadDetached(3);
+        input::takeUsbPadEvents();
+    }
     input::usbPadState(2, bitdo);  // a slot that was never attached
     CHECK(!input::pollUsbPad(out) && input::usbPadPlayer(2) == -1);
     input::usbPadState(9, bitdo);  // out of range: ignored
@@ -11571,6 +11755,44 @@ static void testMilestone6UsbKeyboardMouseIsolation() {
     };
     CHECK(!isKeyboardOrMouseReportDescriptor(gamepadReportDesc, sizeof(gamepadReportDesc)));
     CHECK(isGamepadReportDescriptor(gamepadReportDesc, sizeof(gamepadReportDesc)));
+
+    // The X-ray (usb_xray.h): a game controller's reports are recorded, a keyboard's or a mouse's never.
+    {
+        // An interface of the HID class, no boot subclass, an interrupt IN endpoint.
+        const uint8_t hidPadConfig[] = {0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
+                                        0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x00, 0x00, 0x00,
+                                        0x09, 0x21, 0x11, 0x01, 0x00, 0x01, 0x22, 0x89, 0x00,
+                                        0x07, 0x05, 0x81, 0x03, 0x40, 0x00, 0x0a};
+        const uint8_t bootKbdConfig[] = {0x09, 0x02, 0x22, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
+                                         0x09, 0x04, 0x00, 0x00, 0x01, 0x03, 0x01, 0x01, 0x00,
+                                         0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0a};
+        const uint8_t vendorConfig[] = {0x09, 0x02, 0x20, 0x00, 0x01, 0x01, 0x00, 0x80, 0x32,
+                                        0x09, 0x04, 0x00, 0x00, 0x01, 0xFF, 0x47, 0xD0, 0x00,
+                                        0x07, 0x05, 0x81, 0x03, 0x40, 0x00, 0x04};
+        CHECK(usbXrayWorthCapturing(hidPadConfig, sizeof hidPadConfig, gamepadReportDesc, sizeof gamepadReportDesc));
+        CHECK(!usbXrayWorthCapturing(hidPadConfig, sizeof hidPadConfig, kbdReportDesc, sizeof kbdReportDesc));
+        CHECK(!usbXrayWorthCapturing(hidPadConfig, sizeof hidPadConfig, nullptr, 0));  // not read: maybe a keyboard
+        CHECK(!usbXrayWorthCapturing(bootKbdConfig, sizeof bootKbdConfig, gamepadReportDesc, sizeof gamepadReportDesc));
+        CHECK(usbXrayWorthCapturing(vendorConfig, sizeof vendorConfig, nullptr, 0));
+        const auto lines = usbXrayHexLines(gamepadReportDesc, sizeof gamepadReportDesc, 8);
+        CHECK(!lines.empty() && lines[0] == "+000: 05 01 09 05 a1 01 09 01");
+
+        UsbXrayCapture cap;
+        CHECK(!cap.active());
+        cap.start("test", "Test pad", 1000);
+        CHECK(cap.active());
+        const auto notices = takeUsbXrayNotices();
+        CHECK(notices.size() == 1 && notices[0] == "Test pad");
+        uint8_t r[8] = {0x01, 0x80, 0x80, 0x00, 0x08, 0, 0, 0};
+        for (uint64_t t = 0; t < 300; ++t) {  // a stick wandering, a button pressed now and then
+            r[1] = static_cast<uint8_t>(0x80 + (t % 3));
+            r[3] = (t / 50) % 2 ? 0x01 : 0x00;
+            cap.feed(r, sizeof r, 1000 + t * 4);
+        }
+        CHECK(cap.active());
+        cap.feed(r, sizeof r, 1000 + UsbXrayCapture::kMaxMs + 1);  // past its time: over
+        CHECK(!cap.active());
+    }
 
     // 3. Configuration Descriptors across findUsbPadInterface, probeUsbPadPs5, and probeUsbPadPs4
     const uint8_t bootKbdConfig[] = {

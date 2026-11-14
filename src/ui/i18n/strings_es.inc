@@ -551,12 +551,21 @@ constexpr Column kSpanish = {
     "Finaliza la retransmisión desde tu consola Xbox y vuelve al inicio.", // MenuDescEndStream
     "Asigna qué mando físico controlará esta ranura de jugador virtual.", // MenuDescPlayer
     "Guitarra: un traste llega al juego solo cuando rasgueas mientras lo mantienes (como en Guitar Hero). Apagado: los trastes solos tocan.", // MenuDescStrum
-    "Levantar la guitarra (el mástil hacia arriba) activa el Star Power (Overdrive, RT), como el botón Back.", // MenuDescTilt
+    "Levantar la guitarra (el mástil hacia arriba) activa el Star Power (Overdrive), como el botón Back. Si no se activa en mitad de la canción, hazlo más sensible.", // MenuDescTilt
     "Asígnalos en Fortnite: Configuración > Mando > Fortnite Festival", // GuitarBindTitle
     "Carril", // GuitarBindLane
     "Overdrive", // GuitarBindOverdrive
-    "Rasgueo activado: los trastes también usan los menús (A B Y X).", // GuitarBindStrumOn
+    "Rasgueo activado: en los menús los trastes son A B Y X; el verde (A, Overdrive) solo con un toque rápido sin rasguear.", // GuitarBindStrumOn
     "Rasgueo apagado: el traste toca al pulsarlo.", // GuitarBindStrumOff
+    "Elige el botón que envía este traste (A o ◀ ▶ lo cambian). En Fortnite, asigna el carril al mismo botón.", // MenuDescGuitarBind
+    "Restaurar botones predeterminados", // GuitarBindReset
+    "Devuelve los carriles y el Overdrive a los botones predeterminados de este modo de rasgueo (activado o apagado).", // MenuDescGuitarReset
+    "El Wi-Fi retiene paquetes", // WifiHoldPill
+    "El Wi-Fi retuvo paquetes %s× en 2 min: cambia el canal 5 GHz del router o usa cable.", // WifiHoldTip
+    "Mando USB no reconocido (%s): pulsa cada botón una vez, despacio. Queda en el registro para añadir su soporte.", // UsbXrayNotice
+    "Poco sensible", // TiltLess
+    "Normal", // TiltNormal
+    "Muy sensible", // TiltMore
     "Ajusta el nivel de volumen del altavoz integrado en el mando.", // MenuDescPadSpeakerVolume
     "Volante (Stick Izq.)",                            // GyroSteering
     "Volante (Acelerar R2)",                           // GyroSteeringDrive

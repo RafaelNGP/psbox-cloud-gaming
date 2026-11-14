@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 70">
+  <!-- PSBox: a guitar (Flying V, five fret buttons on its neck), one colour; the app tints it. -->
+  <g transform="translate(14.91 51.21) scale(0.860) rotate(-30)" fill="#fff" fill-rule="evenodd">
+    <path d="M42,-5 L4,-24 C1,-25 -2,-22 0,-19 L24,0 L0,19 C-2,22 1,25 4,24 L42,5 Z M26,-7 h4 v14 h-4 Z"/>
+    <path d="M38,-4.5 h50 v9 h-50 Z M58,-2.3 h3.6 v4.6 h-3.6 Z M63.5,-2.3 h3.6 v4.6 h-3.6 Z M69,-2.3 h3.6 v4.6 h-3.6 Z M74.5,-2.3 h3.6 v4.6 h-3.6 Z M80,-2.3 h3.6 v4.6 h-3.6 Z"/>
+    <path d="M86,-5 L100,-9 L104,-6 L104,6 L100,9 L86,5 Z"/>
+  </g>
+</svg>
