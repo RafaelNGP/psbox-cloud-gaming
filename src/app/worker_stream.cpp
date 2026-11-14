@@ -825,7 +825,7 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
     }
     bool connected = false;
     bool wasInQueue = false;
-    std::string result = "timed out waiting for the session";
+    std::string result = "cancelled";  // the loop below ends otherwise with its own reason
     // A console that is off for good (not asleep) never comes out of
     // Provisioning: give up after a minute (the cloud's queue may take long).
     const uint64_t provisioningSince = platform::nowMs();
@@ -835,7 +835,11 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
     int queueSeconds = -1;
     uint64_t queueAskedAt = 0;
     uint64_t queueStartedAt = 0;
-    for (int i = 0; i < 900 && !g_cancel; ++i) {
+    // Waited for as long as it takes: only the player (Cancel), the service (a failed session, or
+    // one it no longer knows) or an own Xbox that does not wake end it. Before, 900 polls (~18
+    // minutes): a long queue (past 40 minutes at busy times) was given up while the service still
+    // held the place, and the place lost.
+    while (!g_cancel) {
         if (gssv.isHome() && platform::nowMs() - provisioningSince > 60000) {
             result = "ConsoleDidNotWake: no answer in 60 s";
             break;
