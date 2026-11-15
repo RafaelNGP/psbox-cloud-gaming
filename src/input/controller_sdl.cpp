@@ -109,6 +109,7 @@ static void androidVibrateDevice(uint8_t large, uint8_t small, uint32_t duration
 
 #if defined(__ANDROID__)
 void androidTriggerHaptic(int type) {
+    if (!vibrationEnabled()) return;
     typedef void* (*PFN_GetJNIEnv)();
     static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
     if (!pfnGetJNIEnv) return;
@@ -466,6 +467,7 @@ bool readPad(int slot, RawPad& out) {
 }
 
 void setMotors(int slot, uint8_t large, uint8_t small, uint32_t durationMs) {
+    if (!vibrationEnabled()) return;
 #if defined(__ANDROID__)
     if (slot == 0) {
         const Slot& s = g_slots[slot];

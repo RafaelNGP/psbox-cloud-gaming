@@ -574,4 +574,19 @@ constexpr Column kGerman = {
     "Wählt das Land für Preise und kostenlose Angebote im Store. Der Streaming-Server bleibt unverändert.", // SettingDescStoreCountry
     "Kopplungscode in die Zwischenablage kopiert", // SignInCodeCopied
     "Klicken oder tippen Sie auf den Code, um ihn zu kopieren", // SignInClickToCopy
+    "Bildschirmsteuerung",                                                            // TouchOverlay
+    "Deckkraft der Steuerung",                                                        // TouchOpacity
+    "Sticks invertieren",                                                             // TouchInvertSticks
+    "Steuerung anpassen",                                                             // TouchLayoutStudio
+    "Controller-Vibration",                                                           // Vibration
+    "Blendet virtuelle Bildschirm-Bedienelemente ein oder aus.",                      // SettingDescTouchOverlay
+    "Passt die Transparenz der Bildschirmtasten an.",                                 // SettingDescTouchOpacity
+    "Invertiert die vertikale Achse der virtuellen Sticks.",                          // SettingDescTouchInvertSticks
+    "Öffnet den Editor zum Anpassen und Neuanordnen der Bildschirmtasten.",           // SettingDescTouchLayoutStudio
+    "Aktiviert oder deaktiviert die Controller-Vibration.",                           // SettingDescVibration
+    "Aktiviert oder stummschaltet das Mikrofon während des Streams.",                 // MenuDescMicrophone
+    "Tasten ziehen zum Verschieben | In die Mitte von ABXY tippen, um die Gruppe zu bewegen", // TouchStudioBanner
+    "Speichern",                                                                      // Save
+    "Browser zum Anmelden öffnen",                                                    // SignInOpenBrowser
+    "Hier tippen oder A drücken, um im Browser zu öffnen",                            // SignInOpenBrowserHint
 };

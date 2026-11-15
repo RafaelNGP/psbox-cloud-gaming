@@ -574,4 +574,19 @@ constexpr Column kPortugueseBR = {
     "Escolhe o país dos preços e das ofertas gratuitas da loja. O servidor de streaming permanece o mesmo.", // SettingDescStoreCountry
     "Código de pareamento copiado para a área de transferência", // SignInCodeCopied
     "Clique ou toque no código para copiar", // SignInClickToCopy
+    "Controles na tela",                                                              // TouchOverlay
+    "Opacidade dos controles",                                                        // TouchOpacity
+    "Inverter analógicos",                                                            // TouchInvertSticks
+    "Personalizar controle",                                                          // TouchLayoutStudio
+    "Vibração do controle",                                                           // Vibration
+    "Ativa ou desativa a exibição dos controles virtuais na tela.",                   // SettingDescTouchOverlay
+    "Ajusta o nível de transparência dos botões virtuais na tela.",                   // SettingDescTouchOpacity
+    "Inverte o eixo vertical dos analógicos virtuais na tela.",                       // SettingDescTouchInvertSticks
+    "Abre o editor para reposicionar e personalizar os controles na tela.",           // SettingDescTouchLayoutStudio
+    "Ativa ou desativa a vibração (rumble) dos controles.",                           // SettingDescVibration
+    "Ativa ou desativa o microfone durante a transmissão.",                           // MenuDescMicrophone
+    "Arraste os botões para personalizar | Toque no centro de ABXY para mover o grupo", // TouchStudioBanner
+    "Salvar",                                                                         // Save
+    "Abrir navegador para fazer login",                                               // SignInOpenBrowser
+    "Toque aqui ou pressione A para abrir no navegador",                              // SignInOpenBrowserHint
 };

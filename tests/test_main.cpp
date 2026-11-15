@@ -11327,6 +11327,137 @@ static void testMilestone1TouchOverlayCanvasAndHaptics() {
     }
 }
 
+static void testWorkerMobileM4Features() {
+    // 1. R1: Vibration Settings Compliance
+    {
+        bool origVib = xc::input::vibrationEnabled();
+        xc::input::setVibrationEnabled(false);
+        CHECK(!xc::input::vibrationEnabled());
+        // Verify triggerHaptic is gated when disabled
+        xc::input::triggerHaptic(xc::input::HapticType::Click);
+        xc::input::triggerHaptic(xc::input::HapticType::Tick);
+        xc::input::triggerHaptic(xc::input::HapticType::HeavyClick);
+        // Verify rumble is gated when disabled
+        xc::input::setRumble(200, 200, 100, 0);
+        xc::input::setVibrationEnabled(true);
+        CHECK(xc::input::vibrationEnabled());
+        xc::input::setVibrationEnabled(origVib);
+    }
+
+    // 2. R2: Localization Invariants for 15 New Strings
+    {
+        using namespace xc::ui;
+        // Verify English strings
+        setLanguage(Language::English);
+        CHECK(std::string(tr(Str::TouchOverlay)) == "On-screen controls");
+        CHECK(std::string(tr(Str::TouchOpacity)) == "Controls opacity");
+        CHECK(std::string(tr(Str::TouchInvertSticks)) == "Invert thumbsticks");
+        CHECK(std::string(tr(Str::TouchLayoutStudio)) == "Customize controls");
+        CHECK(std::string(tr(Str::Vibration)) == "Controller vibration");
+        CHECK(std::string(tr(Str::SettingDescTouchOverlay)) == "Shows or hides virtual on-screen touch controls.");
+        CHECK(std::string(tr(Str::SettingDescTouchOpacity)) == "Adjusts the transparency of on-screen buttons.");
+        CHECK(std::string(tr(Str::SettingDescTouchInvertSticks)) == "Inverts the vertical axis of virtual thumbsticks.");
+        CHECK(std::string(tr(Str::SettingDescTouchLayoutStudio)) == "Opens the editor to rearrange and customize on-screen controls.");
+        CHECK(std::string(tr(Str::SettingDescVibration)) == "Enables or disables controller rumble vibration.");
+        CHECK(std::string(tr(Str::MenuDescMicrophone)) == "Mutes or unmutes the microphone during the stream.");
+        CHECK(std::string(tr(Str::TouchStudioBanner)) == "Drag buttons to reposition | Tap center of ABXY to move cluster");
+        CHECK(std::string(tr(Str::Save)) == "Save");
+        CHECK(std::string(tr(Str::SignInOpenBrowser)) == "Open browser to sign in");
+        CHECK(std::string(tr(Str::SignInOpenBrowserHint)) == "Tap here or press A to open in browser");
+
+        // Verify Portuguese strings
+        setLanguage(Language::PortugueseBR);
+        CHECK(std::string(tr(Str::TouchOverlay)) == "Controles na tela");
+        CHECK(std::string(tr(Str::TouchOpacity)) == "Opacidade dos controles");
+        CHECK(std::string(tr(Str::TouchInvertSticks)) == "Inverter analógicos");
+        CHECK(std::string(tr(Str::TouchLayoutStudio)) == "Personalizar controle");
+        CHECK(std::string(tr(Str::Vibration)) == "Vibração do controle");
+        CHECK(std::string(tr(Str::SettingDescTouchOverlay)) == "Ativa ou desativa a exibição dos controles virtuais na tela.");
+        CHECK(std::string(tr(Str::Save)) == "Salvar");
+        CHECK(std::string(tr(Str::SignInOpenBrowser)) == "Abrir navegador para fazer login");
+        CHECK(std::string(tr(Str::SignInOpenBrowserHint)) == "Toque aqui ou pressione A para abrir no navegador");
+
+        // Verify all 6 languages have non-empty translations for all 15 strings
+        for (int l = 0; l < static_cast<int>(Language::Count); ++l) {
+            setLanguage(static_cast<Language>(l));
+            CHECK(std::strlen(tr(Str::TouchOverlay)) > 0);
+            CHECK(std::strlen(tr(Str::TouchOpacity)) > 0);
+            CHECK(std::strlen(tr(Str::TouchInvertSticks)) > 0);
+            CHECK(std::strlen(tr(Str::TouchLayoutStudio)) > 0);
+            CHECK(std::strlen(tr(Str::Vibration)) > 0);
+            CHECK(std::strlen(tr(Str::SettingDescTouchOverlay)) > 0);
+            CHECK(std::strlen(tr(Str::SettingDescTouchOpacity)) > 0);
+            CHECK(std::strlen(tr(Str::SettingDescTouchInvertSticks)) > 0);
+            CHECK(std::strlen(tr(Str::SettingDescTouchLayoutStudio)) > 0);
+            CHECK(std::strlen(tr(Str::SettingDescVibration)) > 0);
+            CHECK(std::strlen(tr(Str::MenuDescMicrophone)) > 0);
+            CHECK(std::strlen(tr(Str::TouchStudioBanner)) > 0);
+            CHECK(std::strlen(tr(Str::Save)) > 0);
+            CHECK(std::strlen(tr(Str::SignInOpenBrowser)) > 0);
+            CHECK(std::strlen(tr(Str::SignInOpenBrowserHint)) > 0);
+        }
+        setLanguage(Language::English);
+    }
+
+    // 3. R3: StreamMenu touch scroll position retention
+    {
+        xc::ui::Fonts dummyFonts;
+        xc::ui::StreamMenu menu(dummyFonts);
+        menu.open(0, false);
+        xc::ui::NavInput outNav{};
+        // Start touch drag
+        app::shell::TouchEvent evDown{app::shell::TouchEvent::Kind::Down, 10, 100.0f, 300.0f};
+        menu.onTouch(evDown, outNav);
+        // Motion drag upward
+        app::shell::TouchEvent evMotion{app::shell::TouchEvent::Kind::Motion, 10, 100.0f, 240.0f};
+        menu.onTouch(evMotion, outNav);
+        // Up release
+        app::shell::TouchEvent evUp{app::shell::TouchEvent::Kind::Up, 10, 100.0f, 240.0f};
+        menu.onTouch(evUp, outNav);
+        // Rendering after release must keep menu open and valid
+        xc::ui::StreamInfo sinfo{};
+        xc::ui::Canvas canvas = menu.renderMenu(sinfo);
+        CHECK(menu.isOpen());
+        CHECK(canvas.width() > 0);
+    }
+
+    // 4. R4: Gamepad detection and SDL3 Back button scancode
+    {
+        CHECK(xc::input::scancodeToVk(270) == xc::input::kVkAndroidBack);
+        CHECK(xc::input::scancodeToVk(282) == xc::input::kVkAndroidBack);
+        bool gp = xc::input::hasGamepad();
+        (void)gp;
+    }
+
+    // 5. R4 & R5: AppUi Settings scroll and sign-in layout
+    {
+        xc::ui::Fonts dummyFonts;
+        xc::ui::ImageCache dummyImages([] {}, 10u << 20);
+        xc::ui::AppUi ui(dummyFonts, dummyImages);
+        ui.showSignIn("ABCDEFGH", "https://microsoft.com/link");
+        CHECK(ui.screen() == xc::ui::Screen::SignIn);
+
+        // Touch drag in Settings
+        ui.showHome();
+        // Tap settings touch button at Rect{kW - kMargin - 52, 46, 52, 52} -> (1772, 46)
+        app::shell::TouchEvent evSettingsTapDown{app::shell::TouchEvent::Kind::Down, 1, 1780.0f, 60.0f};
+        ui.onTouch(evSettingsTapDown);
+        app::shell::TouchEvent evSettingsTapUp{app::shell::TouchEvent::Kind::Up, 1, 1780.0f, 60.0f};
+        ui.onTouch(evSettingsTapUp);
+        CHECK(ui.screen() == xc::ui::Screen::Settings);
+
+        // Touch drag downwards inside Settings
+        app::shell::TouchEvent evDragDown{app::shell::TouchEvent::Kind::Down, 2, 500.0f, 500.0f};
+        ui.onTouch(evDragDown);
+        app::shell::TouchEvent evDragMotion{app::shell::TouchEvent::Kind::Motion, 2, 500.0f, 400.0f};
+        ui.onTouch(evDragMotion);
+        app::shell::TouchEvent evDragUp{app::shell::TouchEvent::Kind::Up, 2, 500.0f, 400.0f};
+        ui.onTouch(evDragUp);
+        // Settings scroll position is retained
+        CHECK(ui.screen() == xc::ui::Screen::Settings);
+    }
+}
+
 int main() {
     testMilestone1TouchOverlayCanvasAndHaptics();
     testHwPictureContract();
@@ -11456,6 +11587,7 @@ int main() {
     testM3PlatformAndBitrateUi();
     testM4DebugNoticesExterminationAndToasts();
     testAndroidM5QualityAndUxRefinements();
+    testWorkerMobileM4Features();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

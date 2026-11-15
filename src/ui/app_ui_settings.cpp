@@ -1229,7 +1229,8 @@ void AppUi::drawSettings(Canvas& c) {
                                         tr(Str::FpsLimit), tr(Str::StoreCountry)};
     constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4, kRowPx = 22;
     Rect rows[kSettingRows];  // by row id
-    int y = 184;
+    int y = 184 - static_cast<int>(std::lround(settingsScrollY_));
+    c.setClip({kMargin - 8, 184, kRowW + 16, kH - 184 - 80});
     for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {  // what caps_ rules out is hidden
         if (groupStart) y += kGroupGap;
         Rect r{kMargin, y, kRowW, kRowH};
@@ -1330,6 +1331,7 @@ void AppUi::drawSettings(Canvas& c) {
         }
         y += kRowH + kGap;
     }
+    c.resetClip();
     static constexpr Str kSettingDescs[kSettingRows] = {
         Str::SettingDescLanguage,
         Str::SettingDescResolution,
@@ -1638,6 +1640,7 @@ void AppUi::drawPadTester(Canvas& c) {
         int tabY = panel.y + 44;
 
         auto shoulder = [&](const char* name, int cx) {
+            if (!input::hasGamepad() && !g_keyboardHints) return;
             Rect r{cx - 20, tabY + 5, 40, 28};
             c.fillRect(r, rgba(255, 255, 255, 40), 8);
             fonts_.bold.draw(c, name, cx - fonts_.bold.measure(name, 16) / 2, fonts_.bold.centeredY(r.y, r.h, 16), 16, kGray);

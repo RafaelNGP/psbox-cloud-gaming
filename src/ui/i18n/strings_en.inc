@@ -574,4 +574,19 @@ constexpr Column kEnglish = {
     "Chooses the country used for store prices and free offers. The streaming server stays unchanged.", // SettingDescStoreCountry
     "Pairing code copied to clipboard", // SignInCodeCopied
     "Click or tap code to copy", // SignInClickToCopy
+    "On-screen controls",                                                             // TouchOverlay
+    "Controls opacity",                                                               // TouchOpacity
+    "Invert thumbsticks",                                                             // TouchInvertSticks
+    "Customize controls",                                                             // TouchLayoutStudio
+    "Controller vibration",                                                           // Vibration
+    "Shows or hides virtual on-screen touch controls.",                               // SettingDescTouchOverlay
+    "Adjusts the transparency of on-screen buttons.",                                 // SettingDescTouchOpacity
+    "Inverts the vertical axis of virtual thumbsticks.",                              // SettingDescTouchInvertSticks
+    "Opens the editor to rearrange and customize on-screen controls.",                // SettingDescTouchLayoutStudio
+    "Enables or disables controller rumble vibration.",                               // SettingDescVibration
+    "Mutes or unmutes the microphone during the stream.",                             // MenuDescMicrophone
+    "Drag buttons to reposition | Tap center of ABXY to move cluster",                // TouchStudioBanner
+    "Save",                                                                           // Save
+    "Open browser to sign in",                                                        // SignInOpenBrowser
+    "Tap here or press A to open in browser",                                         // SignInOpenBrowserHint
 };

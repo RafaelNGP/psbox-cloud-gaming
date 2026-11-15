@@ -583,6 +583,21 @@ enum class Str {
     SettingDescStoreCountry,
     SignInCodeCopied,
     SignInClickToCopy,
+    TouchOverlay,
+    TouchOpacity,
+    TouchInvertSticks,
+    TouchLayoutStudio,
+    Vibration,
+    SettingDescTouchOverlay,
+    SettingDescTouchOpacity,
+    SettingDescTouchInvertSticks,
+    SettingDescTouchLayoutStudio,
+    SettingDescVibration,
+    MenuDescMicrophone,
+    TouchStudioBanner,
+    Save,
+    SignInOpenBrowser,
+    SignInOpenBrowserHint,
     Count
 };
 

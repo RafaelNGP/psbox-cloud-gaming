@@ -109,6 +109,7 @@ void openReport(const std::string& what, bool previousSession, const std::string
 // Dead zone, trigger vibration and confirm button from g_settings.
 void applyControllerSettings() {
     std::lock_guard<std::mutex> lock(g_settingsMutex);
+    input::setVibrationEnabled(g_settings.vibrationEnabled);
     input::setDeadzone(g_settings.deadzoneLeft / 100.0f, g_settings.deadzoneRight / 100.0f);
     input::setTriggerFeel(g_settings.triggerStrength, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, g_settings.triggerProfile);
     input::setGyro(g_settings.gyroMode, g_settings.gyroLevel);
@@ -334,6 +335,7 @@ bool coreStartup() {
     }
     ui::setLanguage(ui::languageFromCode(g_settings.language));
     media::setPadSpeakerVolume(g_settings.padSpeakerVolume);
+    input::setVibrationEnabled(g_settings.vibrationEnabled);
     XC_LOGI("settings: language %s, %s, region %s", g_settings.language.c_str(), g_settings.resolution.c_str(),
             g_settings.region.empty() ? "auto" : g_settings.region.c_str());
     shell::beforeDisplay(g_settings);  // the PS5: the splash screen hidden, the video mode (120 Hz) settled

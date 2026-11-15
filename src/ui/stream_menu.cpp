@@ -671,12 +671,12 @@ void StreamMenu::drawGuitarPicker(Canvas& c, int rowY) const {
 const char* StreamMenu::itemDescription(int item) const {
     switch (item) {
         case XboxButton: return tr(Str::MenuDescXboxButton);
-        case TouchOverlayItem: return "Ativa ou desativa a exibição dos controles virtuais na tela.";
-        case TouchOpacityItem: return "Ajusta o nível de transparência dos botões virtuais na tela.";
-        case TouchInvertSticksItem: return "Inverte o eixo vertical dos analógicos virtuais na tela.";
-        case TouchLayoutStudioItem: return "Abre o editor para reposicionar e personalizar os controles na tela.";
-        case VibrationItem: return "Ativa ou desativa a vibração (rumble) dos controles.";
-        case MicMuteItem: return "Ativa ou desativa o microfone durante a transmissão.";
+        case TouchOverlayItem: return tr(Str::SettingDescTouchOverlay);
+        case TouchOpacityItem: return tr(Str::SettingDescTouchOpacity);
+        case TouchInvertSticksItem: return tr(Str::SettingDescTouchInvertSticks);
+        case TouchLayoutStudioItem: return tr(Str::SettingDescTouchLayoutStudio);
+        case VibrationItem: return tr(Str::SettingDescVibration);
+        case MicMuteItem: return tr(Str::MenuDescMicrophone);
         case Stats: return tr(Str::MenuDescStats);
         case Upscaler: return tr(Str::MenuDescUpscaler);
         case Sharpness: return tr(Str::MenuDescSharpness);
@@ -943,16 +943,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     int startIdx = 0;
     if (totalShown > kMaxVisible) {
 #if defined(__ANDROID__)
-        if (touchDragging_ || touchActive_) {
-            startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-        } else {
-            int selStart = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
-            startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-            if (selIdx < startIdx || selIdx >= startIdx + kMaxVisible) {
-                startIdx = selStart;
-                scrollPixelOffset_ = static_cast<float>(startIdx * kRowH);
-            }
-        }
+        startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
 #else
         startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
 #endif
@@ -978,11 +969,11 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         int ty = fonts_.semibold.centeredY(row.y, row.h, kPx);
 
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
-                            : i == TouchOverlayItem    ? "Controles na tela"
-                            : i == TouchOpacityItem    ? "Opacidade dos controles"
-                            : i == TouchInvertSticksItem ? "Inverter analógicos"
-                            : i == TouchLayoutStudioItem ? "Personalizar controle"
-                            : i == VibrationItem       ? "Vibração do controle"
+                            : i == TouchOverlayItem      ? tr(Str::TouchOverlay)
+                            : i == TouchOpacityItem      ? tr(Str::TouchOpacity)
+                            : i == TouchInvertSticksItem ? tr(Str::TouchInvertSticks)
+                            : i == TouchLayoutStudioItem ? tr(Str::TouchLayoutStudio)
+                            : i == VibrationItem         ? tr(Str::Vibration)
                             : i == MicMuteItem         ? tr(Str::MenuMicrophone)
                             : i == PlayerItem          ? tr(Str::MenuPlayer)
                             : i == StrumItem           ? tr(Str::MenuStrum)
@@ -1474,6 +1465,25 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         touchActive_ = false;
         if (touchDragging_) {
             touchDragging_ = false;
+#if defined(__ANDROID__)
+            constexpr int kRowH = 50, kMaxVisible = 10;
+            int shownList[ItemCount];
+            int totalShown = 0;
+            int selIdx = 0;
+            for (int i : kAndroidOrder) {
+                if (!itemShown(i)) continue;
+                if (i == selected_) selIdx = totalShown;
+                shownList[totalShown++] = i;
+            }
+            if (totalShown > kMaxVisible) {
+                int startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
+                if (selIdx < startIdx) {
+                    selected_ = shownList[startIdx];
+                } else if (selIdx >= startIdx + kMaxVisible) {
+                    selected_ = shownList[startIdx + kMaxVisible - 1];
+                }
+            }
+#endif
             return true;
         }
 

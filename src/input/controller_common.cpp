@@ -283,6 +283,13 @@ void resetLightBar(int pad) {
 
 bool padConnected(int index) { return index >= 0 && index < kMaxPads && g_pads[index].connected; }
 
+bool hasGamepad() {
+    for (int i = 0; i < kMaxPads; ++i) {
+        if (g_pads[i].connected || !usbPadNameFor(i).empty()) return true;
+    }
+    return false;
+}
+
 void setTriggerFeel(int strength, int hzIndex, int resistance, bool pulses, int profile) {
     g_triggerStrength = std::clamp(strength, 0, kTriggerStrengths - 1);
     g_triggerHz = std::clamp(hzIndex, 0, 2);

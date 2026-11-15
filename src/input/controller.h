@@ -69,6 +69,8 @@ void refreshPads();
 // Whether the pad at `index` answered its last poll, and its user's name
 // (empty when the slot is free).
 bool padConnected(int index);
+// True if any pad slot has a physical gamepad or USB controller connected.
+bool hasGamepad();
 // When pad `index` was last used (a button or a stick pushed), ms; 0 never.
 uint64_t padActiveAt(int index);
 // A button pressed or a stick / trigger pushed past halfway.
@@ -151,6 +153,7 @@ enum class HapticType {
 #if defined(__ANDROID__)
 void androidTriggerHaptic(int type);
 inline void triggerHaptic(HapticType type = HapticType::Click) {
+    if (!vibrationEnabled()) return;
     androidTriggerHaptic(static_cast<int>(type));
 }
 #else

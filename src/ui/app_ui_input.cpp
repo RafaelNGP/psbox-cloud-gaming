@@ -509,7 +509,7 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
             return ev;
         }
 #if defined(__ANDROID__)
-        Rect btnBox{1160, 360, 600, 130};
+        Rect btnBox{1180, 480, 560, 124};
         if (x >= btnBox.x && x < btnBox.x + btnBox.w && y >= btnBox.y && y < btnBox.y + btnBox.h) {
             ev.action = Action::OpenUrl;
             ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
@@ -522,16 +522,18 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
         return ev;
     }
 
-    // Check avatar / profile click to open settings
+    // Check avatar / settings button click to open settings
     if (screen_ == Screen::Home && !searching_) {
-        constexpr int kAvatar = 52;
-        if (x >= kW - kMargin - kAvatar && x <= kW - kMargin && y >= 40 && y <= 100) {
+        Rect settingsBtn{kW - kMargin - 52, 46, 52, 52};
+        if ((x >= settingsBtn.x && x <= settingsBtn.x + settingsBtn.w && y >= settingsBtn.y && y <= settingsBtn.y + settingsBtn.h) ||
+            (x >= settingsBtn.x - 16 - 64 && x <= settingsBtn.x && y >= 40 && y <= 110)) {
             screen_ = Screen::Settings;
             settingsRow_ = 0;
             settingsFromError_ = false;
             settingsCountry_ = settings_.loginCountry;
             dropdownOpen_ = false;
             filterList_ = -1;
+            settingsScrollY_ = 0.0f;
             dirty_ = true;
             return ev;
         }
@@ -928,10 +930,10 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
             }
         }
         constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
-        int curY = 184;
+        int curY = 184 - static_cast<int>(std::lround(settingsScrollY_));
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
             if (groupStart) curY += kGroupGap;
-            if (x >= kMargin && x < kMargin + kRowW && y >= curY && y < curY + kRowH) {
+            if (x >= kMargin && x < kMargin + kRowW && y >= curY && y < curY + kRowH && y >= 184 && y < kH - 80) {
                 settingsRow_ = i;
                 if (i == 14) {
                     openPadTester();
@@ -1169,6 +1171,16 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
             } else if (screen_ == Screen::Details && achievementsOpen_) {
                 achScroll_ = std::max(0, achScroll_ - static_cast<int>(dy));
                 dirty_ = true;
+            } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
+                constexpr int kRowH = 30, kGroupGap = 4;
+                int totalH = 0;
+                for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
+                    if (groupStart) totalH += kGroupGap;
+                    totalH += kRowH;
+                }
+                float maxScroll = std::max(0.0f, static_cast<float>(totalH - 720));
+                settingsScrollY_ = std::clamp(settingsScrollY_ - dy, 0.0f, maxScroll);
+                dirty_ = true;
             }
         }
         touchTracker_.lastX = ev.x;
@@ -1194,6 +1206,29 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                     gridScroll_.target = std::clamp(gridScroll_.target - flingDelta, 0.0f, maxScroll);
                     animating_ = true;
                     dirty_ = true;
+                } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
+                    constexpr int kRowH = 30, kGroupGap = 4;
+                    int totalH = 0;
+                    for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
+                        if (groupStart) totalH += kGroupGap;
+                        totalH += kRowH;
+                    }
+                    float maxScroll = std::max(0.0f, static_cast<float>(totalH - 720));
+                    settingsScrollY_ = std::clamp(settingsScrollY_ - flingDelta, 0.0f, maxScroll);
+                    dirty_ = true;
+                }
+            }
+            // Reconcile cursors upon touch drag release without snapping back
+            if (screen_ == Screen::Home && !searching_ && !updatePrompt_ && !quitPrompt_ && !reportOpen_) {
+                if (tab_ == Tab::Library) {
+                    int topRow = std::max(0, static_cast<int>((gridScroll_.target + 20) / kGridPitchY));
+                    const LibraryLayout& L = libraryLayout();
+                    if (topRow < static_cast<int>(L.rowFirst.size())) {
+                        gridFocus_ = L.rowFirst[static_cast<size_t>(topRow)];
+                    }
+                } else if (tab_ == Tab::GamePass && !rows_.empty()) {
+                    focusRow_ = std::clamp(static_cast<int>(std::lround(rowY_.target)), 0, static_cast<int>(rows_.size()) - 1);
+                    rowY_.target = static_cast<float>(focusRow_);
                 }
             }
             touchTracker_.active = false;

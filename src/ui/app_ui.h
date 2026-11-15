@@ -819,6 +819,7 @@ private:
     std::vector<uint32_t> wheel_;  // the wheel's pixels at wheelValue_
     float wheelValue_ = -1;
     int settingsRow_ = 0;
+    float settingsScrollY_ = 0.0f;
     bool dropdownOpen_ = false;  // the list of the focused settings row
     int dropdownIndex_ = 0, dropdownTop_ = 0;
     uint64_t signOutHoldStart_ = 0;  // TOUCHPAD hold in progress

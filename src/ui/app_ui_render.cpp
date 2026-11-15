@@ -57,31 +57,46 @@ void AppUi::drawGamerscoreBadge(Canvas& c, float cx, float cy, float r) {
 // from 2 h left, red at none. An unlimited account says so; nothing when it
 // is not known.
 void AppUi::drawCloudTime(Canvas& c, int x, int y) {
+#if defined(__ANDROID__)
+    constexpr int kPx = 22, kLineH = 28;
+    constexpr float kClockR = 10.0f;
+    constexpr int kBarH = 6;
+    constexpr int kPad = 26;
+#else
     constexpr int kPx = 15, kLineH = 20;
+    constexpr float kClockR = 7.0f;
+    constexpr int kBarH = 4;
+    constexpr int kPad = 20;
+#endif
     const int ty = fonts_.semibold.centeredY(y, kLineH, kPx);
     const float iconY = y + kLineH / 2.0f;
     // A free account plays in sessions of a fixed length: "unlimited" would be wrong for it.
     if (freeTierSessionSeconds_ > 0 && isFreeAccountLocked()) {
-        drawClockIcon(c, x + 7.0f, iconY, 7.0f, kGray);
-        fonts_.semibold.draw(c, trf(Str::CloudTimeFreeTier, std::to_string(freeTierSessionSeconds_ / 60)), x + 20, ty, kPx, kGray);
+        drawClockIcon(c, x + kClockR, iconY, kClockR, kGray);
+        fonts_.semibold.draw(c, trf(Str::CloudTimeFreeTier, std::to_string(freeTierSessionSeconds_ / 60)), x + kPad, ty, kPx, kGray);
         return;
     }
     if (playtimeUnlimited_) {
-        drawClockIcon(c, x + 7.0f, iconY, 7.0f, kGray);
-        fonts_.semibold.draw(c, tr(Str::CloudTimeUnlimited), x + 20, ty, kPx, kGray);
+        drawClockIcon(c, x + kClockR, iconY, kClockR, kGray);
+        fonts_.semibold.draw(c, tr(Str::CloudTimeUnlimited), x + kPad, ty, kPx, kGray);
         return;
     }
     if (playtimeRemaining_ < 0) return;
     const Color col = playtimeRemaining_ <= 0      ? rgba(240, 100, 100)
                       : playtimeRemaining_ < 7260 ? rgba(255, 160, 40)
                                                    : kGray;
-    drawClockIcon(c, x + 7.0f, iconY, 7.0f, col);
-    int end = fonts_.semibold.draw(c, trf(Str::CloudTimeLeft, formatCloudTime(playtimeRemaining_)), x + 20, ty, kPx, col);
+    drawClockIcon(c, x + kClockR, iconY, kClockR, col);
+    int end = fonts_.semibold.draw(c, trf(Str::CloudTimeLeft, formatCloudTime(playtimeRemaining_)), x + kPad, ty, kPx, col);
     if (playtimeMax_ <= 0) return;
     end = fonts_.semibold.draw(c, " " + trf(Str::CloudTimeOf, formatCloudTime(playtimeMax_)), end, ty, kPx, kDim);
     // As wide as the brand name, or the line when that is longer.
-    const int w = std::max(fonts_.semibold.measure(tr(Str::CloudGaming), 22), end - x);
-    const Rect bar{x, y + kLineH + 2, w, 4};
+#if defined(__ANDROID__)
+    constexpr int kBrandPx = 30;
+#else
+    constexpr int kBrandPx = 22;
+#endif
+    const int w = std::max(fonts_.semibold.measure(tr(Str::CloudGaming), kBrandPx), end - x);
+    const Rect bar{x, y + kLineH + 2, w, kBarH};
     c.fillRect(bar, rgba(255, 255, 255, 36), 2);
     const double f = std::clamp(static_cast<double>(playtimeRemaining_) / static_cast<double>(playtimeMax_), 0.0, 1.0);
     if (const int fw = static_cast<int>(w * f + 0.5); fw > 0) c.fillRect({x, bar.y, std::max(fw, 4), bar.h}, col, 2);
@@ -89,20 +104,57 @@ void AppUi::drawCloudTime(Canvas& c, int x, int y) {
 
 void AppUi::drawTopBar(Canvas& c) {
     const bool hasCloudTime = playtimeUnlimited_ || playtimeRemaining_ >= 0;
-    drawLogo(c, kMargin + 22, 72, 22);
+#if defined(__ANDROID__)
+    constexpr int kLogoR = 30;
+    constexpr int kBrandPx = 30;
+    constexpr int kAvatar = 64;
+    constexpr int kGamertagPx = 30;
+    constexpr int kSubPlanPx = 16;
+    constexpr int kSubBoxH = 24;
+    constexpr int kSubGpPx = 18;
+    constexpr int kLineY = 74, kLineH = 28, kLinePx = 22;
+    constexpr float kBadgeR = 11.5f;
+    constexpr int kBadgeMargin = 16;
+#else
+    constexpr int kLogoR = 22;
+    constexpr int kBrandPx = 22;
+    constexpr int kAvatar = 52;
+    constexpr int kGamertagPx = 22;
+    constexpr int kSubPlanPx = 11;
+    constexpr int kSubBoxH = 16;
+    constexpr int kSubGpPx = 14;
+    constexpr int kLineY = 76, kLineH = 22, kLinePx = 17;
+    constexpr float kBadgeR = 8.5f;
+    constexpr int kBadgeMargin = 13;
+#endif
 
+    drawLogo(c, kMargin + kLogoR, 72, kLogoR);
+
+    int brandX = kMargin + kLogoR * 2 + 20;
     if (hasCloudTime) {
-        fonts_.semibold.draw(c, tr(Str::CloudGaming), kMargin + 64, 45, 22, kWhite);
-        drawCloudTime(c, kMargin + 64, 73);
+        fonts_.semibold.draw(c, tr(Str::CloudGaming), brandX, 42, kBrandPx, kWhite);
+        drawCloudTime(c, brandX, 72);
     } else {
-        fonts_.semibold.draw(c, tr(Str::CloudGaming), kMargin + 64, 60, 22, kWhite);
+        fonts_.semibold.draw(c, tr(Str::CloudGaming), brandX, 58, kBrandPx, kWhite);
     }
 
-    int x = kW - kMargin;
-    constexpr int kAvatar = 52;
-    x -= kAvatar;
+    // Dedicated Settings touch button
+    Rect settingsBtn{kW - kMargin - 52, 46, 52, 52};
+    c.fillRect(settingsBtn, rgba(255, 255, 255, 18), 26);
+    c.strokeRect(settingsBtn, rgba(255, 255, 255, 45), 1, 26);
+    float scx = settingsBtn.x + 26.0f, scy = settingsBtn.y + 26.0f;
+    for (int a = 0; a < 6; ++a) {
+        float angle = a * (3.14159265f / 3.0f);
+        float ca = std::cos(angle), sa = std::sin(angle);
+        c.line(scx + 7.0f * ca, scy + 7.0f * sa, scx + 14.0f * ca, scy + 14.0f * sa, 3.5f, kWhite);
+    }
+    c.strokeCircle(scx, scy, 9.5f, 3.5f, kWhite);
+    c.fillCircle(scx, scy, 4.0f, rgba(20, 20, 20));
+
+    int x = settingsBtn.x - 16 - kAvatar;
+    int avatarY = 72 - kAvatar / 2;
     if (auto pic = images_.get(gamerpicUrl_, kAvatar, kAvatar)) {
-        c.drawImage(*pic, x, 46, 255, -1);
+        c.drawImage(*pic, x, avatarY, 255, -1);
     } else {
         c.fillCircle(x + kAvatar / 2.0f, 72, kAvatar / 2.0f, kPanel);
     }
@@ -112,10 +164,9 @@ void AppUi::drawTopBar(Canvas& c) {
         // plan, right-aligned to the picture as the Xbox app shows them.
         bool isFree = subscription_.empty() || (subscription_ != "GamePass" && xcloud::planTier(subscription_) == 0);
         bool second = !gamerscore_.empty() || !subscription_.empty() || isFree;
-        int w = fonts_.semibold.measure(gamertag_, 22);
-        fonts_.semibold.draw(c, gamertag_, x - 16 - w, second ? 44 : 59, 22, kWhite);
+        int w = fonts_.semibold.measure(gamertag_, kGamertagPx);
+        fonts_.semibold.draw(c, gamertag_, x - 16 - w, second ? (kGamertagPx == 30 ? 38 : 44) : 59, kGamertagPx, kWhite);
         int right = x - 16;
-        constexpr int kLineY = 76, kLineH = 22, kLinePx = 17;
         const float midY = kLineY + kLineH / 2.0f;
         if (!subscription_.empty()) {
             // "GAME PASS", and the plan in an outlined box when it is known
@@ -124,27 +175,27 @@ void AppUi::drawTopBar(Canvas& c) {
             if (subscription_ != "GamePass") {
                 std::string plan = subscription_;
                 for (auto& ch : plan) ch = static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
-                int pw = fonts_.bold.measure(plan, 11);
-                Rect box{right - pw - 10, static_cast<int>(midY) - 8, pw + 10, 16};
+                int pw = fonts_.bold.measure(plan, kSubPlanPx);
+                Rect box{right - pw - 10, static_cast<int>(midY) - kSubBoxH / 2, pw + 10, kSubBoxH};
                 c.strokeRect(box, kGray, 1, 2);
-                fonts_.bold.draw(c, plan, box.x + 5, fonts_.bold.centeredY(box.y, box.h, 11), 11, kGray);
+                fonts_.bold.draw(c, plan, box.x + 5, fonts_.bold.centeredY(box.y, box.h, kSubPlanPx), kSubPlanPx, kGray);
                 left = box.x - 6;
             }
             const char* gp = "GAME PASS";
-            int gw = fonts_.semibold.measure(gp, 14);
-            fonts_.semibold.draw(c, gp, left - gw, fonts_.semibold.centeredY(kLineY, kLineH, 14), 14, kGray);
+            int gw = fonts_.semibold.measure(gp, kSubGpPx);
+            fonts_.semibold.draw(c, gp, left - gw, fonts_.semibold.centeredY(kLineY, kLineH, kSubGpPx), kSubGpPx, kGray);
             right = left - gw - 16;
         } else if (isFree) {
             // "XBOX GAME PASS" and FREE in its box, as a plan's name is shown.
             const char* freeLabel = "FREE";
-            int fw = fonts_.bold.measure(freeLabel, 11);
-            Rect box{right - fw - 12, static_cast<int>(midY) - 8, fw + 12, 16};
+            int fw = fonts_.bold.measure(freeLabel, kSubPlanPx);
+            Rect box{right - fw - 12, static_cast<int>(midY) - kSubBoxH / 2, fw + 12, kSubBoxH};
             c.fillRect(box, rgba(255, 255, 255, 20), 4);
             c.strokeRect(box, rgba(160, 160, 175, 180), 1, 4);
-            fonts_.bold.draw(c, freeLabel, box.x + 6, fonts_.bold.centeredY(box.y, box.h, 11), 11, rgba(220, 225, 235, 255));
+            fonts_.bold.draw(c, freeLabel, box.x + 6, fonts_.bold.centeredY(box.y, box.h, kSubPlanPx), kSubPlanPx, rgba(220, 225, 235, 255));
             const char* gp = "XBOX GAME PASS";
-            int gw = fonts_.semibold.measure(gp, 14);
-            fonts_.semibold.draw(c, gp, box.x - 6 - gw, fonts_.semibold.centeredY(kLineY, kLineH, 14), 14, kGray);
+            int gw = fonts_.semibold.measure(gp, kSubGpPx);
+            fonts_.semibold.draw(c, gp, box.x - 6 - gw, fonts_.semibold.centeredY(kLineY, kLineH, kSubGpPx), kSubGpPx, kGray);
             right = box.x - 6 - gw - 16;
         }
         if (!gamerscore_.empty()) {
@@ -157,13 +208,14 @@ void AppUi::drawTopBar(Canvas& c) {
             int nw = fonts_.semibold.measure(n, kLinePx);
             int nx = right - nw;
             fonts_.semibold.draw(c, n, nx, fonts_.semibold.centeredY(kLineY, kLineH, kLinePx), kLinePx, kGray);
-            drawGamerscoreBadge(c, nx - 13.0f, midY, 8.5f);
-            right = nx - 26;
+            drawGamerscoreBadge(c, nx - kBadgeMargin, midY, kBadgeR);
+            right = nx - static_cast<int>(kBadgeR * 2.0f + 9.0f);
         }
     }
 }
 
 void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>& hints) {
+    if (!input::hasGamepad() && !g_keyboardHints) return;
     // Right-aligned PlayStation button glyphs with labels.
     constexpr int kPx = 22, kR = 14, kGap = 36;
     int x = kW - kMargin;
@@ -352,40 +404,41 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         fonts_.regular.draw(c, tr(Str::SignInClickToCopy), left, 762, 22, kDim);
 #endif
     }
-    drawSpinner(c, left + 18, 830, 14, nowMs);
-    fonts_.regular.draw(c, tr(Str::SignInWaiting), left + 48, 815, 26, kDim);
+    drawSpinner(c, left + 18, 885, 14, nowMs);
+    fonts_.regular.draw(c, tr(Str::SignInWaiting), left + 48, 872, 26, kDim);
 
     if (!platform::dataDirWritable()) {
         std::string pathAndErr = platform::dataDir() + " (errno " + std::to_string(platform::dataDirErrno()) + ")";
         std::string warn1 = trf(Str::StorageNotWritable, pathAndErr);
         std::string warn2 = trf(Str::StorageFixHint, platform::dataDir());
-        fonts_.semibold.draw(c, warn1, left, 875, 22, rgba(255, 160, 40));
-        fonts_.regular.draw(c, warn2, left, 905, 20, kGray);
+        fonts_.semibold.draw(c, warn1, left, 935, 22, rgba(255, 160, 40));
+        fonts_.regular.draw(c, warn2, left, 965, 20, kGray);
     }
 
 #if defined(__ANDROID__)
-    // Big prominent button to open the browser for sign-in
-    Rect btnBox{1160, 360, 600, 130};
-    c.fillRect(btnBox, rgba(16, 124, 65), 24); // Xbox Green
-    c.strokeRect(btnBox, rgba(30, 180, 90), 3, 24);
+    // Harmonized Xbox-styled primary action button for mobile browser sign-in
+    Rect btnBox{1180, 480, 560, 124};
+    c.fillRect(btnBox, kGreen, 24);
+    c.strokeRect(btnBox, rgba(30, 215, 96, 140), 2, 24);
 
-    const char* btnTxt = "Abrir navegador para fazer login";
+    const char* btnTxt = tr(Str::SignInOpenBrowser);
     int bw = fonts_.bold.measure(btnTxt, 28);
     fonts_.bold.draw(c, btnTxt, btnBox.x + (btnBox.w - bw) / 2,
-                     fonts_.bold.centeredY(btnBox.y, btnBox.h - 26, 28), 28, kWhite);
+                     btnBox.y + 24, 28, kWhite);
 
-    const char* subTxt = "Toque aqui ou aperte A para abrir no navegador";
+    const char* subTxt = tr(Str::SignInOpenBrowserHint);
     int sw = fonts_.regular.measure(subTxt, 18);
-    fonts_.regular.draw(c, subTxt, btnBox.x + (btnBox.w - sw) / 2, btnBox.y + btnBox.h - 36, 18, rgba(220, 240, 230));
+    fonts_.regular.draw(c, subTxt, btnBox.x + (btnBox.w - sw) / 2,
+                        btnBox.y + btnBox.h - 32, 18, rgba(220, 245, 225));
 
-    // Under the code panel: clear copy instruction badge
-    Rect copyBadge{left, 765, panel.w, 52};
-    c.fillRect(copyBadge, rgba(35, 45, 60, 230), 14);
-    c.strokeRect(copyBadge, rgba(60, 120, 200, 180), 2, 14);
-    const char* copyMsg = "📋 Toque no código acima para copiar";
-    int cw = fonts_.semibold.measure(copyMsg, 22);
+    // Under the code panel: clean copy affordance badge matching app palette
+    Rect copyBadge{left, 765, panel.w, 46};
+    c.fillRect(copyBadge, rgba(28, 28, 34, 220), 12);
+    c.strokeRect(copyBadge, rgba(255, 255, 255, 30), 1, 12);
+    const char* copyMsg = tr(Str::SignInClickToCopy);
+    int cw = fonts_.semibold.measure(copyMsg, 20);
     fonts_.semibold.draw(c, copyMsg, copyBadge.x + (copyBadge.w - cw) / 2,
-                         fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 22), 22, rgba(160, 210, 255));
+                         fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 20), 20, kGray);
 #else
     // QR code for the sign-in page. Not "?otc=<code>": that prefilled link
     // goes through a consent flow that rejects this client id ("first party
@@ -426,6 +479,7 @@ void AppUi::drawTabs(Canvas& c) {
     }
     int x = (kW - total) / 2;
     auto shoulder = [&](const char* name, int cx) {
+        if (!input::hasGamepad() && !g_keyboardHints) return;
         Rect r{cx - 22, kY + 8, 44, 28};
         c.fillRect(r, rgba(255, 255, 255, 40), 8);
         fonts_.bold.draw(c, name, cx - fonts_.bold.measure(name, 16) / 2, fonts_.bold.centeredY(r.y, r.h, 16), 16, kGray);

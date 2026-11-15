@@ -574,4 +574,19 @@ constexpr Column kFrench = {
     "Choisit le pays des prix et des offres gratuites de la boutique. Le serveur de streaming reste inchangé.", // SettingDescStoreCountry
     "Code de jumelage copié dans le presse-papiers", // SignInCodeCopied
     "Cliquez ou appuyez sur le code pour copier", // SignInClickToCopy
+    "Commandes tactiles",                                                             // TouchOverlay
+    "Opacité des commandes",                                                          // TouchOpacity
+    "Inverser les sticks",                                                            // TouchInvertSticks
+    "Personnaliser les commandes",                                                    // TouchLayoutStudio
+    "Vibration de la manette",                                                        // Vibration
+    "Affiche ou masque les commandes tactiles virtuelles à l'écran.",                 // SettingDescTouchOverlay
+    "Ajuste la transparence des boutons tactiles à l'écran.",                         // SettingDescTouchOpacity
+    "Inverse l'axe vertical des sticks virtuels à l'écran.",                          // SettingDescTouchInvertSticks
+    "Ouvre l'éditeur pour repositionner et personnaliser les commandes tactiles.",    // SettingDescTouchLayoutStudio
+    "Active ou désactive la vibration de la manette.",                                // SettingDescVibration
+    "Active ou désactive le microphone pendant la diffusion.",                        // MenuDescMicrophone
+    "Faites glisser les boutons pour les placer | Touchez le centre d'ABXY pour déplacer le groupe", // TouchStudioBanner
+    "Enregistrer",                                                                    // Save
+    "Ouvrir le navigateur pour se connecter",                                         // SignInOpenBrowser
+    "Touchez ici ou appuyez sur A pour ouvrir dans le navigateur",                    // SignInOpenBrowserHint
 };

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 RafaelNGP
 #include "ui/touch_pad_overlay.h"
+#include "ui/strings.h"
 #include "app/web_server.h"
 #include "platform/platform.h"
 #include "util/json.h"
@@ -883,7 +884,7 @@ void TouchPadOverlay::drawLayoutStudioHud_(Canvas& c) {
     Rect banner{440, 20, 1040, 44};
     c.fillRect(banner, rgba(20, 20, 28, 220), 12);
     c.strokeRect(banner, rgba(255, 255, 255, 40), 1, 12);
-    const char* bannerText = "Arraste os botões para personalizar | Toque no centro de ABXY para mover o grupo";
+    const char* bannerText = tr(Str::TouchStudioBanner);
     int bw = fonts_.semibold.measure(bannerText, 17);
     fonts_.semibold.draw(c, bannerText, banner.x + (banner.w - bw) / 2, fonts_.semibold.centeredY(banner.y, banner.h, 17), 17, rgba(240, 240, 250));
 
@@ -892,7 +893,7 @@ void TouchPadOverlay::drawLayoutStudioHud_(Canvas& c) {
     Rect rReset{670, 980, 200, 48};
     c.fillRect(rReset, rgba(35, 35, 42, 230), 12);
     c.strokeRect(rReset, rgba(240, 160, 50, 200), 2, 12);
-    const char* txtReset = "Restaurar Padrão";
+    const char* txtReset = tr(Str::ResetToDefault);
     int rw = fonts_.semibold.measure(txtReset, 18);
     fonts_.semibold.draw(c, txtReset, rReset.x + (rReset.w - rw) / 2, fonts_.semibold.centeredY(rReset.y, rReset.h, 18), 18, rgba(240, 160, 50));
 
@@ -900,7 +901,7 @@ void TouchPadOverlay::drawLayoutStudioHud_(Canvas& c) {
     Rect rCancel{890, 980, 140, 48};
     c.fillRect(rCancel, rgba(50, 50, 58, 230), 12);
     c.strokeRect(rCancel, rgba(160, 160, 175, 180), 2, 12);
-    const char* txtCancel = "Cancelar";
+    const char* txtCancel = tr(Str::Cancel);
     int cw = fonts_.semibold.measure(txtCancel, 18);
     fonts_.semibold.draw(c, txtCancel, rCancel.x + (rCancel.w - cw) / 2, fonts_.semibold.centeredY(rCancel.y, rCancel.h, 18), 18, rgba(230, 230, 240));
 
@@ -908,7 +909,7 @@ void TouchPadOverlay::drawLayoutStudioHud_(Canvas& c) {
     Rect rSave{1050, 980, 160, 48};
     c.fillRect(rSave, rgba(16, 124, 16, 240), 12);
     c.strokeRect(rSave, rgba(30, 215, 96, 240), 2, 12);
-    const char* txtSave = "Salvar";
+    const char* txtSave = tr(Str::Save);
     int sw = fonts_.bold.measure(txtSave, 18);
     fonts_.bold.draw(c, txtSave, rSave.x + (rSave.w - sw) / 2, fonts_.bold.centeredY(rSave.y, rSave.h, 18), 18, rgba(255, 255, 255));
 
