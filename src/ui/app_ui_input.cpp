@@ -500,14 +500,22 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
         }
     }
 
-    if (screen_ == Screen::SignIn && caps_.openUrl && !code_.empty()) {
+    if (screen_ == Screen::SignIn && !code_.empty()) {
         constexpr int left = 180;
         int panelW = std::max(400, static_cast<int>(code_.size()) * 82 + 64);
-        if (x >= left && x < left + panelW && y >= 600 && y < 750) {
+        if (x >= left && x < left + panelW && y >= 600 && y < 830) {
             ev.action = Action::CopyClipboard;
             ev.clipboardText = code_;
             return ev;
         }
+#if defined(__ANDROID__)
+        Rect btnBox{1160, 360, 600, 130};
+        if (x >= btnBox.x && x < btnBox.x + btnBox.w && y >= btnBox.y && y < btnBox.y + btnBox.h) {
+            ev.action = Action::OpenUrl;
+            ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+            return ev;
+        }
+#endif
     }
 
     if (reportOpen_ || countryPickerOpen_ || (screen_ == Screen::Home && (updatePrompt_ || quitPrompt_))) {
@@ -1333,8 +1341,12 @@ UiEvent AppUi::handleLocked(const NavInput& in) {
             handleHome(in, ev);
             break;
         case Screen::SignIn:
-            // A desktop: Cross (Enter) opens the sign-in page in the browser.
-            if (in.accept && caps_.openUrl) {
+            // Desktop or Android: Cross/A opens the sign-in page in the browser.
+            if (in.accept && (caps_.openUrl
+#if defined(__ANDROID__)
+                || true
+#endif
+            )) {
                 ev.action = Action::OpenUrl;
                 ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
             }

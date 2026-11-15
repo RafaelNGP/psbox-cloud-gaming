@@ -348,7 +348,9 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         x += cell;
     }
     if (caps_.openUrl && !code_.empty()) {
+#if !defined(__ANDROID__)
         fonts_.regular.draw(c, tr(Str::SignInClickToCopy), left, 762, 22, kDim);
+#endif
     }
     drawSpinner(c, left + 18, 830, 14, nowMs);
     fonts_.regular.draw(c, tr(Str::SignInWaiting), left + 48, 815, 26, kDim);
@@ -361,6 +363,30 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         fonts_.regular.draw(c, warn2, left, 905, 20, kGray);
     }
 
+#if defined(__ANDROID__)
+    // Big prominent button to open the browser for sign-in
+    Rect btnBox{1160, 360, 600, 130};
+    c.fillRect(btnBox, rgba(16, 124, 65), 24); // Xbox Green
+    c.strokeRect(btnBox, rgba(30, 180, 90), 3, 24);
+
+    const char* btnTxt = "Abrir navegador para fazer login";
+    int bw = fonts_.bold.measure(btnTxt, 28);
+    fonts_.bold.draw(c, btnTxt, btnBox.x + (btnBox.w - bw) / 2,
+                     fonts_.bold.centeredY(btnBox.y, btnBox.h - 26, 28), 28, kWhite);
+
+    const char* subTxt = "Toque aqui ou aperte A para abrir no navegador";
+    int sw = fonts_.regular.measure(subTxt, 18);
+    fonts_.regular.draw(c, subTxt, btnBox.x + (btnBox.w - sw) / 2, btnBox.y + btnBox.h - 36, 18, rgba(220, 240, 230));
+
+    // Under the code panel: clear copy instruction badge
+    Rect copyBadge{left, 765, panel.w, 52};
+    c.fillRect(copyBadge, rgba(35, 45, 60, 230), 14);
+    c.strokeRect(copyBadge, rgba(60, 120, 200, 180), 2, 14);
+    const char* copyMsg = "📋 Toque no código acima para copiar";
+    int cw = fonts_.semibold.measure(copyMsg, 22);
+    fonts_.semibold.draw(c, copyMsg, copyBadge.x + (copyBadge.w - cw) / 2,
+                         fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 22), 22, rgba(160, 210, 255));
+#else
     // QR code for the sign-in page. Not "?otc=<code>": that prefilled link
     // goes through a consent flow that rejects this client id ("first party
     // application ... pre-authorization"), so the code is typed on the phone.
@@ -386,6 +412,7 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         fonts_.regular.draw(c, tr(Str::SignInScan), box.x + (box.w - w) / 2, box.y + box.h + 24, 26, kGray);
     }
     if (caps_.openUrl) drawHints(c, {{kIconCross, tr(Str::OpenInBrowser)}});  // a desktop: the page in the browser
+#endif
 }
 
 void AppUi::drawTabs(Canvas& c) {

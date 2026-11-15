@@ -230,7 +230,23 @@ void notePadActivity(int slot) {
     }
 }
 
+static std::atomic<bool> g_vibrationEnabled{true};
+
+void setVibrationEnabled(bool on) {
+    g_vibrationEnabled.store(on, std::memory_order_relaxed);
+    if (!on) {
+        for (int i = 0; i < kMaxPads; ++i) {
+            g_pads[i].motors.set(0, 0, 0);
+        }
+    }
+}
+
+bool vibrationEnabled() {
+    return g_vibrationEnabled.load(std::memory_order_relaxed);
+}
+
 void setRumble(uint8_t large, uint8_t small, uint32_t durationMs, int pad) {
+    if (!g_vibrationEnabled.load(std::memory_order_relaxed)) return;
     if (pad >= 0 && pad < kMaxPads) g_pads[pad].motors.set(large, small, durationMs);
 }
 

@@ -190,6 +190,8 @@ bool Settings::load(const std::string& path) {
     soloInputRedirect = (*j)["soloInputRedirect"].asBool((*j)["solo_input_redirect"].asBool(soloInputRedirect));
     touchOverlayMode = static_cast<int>(std::clamp<int64_t>((*j)["touchOverlayMode"].asInt(touchOverlayMode), 0, 2));
     touchInvertSticks = (*j)["touchInvertSticks"].asBool(touchInvertSticks);
+    vibrationEnabled = (*j)["vibrationEnabled"].asBool(vibrationEnabled);
+    touchOpacity = static_cast<int>(std::clamp<int64_t>((*j)["touchOpacity"].asInt(touchOpacity), 10, 100));
     titlePlaytime.clear();
     for (const auto& [id, sec] : (*j)["titlePlaytime"].members())
         if (sec.asInt() > 0) titlePlaytime[id] = static_cast<uint64_t>(sec.asInt());
@@ -224,6 +226,8 @@ bool Settings::load(const std::string& path) {
         p.triggerPulses = obj["triggerPulses"].asBool(triggerPulses);
         p.triggerProfile = static_cast<int>(std::clamp<int64_t>(obj["triggerProfile"].asInt(triggerProfile), 0, 2));
         p.audioHaptics = static_cast<int>(std::clamp<int64_t>(obj["audioHaptics"].asInt(audioHaptics), 0, 3));
+        p.vibrationEnabled = obj["vibrationEnabled"].asBool(vibrationEnabled);
+        p.touchOpacity = static_cast<int>(std::clamp<int64_t>(obj["touchOpacity"].asInt(touchOpacity), 10, 100));
         p.circleConfirms = obj["circleConfirms"].asBool(circleConfirms);
         p.highRefresh = obj["highRefresh"].asBool(highRefresh);
         p.keyMap = keyMapFromJson(obj["keyMap"], keyMap);
@@ -281,6 +285,8 @@ GameProfile Settings::defaultProfile() const {
     p.triggerPulses = triggerPulses;
     p.triggerProfile = triggerProfile;
     p.audioHaptics = audioHaptics;
+    p.vibrationEnabled = vibrationEnabled;
+    p.touchOpacity = touchOpacity;
     p.circleConfirms = circleConfirms;
     p.highRefresh = highRefresh;
     p.keyMap = keyMap;
@@ -420,6 +426,8 @@ bool Settings::save(const std::string& path) const {
     v.set("soloInputRedirect", soloInputRedirect);
     v.set("touchOverlayMode", touchOverlayMode);
     v.set("touchInvertSticks", touchInvertSticks);
+    v.set("vibrationEnabled", vibrationEnabled);
+    v.set("touchOpacity", touchOpacity);
     v.set("guitarStrum", guitarStrum);
     v.set("guitarTilt", guitarTilt);
     v.set("guitarLiftBy", static_cast<double>(guitarRaiseBy));
@@ -465,6 +473,8 @@ bool Settings::save(const std::string& path) const {
         obj.set("triggerPulses", p.triggerPulses);
         obj.set("triggerProfile", p.triggerProfile);
         obj.set("audioHaptics", p.audioHaptics);
+        obj.set("vibrationEnabled", p.vibrationEnabled);
+        obj.set("touchOpacity", p.touchOpacity);
         obj.set("circleConfirms", p.circleConfirms);
         obj.set("highRefresh", p.highRefresh);
         obj.set("keyMap", keyMapToJson(p.keyMap));

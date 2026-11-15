@@ -158,6 +158,8 @@ void StreamScreen::syncFromSettings() {
     input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
     media::setAudioHapticsLevel(audioHaptics_);
     input::setCircleConfirms(prof.circleConfirms);
+    input::setVibrationEnabled(prof.vibrationEnabled);
+    touchOverlay_.setOpacity(prof.touchOpacity / 100.0f);
     if (g_ui) g_ui->setCircleConfirms(prof.circleConfirms);
 
     media::audioSetRoute(static_cast<media::AudioRoute>(g_settings.audioRoute));
@@ -355,6 +357,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         input::setDeadzone(deadzone_ / 100.0f, deadzoneRight_ / 100.0f);
         input::setTriggerFeel(triggerStrength_, triggerHz_, triggerResistance_, triggerPulses_, triggerProfile_);
         input::setCircleConfirms(prof.circleConfirms);
+        input::setVibrationEnabled(hasCustom ? prof.vibrationEnabled : g_settings.vibrationEnabled);
+        touchOverlay_.setOpacity((hasCustom ? prof.touchOpacity : g_settings.touchOpacity) / 100.0f);
         if (g_ui) g_ui->setCircleConfirms(prof.circleConfirms);
         // 120 Hz (VRR) for this game's stream: active when enabled in settings/profile
         bool want120 = (hasCustom ? prof.highRefresh : g_settings.highRefresh) && !g_autoplay.hz60;
@@ -452,6 +456,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 menu_.setAudioHaptics(hasCustomProfile_ ? g_settings.perGame[gameKey_].audioHaptics : g_settings.audioHaptics);
                 menu_.setTouchOverlayEnabled(g_settings.touchOverlayMode != 2);
                 menu_.setTouchInvertSticks(g_settings.touchInvertSticks);
+                menu_.setTouchOpacity(g_settings.touchOpacity);
+                menu_.setVibrationEnabled(hasCustomProfile_ ? g_settings.perGame[gameKey_].vibrationEnabled : g_settings.vibrationEnabled);
                 padVol = g_settings.padSpeakerVolume;
             }
             touchOverlay_.reset();
@@ -666,6 +672,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                         p.triggerPulses = triggerPulses_;
                         p.triggerProfile = triggerProfile_;
                         p.audioHaptics = audioHaptics_;
+                        p.vibrationEnabled = menu_.vibrationEnabled();
+                        p.touchOpacity = menu_.touchOpacity();
                         p.circleConfirms = circleConfirms_;
                         auto had = g_settings.perGame.find(gameKey_);  // not set from this menu: kept
                         p.highRefresh = had != g_settings.perGame.end() ? had->second.highRefresh : g_settings.highRefresh;
@@ -703,6 +711,10 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                         audioHaptics_ = def.audioHaptics;
                         media::setAudioHapticsLevel(audioHaptics_);
                         menu_.setAudioHaptics(audioHaptics_);
+                        input::setVibrationEnabled(def.vibrationEnabled);
+                        menu_.setVibrationEnabled(def.vibrationEnabled);
+                        menu_.setTouchOpacity(def.touchOpacity);
+                        touchOverlay_.setOpacity(def.touchOpacity / 100.0f);
                         keyMap_ = def.keyMap;
                         padMap_ = def.padMap;
                         touchpadShortcuts_ = def.touchpadShortcuts;
@@ -1004,6 +1016,39 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 touchOverlay_.openLayoutStudio();
                 touchOverlay_.setVisible(true);
                 touchOverlay_.markDirty();
+                overlaySeq_ = 0;
+                break;
+            }
+            case ui::MenuAction::TouchOpacity: {
+                int op = menu_.touchOpacity();
+                touchOverlay_.setOpacity(op / 100.0f);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].touchOpacity = op;
+                    else g_settings.touchOpacity = op;
+                    touchOverlay_.setSettings(g_settings);
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
+                overlaySeq_ = 0;
+                break;
+            }
+            case ui::MenuAction::VibrationToggle: {
+                bool vib = menu_.vibrationEnabled();
+                input::setVibrationEnabled(vib);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    if (hasCustomProfile_) g_settings.perGame[gameKey_].vibrationEnabled = vib;
+                    else g_settings.vibrationEnabled = vib;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
                 overlaySeq_ = 0;
                 break;
             }
@@ -1581,6 +1626,7 @@ void StreamScreen::idle() {
         input::setTriggerFeel(g_settings.triggerStrength, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, g_settings.triggerProfile);
         input::setCircleConfirms(g_settings.circleConfirms);
         if (g_ui) g_ui->setCircleConfirms(g_settings.circleConfirms);
+        input::setVibrationEnabled(g_settings.vibrationEnabled);
         display::setHighRefresh(false);
         highRefresh_ = false;
     }
@@ -1649,9 +1695,8 @@ bool StreamScreen::onTouch(const app::shell::TouchEvent& ev) {
     if (menu_.isOpen()) {
         if (ev.kind == app::shell::TouchEvent::Kind::Up || ev.kind == app::shell::TouchEvent::Kind::Cancel) {
             touchOverlay_.onTouch(ev);
-        } else if (ev.kind == app::shell::TouchEvent::Kind::Down) {
-            menu_.onTouch(ev.x, ev.y, pendingTouchNav_);
         }
+        menu_.onTouch(ev, pendingTouchNav_);
         return true;
     }
 

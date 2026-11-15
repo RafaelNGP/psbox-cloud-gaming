@@ -97,6 +97,7 @@ public:
     void toggleVisible();
     bool invertSticks() const { return invertSticks_; }
     void setInvertSticks(bool invert);
+    void setOpacity(float op);
     void reset();
 
     bool takeMenuToggleRequest() {

@@ -81,6 +81,8 @@ std::string padDeviceName(int index);
 // Rumble, 0..255 per motor (large = low frequency, small = high frequency),
 // for `durationMs` (0 = until changed). Any thread; polling applies it.
 void setRumble(uint8_t large, uint8_t small, uint32_t durationMs, int pad = 0);
+void setVibrationEnabled(bool on);
+bool vibrationEnabled();
 // Sub-bass audio-to-haptics pulse (when no active game rumble is running)
 void setAudioHaptics(uint8_t kick, uint32_t durationMs = 60, int pad = 0);
 void setAudioHapticsEnabled(bool on);

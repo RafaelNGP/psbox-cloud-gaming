@@ -38,6 +38,8 @@ struct GameProfile {
     bool triggerPulses = false;
     int triggerProfile = 0;      // 0 Standard, 1 Shooter, 2 Racing
     int audioHaptics = 0;        // 0 Off, 1 Low, 2 Med, 3 High
+    bool vibrationEnabled = true; // Controller rumble enabled
+    int touchOpacity = 80;       // On-screen touch controls base opacity (20..100%)
     bool circleConfirms = false;
     // Display
     bool highRefresh = false;    // 120 Hz output (VRR) while streaming
@@ -127,6 +129,8 @@ struct Settings {
     bool triggerPulses = false;  // pulses of the resistance instead of the motor vibrating
     int triggerProfile = 0;      // 0 Standard, 1 Shooter, 2 Racing
     int audioHaptics = 0;        // 0 Off, 1 Low, 2 Med, 3 High
+    bool vibrationEnabled = true; // Controller rumble enabled
+    int touchOpacity = 80;       // On-screen touch controls base opacity (20..100%)
     bool circleConfirms = false;
     // The DualSense light bar: 0 the colour of the game in focus, 1
     // lightBarColour, 2 off.

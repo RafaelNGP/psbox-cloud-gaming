@@ -168,11 +168,12 @@ void TouchPadOverlay::reset() {
 void TouchPadOverlay::setSettings(const app::Settings& settings) {
     overlayMode_ = std::clamp(settings.touchOverlayMode, 0, 2);
     invertSticks_ = settings.touchInvertSticks;
+    float baseOp = std::clamp(settings.touchOpacity, 10, 100) / 100.0f;
     if (overlayMode_ == 0) {
-        targetOpacity_ = 0.80f;
+        targetOpacity_ = baseOp;
     } else if (overlayMode_ == 1) {
-        targetOpacity_ = 0.80f;
-        currentOpacity_ = 0.80f;
+        targetOpacity_ = baseOp;
+        currentOpacity_ = baseOp;
         physicalSuppressed_ = false;
     } else if (overlayMode_ == 2) {
         for (auto& t : touches_) {
@@ -180,6 +181,14 @@ void TouchPadOverlay::setSettings(const app::Settings& settings) {
         }
         currentOpacity_ = targetOpacity_ = 0.0f;
         updateStateAndInject_();
+    }
+    markDirty();
+}
+
+void TouchPadOverlay::setOpacity(float op) {
+    targetOpacity_ = std::clamp(op, 0.10f, 1.0f);
+    if (overlayMode_ != 2 && !physicalSuppressed_) {
+        currentOpacity_ = targetOpacity_;
     }
     markDirty();
 }
