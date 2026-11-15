@@ -9,6 +9,12 @@ namespace xc::ui {
 
 std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps) {
     return filterRows(kSettingsOrder, kSettingsGroupStart, [&](int row) {
+#if defined(__ANDROID__)
+        if (row == 20) return false; // Hardware video decoder
+        if (row == 5) return false;  // Confirm button (Cross/Circle swap)
+        if (row == 4) return false;  // Trigger rumble
+        if (row == 21) return false; // Audio haptics
+#endif
         switch (row) {
         case 4: return caps.triggerRumble || caps.adaptiveTriggers;  // trigger vibration and its tester
         case 21: return caps.triggerRumble || caps.adaptiveTriggers; // audio-to-haptics
@@ -32,6 +38,12 @@ int settingsRowPosition(const UiCaps& caps, int row) {
 
 std::vector<SettingsRowPos> visibleGameSettingsRows(const UiCaps& caps, bool custom, bool mouseSupported) {
     return filterRows(kGameRowOrder, kGameGroupStart, [&](int row) {
+#if defined(__ANDROID__)
+        if (row == 15) return false; // Video decoder in game settings
+        if (row == 7) return false;  // Confirm button in game settings
+        if (row == 6) return false;  // Trigger rumble in game settings
+        if (row == 16) return false; // Audio haptics in game settings
+#endif
         switch (row) {
         case 1: return caps.upscalers;
         case 2: return caps.sharpen;

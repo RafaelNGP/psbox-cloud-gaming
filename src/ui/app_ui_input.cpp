@@ -247,6 +247,21 @@ UiEvent AppUi::onMouseMove(float x, float y) {
     if (screen_ == Screen::Streaming || screen_ == Screen::Splash) {
         return ev;
     }
+    if (screen_ == Screen::Home && quitPrompt_) {
+        constexpr int kButtonW = 300, kButtonH = 72, kPanelW = 2 * kButtonW + 24 + 112, kPanelH = 250;
+        Rect panel{(kW - kPanelW) / 2, (kH - kPanelH) / 2 - 30, kPanelW, kPanelH};
+        Rect b0{panel.x + 56, panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        Rect b1{panel.x + 56 + (kButtonW + 24), panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        auto inRect = [&](const Rect& r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; };
+        if (inRect(b0) && promptFocus_ != 0) {
+            promptFocus_ = 0;
+            dirty_ = true;
+        } else if (inRect(b1) && promptFocus_ != 1) {
+            promptFocus_ = 1;
+            dirty_ = true;
+        }
+        return ev;
+    }
     if (screen_ == Screen::Home && !searching_ && !reportOpen_ && !updatePrompt_ && !quitPrompt_) {
         if (tab_ == Tab::GamePass && y >= 140 && y < kH - 80) {
             constexpr int kGridW = kLibraryCols * kCardPitch - kCardGap;
@@ -550,7 +565,52 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
         return ev;
     }
 
-    if (countryPickerOpen_ || (screen_ == Screen::Home && (updatePrompt_ || quitPrompt_))) {
+    if (screen_ == Screen::Home && quitPrompt_) {
+        constexpr int kButtonW = 300, kButtonH = 72, kPanelW = 2 * kButtonW + 24 + 112, kPanelH = 250;
+        Rect panel{(kW - kPanelW) / 2, (kH - kPanelH) / 2 - 30, kPanelW, kPanelH};
+        Rect b0{panel.x + 56, panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        Rect b1{panel.x + 56 + (kButtonW + 24), panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        auto inRect = [&](const Rect& r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; };
+        if (inRect(b0)) {
+            ev.action = Action::Quit;
+            quitPrompt_ = false;
+            dirty_ = true;
+            return ev;
+        } else if (inRect(b1) || !inRect(panel)) {
+            quitPrompt_ = false;
+            dirty_ = true;
+            return ev;
+        }
+        return ev;
+    }
+
+    if (screen_ == Screen::Home && updatePrompt_) {
+        constexpr int kPanelW = 960, kPanelH = 340, kButtonW = 260, kButtonH = 72;
+        Rect panel{(kW - kPanelW) / 2, (kH - kPanelH) / 2 - 40, kPanelW, kPanelH};
+        constexpr int kGap = (kPanelW - 112 - 3 * kButtonW) / 2;
+        Rect b0{panel.x + 56, panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        Rect b1{panel.x + 56 + (kButtonW + kGap), panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        Rect b2{panel.x + 56 + 2 * (kButtonW + kGap), panel.y + panel.h - kButtonH - 44, kButtonW, kButtonH};
+        auto inRect = [&](const Rect& r) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; };
+        if (inRect(b0)) {
+            ev.action = Action::UpdateNow;
+            updatePrompt_ = false;
+            dirty_ = true;
+            return ev;
+        } else if (inRect(b1)) {
+            showingUpdateNotes_ = true;
+            updateNotesScroll_ = 0;
+            dirty_ = true;
+            return ev;
+        } else if (inRect(b2) || !inRect(panel)) {
+            updatePrompt_ = false;
+            dirty_ = true;
+            return ev;
+        }
+        return ev;
+    }
+
+    if (countryPickerOpen_) {
         return ev;
     }
 
@@ -1215,11 +1275,33 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                     if (curRow.isGrid) {
                         int totalRows = (static_cast<int>(curRow.tiles.size()) + kLibraryCols - 1) / kLibraryCols;
                         float maxScroll = std::max(0.0f, static_cast<float>(totalRows * kGridPitchY - (kH - kRowTop - 48)));
-                        rowScroll_[static_cast<size_t>(focusRow_)].target =
-                            std::clamp(rowScroll_[static_cast<size_t>(focusRow_)].target - dy, 0.0f, maxScroll);
-                        rowScroll_[static_cast<size_t>(focusRow_)].value = rowScroll_[static_cast<size_t>(focusRow_)].target;
-                        animating_ = true;
-                        dirty_ = true;
+                        if (dy > 0 && rowScroll_[static_cast<size_t>(focusRow_)].target <= 0.0f) {
+                            // User is at top of grid and dragging down -> scroll back out to shelf above!
+                            if (focusRow_ > 0) {
+                                --focusRow_;
+                                rowY_.target = std::clamp(static_cast<float>(focusRow_) - dy / static_cast<float>(kRowPitch),
+                                                          0.0f, static_cast<float>(rows_.size() - 1));
+                                rowY_.value = rowY_.target;
+                                animating_ = true;
+                                dirty_ = true;
+                            }
+                        } else {
+                            float prevTarget = rowScroll_[static_cast<size_t>(focusRow_)].target;
+                            float nextTarget = std::clamp(prevTarget - dy, 0.0f, maxScroll);
+                            rowScroll_[static_cast<size_t>(focusRow_)].target = nextTarget;
+                            rowScroll_[static_cast<size_t>(focusRow_)].value = nextTarget;
+                            animating_ = true;
+                            dirty_ = true;
+                            if (dy > 0 && prevTarget > 0.0f && nextTarget == 0.0f && focusRow_ > 0) {
+                                float overshoot = dy - prevTarget;
+                                if (overshoot > 4.0f) {
+                                    --focusRow_;
+                                    rowY_.target = std::clamp(static_cast<float>(focusRow_) - overshoot / static_cast<float>(kRowPitch),
+                                                              0.0f, static_cast<float>(rows_.size() - 1));
+                                    rowY_.value = rowY_.target;
+                                }
+                            }
+                        }
                     } else {
                         // Ribbon shelf: vertical drags move shelves, horizontal drags scroll cards
                         if (std::abs(dy) > std::abs(dx)) {
@@ -1288,6 +1370,22 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                     gridScroll_.target = std::clamp(gridScroll_.target - flingDelta, 0.0f, maxScroll);
                     animating_ = true;
                     dirty_ = true;
+                } else if (tab_ == Tab::GamePass && !rows_.empty()) {
+                    const GameRow& curRow = rows_[static_cast<size_t>(focusRow_)];
+                    if (curRow.isGrid) {
+                        int totalRows = (static_cast<int>(curRow.tiles.size()) + kLibraryCols - 1) / kLibraryCols;
+                        float maxScroll = std::max(0.0f, static_cast<float>(totalRows * kGridPitchY - (kH - kRowTop - 48)));
+                        if (flingDelta < 0.0f && rowScroll_[static_cast<size_t>(focusRow_)].target - flingDelta < 0.0f && focusRow_ > 0) {
+                            rowScroll_[static_cast<size_t>(focusRow_)].target = 0.0f;
+                            --focusRow_;
+                            rowY_.target = static_cast<float>(focusRow_);
+                        } else {
+                            rowScroll_[static_cast<size_t>(focusRow_)].target =
+                                std::clamp(rowScroll_[static_cast<size_t>(focusRow_)].target - flingDelta, 0.0f, maxScroll);
+                        }
+                        animating_ = true;
+                        dirty_ = true;
+                    }
                 } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
                     float maxScroll = settingsMaxScroll(caps_);
                     settingsScrollY_ = std::clamp(settingsScrollY_ - flingDelta, 0.0f, maxScroll);
@@ -1304,7 +1402,13 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                     }
                 } else if (tab_ == Tab::GamePass && !rows_.empty()) {
                     focusRow_ = std::clamp(static_cast<int>(std::lround(rowY_.target)), 0, static_cast<int>(rows_.size()) - 1);
-                    rowY_.target = static_cast<float>(focusRow_);
+                    if (rows_[static_cast<size_t>(focusRow_)].isGrid) {
+                        retarget();
+                    } else {
+                        rowY_.target = static_cast<float>(focusRow_);
+                    }
+                    animating_ = true;
+                    dirty_ = true;
                 }
             } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
                 auto rows = visibleSettingsRows(caps_);
