@@ -84,6 +84,28 @@ constexpr int kKeysPerColumn = input::kKeyActions / 2;
 // Updates on a desktop: the newest release's page (the app doesn't install it there).
 constexpr const char* kReleasesPage = "https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest";
 
+#if defined(__ANDROID__)
+constexpr int kSettingsRowW = 1140, kSettingsRowH = 46, kSettingsGap = 4, kSettingsGroupGap = 12, kSettingsRowPx = 25;
+constexpr int kSettingsListTop = 210, kSettingsClipTop = 196;
+#else
+constexpr int kSettingsRowW = 1140, kSettingsRowH = 30, kSettingsGap = 1, kSettingsGroupGap = 4, kSettingsRowPx = 22;
+constexpr int kSettingsListTop = 188, kSettingsClipTop = 180;
+#endif
+
+inline int settingsTotalHeight(const UiCaps& caps) {
+    int totalH = 0;
+    for (const auto& [i, groupStart] : visibleSettingsRows(caps)) {
+        if (groupStart) totalH += kSettingsGroupGap;
+        totalH += kSettingsRowH + kSettingsGap;
+    }
+    return totalH;
+}
+
+inline float settingsMaxScroll(const UiCaps& caps) {
+    const float viewportH = static_cast<float>(kH - kSettingsListTop - 80);
+    return std::max(0.0f, static_cast<float>(settingsTotalHeight(caps)) - viewportH);
+}
+
 // The rows of `order` that `shown` keeps. A group starts on screen where the
 // row above belongs to another group (a hidden group leaves no gap).
 template <size_t N, class Shown>

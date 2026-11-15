@@ -48,6 +48,7 @@ void AppUi::handleHome(const NavInput& in, UiEvent& ev) {
         settingsCountry_ = settings_.loginCountry;
         dropdownOpen_ = false;
         filterList_ = -1;
+        settingsScrollY_ = 0.0f;
         dirty_ = true;
         return;
     }
@@ -315,23 +316,18 @@ UiEvent AppUi::onMouseMove(float x, float y) {
         if (dropdownOpen_ || tester_ != Tester::None || pickerOpen_ || countryPickerOpen_ || reportOpen_) {
             return ev;
         }
-#if defined(__ANDROID__)
-        constexpr int kRowW = 1140, kRowH = 46, kGap = 4, kGroupGap = 12;
-        int curY = 210 - static_cast<int>(std::lround(settingsScrollY_));
-#else
-        constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
-        int curY = 188 - static_cast<int>(std::lround(settingsScrollY_));
-#endif
+        int curY = kSettingsListTop - static_cast<int>(std::lround(settingsScrollY_));
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
-            if (groupStart) curY += kGroupGap;
-            if (x >= kMargin && x < kMargin + kRowW && y >= curY && y < curY + kRowH) {
+            if (groupStart) curY += kSettingsGroupGap;
+            if (x >= kMargin && x < kMargin + kSettingsRowW && y >= curY && y < curY + kSettingsRowH &&
+                y >= kSettingsClipTop && y < kH - 80) {
                 if (settingsRow_ != i) {
                     settingsRow_ = i;
                     dirty_ = true;
                 }
                 return ev;
             }
-            curY += kRowH + kGap;
+            curY += kSettingsRowH + kSettingsGap;
         }
     } else if (screen_ == Screen::Details) {
         if (achievementsOpen_ || reportOpen_) {
@@ -563,7 +559,7 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
         constexpr int kAvatarRight = kW - 120;
         Rect settingsBtn{kAvatarRight + (120 - 52) / 2, 46, 52, 52};
         if ((x >= settingsBtn.x - 12 && x <= settingsBtn.x + settingsBtn.w + 12 && y >= settingsBtn.y - 12 && y <= settingsBtn.y + settingsBtn.h + 12) ||
-            (x >= kAvatarRight - 64 && x <= kAvatarRight && y >= 40 && y <= 110)) {
+            (x >= kAvatarRight - 70 && x <= kW && y >= 30 && y <= 120)) {
             screen_ = Screen::Settings;
             settingsRow_ = 0;
             settingsFromError_ = false;
@@ -579,8 +575,30 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
     // Touch exit from Settings back to Home
     if (screen_ == Screen::Settings) {
         Rect backBtn{kMargin, 94, 52, 52};
-        if ((x >= backBtn.x - 16 && x <= backBtn.x + backBtn.w + 16 && y >= backBtn.y - 16 && y <= backBtn.y + backBtn.h + 16) ||
-            (x >= backBtn.x && x <= backBtn.x + 240 && y >= 80 && y <= 160)) {
+        if ((x >= backBtn.x - 20 && x <= backBtn.x + backBtn.w + 20 && y >= backBtn.y - 20 && y <= backBtn.y + backBtn.h + 20) ||
+            (x >= backBtn.x && x <= backBtn.x + 260 && y >= 70 && y <= 160)) {
+            if (dropdownOpen_) {
+                dropdownOpen_ = false;
+                dirty_ = true;
+                return ev;
+            }
+            if (trophyDisclaimerOpen_) {
+                trophyDisclaimerOpen_ = false;
+                dirty_ = true;
+                return ev;
+            }
+            if (removeTrophiesConfirmOpen_) {
+                removeTrophiesConfirmOpen_ = false;
+                dirty_ = true;
+                return ev;
+            }
+            if (tester_ != Tester::None) {
+                tester_ = Tester::None;
+                dirty_ = true;
+                ev.action = Action::SettingsChanged;
+                ev.settings = settings_;
+                return ev;
+            }
             resetSettingsHoldStart_ = 0;
             screen_ = settingsFromError_ ? Screen::Error : Screen::Home;
             dirty_ = true;
@@ -943,16 +961,15 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
             constexpr int kItemH = 62, kVisible = 8, kListW = 640;
             int n = static_cast<int>(options.size());
             int visible = std::min(n, kVisible);
-            constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
-            Rect panel{kMargin + kRowW - kListW, 184, kListW, visible * kItemH + 16};
-            int curY = 184;
+            Rect panel{kMargin + kSettingsRowW - kListW, 184, kListW, visible * kItemH + 16};
+            int curY = kSettingsListTop - static_cast<int>(std::lround(settingsScrollY_));
             for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
-                if (groupStart) curY += kGroupGap;
+                if (groupStart) curY += kSettingsGroupGap;
                 if (i == settingsRow_) {
-                    panel.y = curY + kRowH + 8;
+                    panel.y = curY + kSettingsRowH + 8;
                     break;
                 }
-                curY += kRowH + kGap;
+                curY += kSettingsRowH + kSettingsGap;
             }
             if (panel.y + panel.h > kH - 100) panel.y = std::max(120, kH - 100 - panel.h);
 
@@ -976,15 +993,16 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
                 }
             } else {
                 dropdownOpen_ = false;
+                settingsScrollY_ = 0.0f;
                 dirty_ = true;
                 return ev;
             }
         }
-        constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
-        int curY = 184 - static_cast<int>(std::lround(settingsScrollY_));
+        int curY = kSettingsListTop - static_cast<int>(std::lround(settingsScrollY_));
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
-            if (groupStart) curY += kGroupGap;
-            if (x >= kMargin && x < kMargin + kRowW && y >= curY && y < curY + kRowH && y >= 184 && y < kH - 80) {
+            if (groupStart) curY += kSettingsGroupGap;
+            if (x >= kMargin && x < kMargin + kSettingsRowW && y >= curY && y < curY + kSettingsRowH &&
+                y >= kSettingsClipTop && y < kH - 80) {
                 settingsRow_ = i;
                 if (i == 14) {
                     openPadTester();
@@ -1063,7 +1081,7 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
                     return ev;
                 }
             }
-            curY += kRowH + kGap;
+            curY += kSettingsRowH + kSettingsGap;
         }
     }
     return ev;
@@ -1130,6 +1148,10 @@ UiEvent AppUi::onMouseWheel(float dx, float dy) {
         }
     } else if (screen_ == Screen::Details && achievementsOpen_) {
         achScroll_ = std::max(0, achScroll_ - static_cast<int>(dy * 3));
+        dirty_ = true;
+    } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
+        float maxScroll = settingsMaxScroll(caps_);
+        settingsScrollY_ = std::clamp(settingsScrollY_ - dy * 120.0f, 0.0f, maxScroll);
         dirty_ = true;
     }
     return ev;
@@ -1223,15 +1245,24 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                 achScroll_ = std::max(0, achScroll_ - static_cast<int>(dy));
                 dirty_ = true;
             } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
-                constexpr int kRowH = 30, kGroupGap = 4;
-                int totalH = 0;
-                for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
-                    if (groupStart) totalH += kGroupGap;
-                    totalH += kRowH;
-                }
-                float maxScroll = std::max(0.0f, static_cast<float>(totalH - 720));
+                float maxScroll = settingsMaxScroll(caps_);
                 settingsScrollY_ = std::clamp(settingsScrollY_ - dy, 0.0f, maxScroll);
                 dirty_ = true;
+
+                // Finger drag moves highlight cursor with the finger/scroll
+                int curY = kSettingsListTop - static_cast<int>(std::lround(settingsScrollY_));
+                auto rows = visibleSettingsRows(caps_);
+                for (const auto& [i, groupStart] : rows) {
+                    if (groupStart) curY += kSettingsGroupGap;
+                    if (ev.y >= curY && ev.y < curY + kSettingsRowH) {
+                        if (settingsRow_ != i) {
+                            settingsRow_ = i;
+                            resetSettingsHoldStart_ = 0;
+                        }
+                        break;
+                    }
+                    curY += kSettingsRowH + kSettingsGap;
+                }
             }
         }
         touchTracker_.lastX = ev.x;
@@ -1258,13 +1289,7 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                     animating_ = true;
                     dirty_ = true;
                 } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
-                    constexpr int kRowH = 30, kGroupGap = 4;
-                    int totalH = 0;
-                    for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
-                        if (groupStart) totalH += kGroupGap;
-                        totalH += kRowH;
-                    }
-                    float maxScroll = std::max(0.0f, static_cast<float>(totalH - 720));
+                    float maxScroll = settingsMaxScroll(caps_);
                     settingsScrollY_ = std::clamp(settingsScrollY_ - flingDelta, 0.0f, maxScroll);
                     dirty_ = true;
                 }
@@ -1280,6 +1305,28 @@ UiEvent AppUi::onTouch(const app::shell::TouchEvent& ev) {
                 } else if (tab_ == Tab::GamePass && !rows_.empty()) {
                     focusRow_ = std::clamp(static_cast<int>(std::lround(rowY_.target)), 0, static_cast<int>(rows_.size()) - 1);
                     rowY_.target = static_cast<float>(focusRow_);
+                }
+            } else if (screen_ == Screen::Settings && !dropdownOpen_ && tester_ == Tester::None && !pickerOpen_ && !trophyDisclaimerOpen_) {
+                auto rows = visibleSettingsRows(caps_);
+                int curY = kSettingsListTop - static_cast<int>(std::lround(settingsScrollY_));
+                int focusedY = -1;
+                int firstVisibleRow = -1;
+                int lastVisibleRow = -1;
+                for (const auto& [i, groupStart] : rows) {
+                    if (groupStart) curY += kSettingsGroupGap;
+                    if (i == settingsRow_) focusedY = curY;
+                    if (curY >= kSettingsClipTop && curY + kSettingsRowH <= kH - 80) {
+                        if (firstVisibleRow < 0) firstVisibleRow = i;
+                        lastVisibleRow = i;
+                    }
+                    curY += kSettingsRowH + kSettingsGap;
+                }
+                if (focusedY < kSettingsClipTop && firstVisibleRow >= 0) {
+                    settingsRow_ = firstVisibleRow;
+                    dirty_ = true;
+                } else if (focusedY + kSettingsRowH > kH - 80 && lastVisibleRow >= 0) {
+                    settingsRow_ = lastVisibleRow;
+                    dirty_ = true;
                 }
             }
             touchTracker_.active = false;
@@ -1566,6 +1613,28 @@ UiEvent AppUi::handleLocked(const NavInput& in) {
                     resetSettingsHoldStart_ = 0;
                     dirty_ = true;
                 }
+                // Keep view scrolled so settingsRow_ is comfortably visible
+                int unscaledY = kSettingsListTop;
+                int focusedY = -1;
+                for (const auto& [i, groupStart] : rows) {
+                    if (groupStart) unscaledY += kSettingsGroupGap;
+                    if (i == settingsRow_) {
+                        focusedY = unscaledY;
+                        break;
+                    }
+                    unscaledY += kSettingsRowH + kSettingsGap;
+                }
+                if (focusedY >= 0) {
+                    float maxScroll = settingsMaxScroll(caps_);
+                    float rowScreenY = static_cast<float>(focusedY) - settingsScrollY_;
+                    if (rowScreenY < static_cast<float>(kSettingsClipTop + 10)) {
+                        settingsScrollY_ = std::clamp(static_cast<float>(focusedY - (kSettingsClipTop + 10)), 0.0f, maxScroll);
+                        dirty_ = true;
+                    } else if (rowScreenY + kSettingsRowH > static_cast<float>(kH - 80 - 10)) {
+                        settingsScrollY_ = std::clamp(static_cast<float>(focusedY + kSettingsRowH - (kH - 80 - 10)), 0.0f, maxScroll);
+                        dirty_ = true;
+                    }
+                }
             }
             if (settingsRow_ == 23) {
                 if (in.acceptHeld) {
@@ -1790,6 +1859,7 @@ UiEvent AppUi::handleLocked(const NavInput& in) {
                 settingsFromError_ = true;
                 settingsCountry_ = settings_.loginCountry;
                 dropdownOpen_ = false;
+                settingsScrollY_ = 0.0f;
                 dirty_ = true;
             }
             if (in.triangle) {  // "Report a problem", with the error shown

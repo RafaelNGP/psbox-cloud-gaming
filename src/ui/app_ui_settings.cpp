@@ -1236,13 +1236,8 @@ void AppUi::drawSettings(Canvas& c) {
                                         tr(Str::VideoDecoder),  tr(Str::AudioHaptics),  tr(Str::PreviewFeatures),
                                         tr(Str::ResetSettings), tr(Str::SyncTrophies),  tr(Str::RemoveTrophies),
                                         tr(Str::FpsLimit), tr(Str::StoreCountry)};
-#if defined(__ANDROID__)
-    constexpr int kRowW = 1140, kRowH = 46, kGap = 4, kGroupGap = 12, kRowPx = 25;
-    constexpr int kListTop = 210, kClipTop = 196;
-#else
-    constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4, kRowPx = 22;
-    constexpr int kListTop = 188, kClipTop = 180;
-#endif
+    constexpr int kRowW = kSettingsRowW, kRowH = kSettingsRowH, kGap = kSettingsGap, kGroupGap = kSettingsGroupGap, kRowPx = kSettingsRowPx;
+    constexpr int kListTop = kSettingsListTop, kClipTop = kSettingsClipTop;
     Rect rows[kSettingRows];  // by row id
     int y = kListTop - static_cast<int>(std::lround(settingsScrollY_));
     c.setClip({kMargin - 8, kClipTop, kRowW + 16, kH - kClipTop - 80});
