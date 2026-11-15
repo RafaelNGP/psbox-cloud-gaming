@@ -34,6 +34,7 @@
 #include <sys/ioctl.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <csignal>
 
 extern "C" {
 int sceNetIoctl(int s, unsigned long cmd, void* data);
@@ -1375,3 +1376,46 @@ extern "C" void freeaddrinfo(struct addrinfo* ai) {
         ai = next;
     }
 }
+
+extern "C" {
+extern const char __text_start[] __attribute__((weak));
+}
+
+namespace xc::platform {
+
+void setLowLatencyNetwork(bool) {}
+
+void getCodeBounds(uintptr_t& base, uintptr_t& end) {
+    base = reinterpret_cast<uintptr_t>(__text_start);
+    end = base + 0x20000000;
+}
+
+bool findModuleByAddr(uintptr_t addr, char* nameBuf, size_t nameCap, uintptr_t& baseAddr) {
+    if (!nameBuf || nameCap == 0) return false;
+    uintptr_t base = reinterpret_cast<uintptr_t>(__text_start);
+    if (base != 0 && addr >= base && addr < base + 0x20000000) {
+        std::strncpy(nameBuf, "eboot", nameCap - 1);
+        nameBuf[nameCap - 1] = 0;
+        baseAddr = base;
+        return true;
+    }
+    return false;
+}
+
+void extractSignalContext(void* uctx, void* siginfo, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr) {
+    auto* info = static_cast<siginfo_t*>(siginfo);
+    faultAddr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
+    if (uctx) {
+        const auto* mc = reinterpret_cast<const uint64_t*>(static_cast<const char*>(uctx) + 16);
+        rbp = static_cast<uintptr_t>(mc[9]);
+        pc = static_cast<uintptr_t>(mc[20]);
+        rsp = static_cast<uintptr_t>(mc[23]);
+        if (faultAddr == 0) faultAddr = static_cast<uintptr_t>(mc[17]);
+        if (pc == 0 && rsp != 0 && (rsp & 7) == 0) {
+            pc = *reinterpret_cast<const uintptr_t*>(rsp);
+        }
+    }
+}
+
+}  // namespace xc::platform
+

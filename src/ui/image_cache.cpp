@@ -17,10 +17,8 @@
 #define STB_IMAGE_RESIZE_STATIC
 #include "stb_image_resize2.h"
 
+#include "util/fs.h"
 #include <atomic>
-#include <dirent.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <cstring>
@@ -98,8 +96,8 @@ ImageCache::ImageCache(std::function<void()> onReady, size_t budgetBytes, std::s
                        size_t diskBudgetBytes)
     : onReady_(std::move(onReady)), budget_(budgetBytes), diskDir_(std::move(diskDir)), diskBudget_(diskBudgetBytes) {
     if (!diskDir_.empty()) {
-        ::mkdir(diskDir_.c_str(), 0777);  // like the data folder: removable over FTP too
-        ::chmod(diskDir_.c_str(), 0777);  // one made 0755 by an older version
+        fs::makeDirs(diskDir_);
+        fs::makeWorldWritable(diskDir_);
         trimDisk();
     }
     threads_.resize(budget_ <= (64u << 20) ? 1 : 3);
@@ -156,6 +154,21 @@ void ImageCache::evict() {
     }
 }
 
+void ImageCache::shrink() {
+    std::lock_guard<std::mutex> lock(mutex_);
+    size_t targetBudget = budget_ / 2;
+    while (bytes_ > targetBudget) {
+        auto victim = entries_.end();
+        for (auto it = entries_.begin(); it != entries_.end(); ++it)
+            if (it->second.image && (victim == entries_.end() || it->second.lastUse < victim->second.lastUse))
+                victim = it;
+        if (victim == entries_.end()) break;
+        bytes_ -= victim->second.image->bytes();
+        entries_.erase(victim);
+    }
+    XC_LOGI("image cache: shrunk to %zu MB", bytes_ >> 20);
+}
+
 std::string ImageCache::diskPath(const std::string& url) const {
     uint64_t h = 1469598103934665603ull;  // FNV-1a of the sized URL
     for (unsigned char ch : url) h = (h ^ ch) * 1099511628211ull;
@@ -167,21 +180,20 @@ std::string ImageCache::diskPath(const std::string& url) const {
 void ImageCache::trimDisk() {
     struct File {
         std::string path;
-        off_t size;
-        time_t mtime;
+        uint64_t size;
+        int64_t mtime;
     };
     std::vector<File> files;
     size_t total = 0;
-    if (DIR* d = ::opendir(diskDir_.c_str())) {
-        while (dirent* e = ::readdir(d)) {
-            if (e->d_name[0] == '.') continue;
-            std::string path = diskDir_ + "/" + e->d_name;
-            struct stat st {};
-            if (::stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) continue;
-            files.push_back({path, st.st_size, st.st_mtime});
-            total += static_cast<size_t>(st.st_size);
+    for (const auto& name : fs::listDir(diskDir_)) {
+        if (name.empty() || name[0] == '.') continue;
+        std::string path = diskDir_ + "/" + name;
+        uint64_t sz = 0;
+        int64_t mt = 0;
+        if (fs::isFile(path) && fs::fileSize(path, sz) && fs::modifiedTime(path, mt)) {
+            files.push_back({path, sz, mt});
+            total += static_cast<size_t>(sz);
         }
-        ::closedir(d);
     }
     if (total <= diskBudget_) {
         XC_LOGI("image cache: %zu files, %zu MB on disk", files.size(), total >> 20);
@@ -191,7 +203,7 @@ void ImageCache::trimDisk() {
     size_t removed = 0;
     for (const auto& f : files) {
         if (total <= diskBudget_ * 3 / 4) break;  // some headroom
-        if (::unlink(f.path.c_str()) == 0) {
+        if (fs::removeFile(f.path)) {
             total -= static_cast<size_t>(f.size);
             ++removed;
         }

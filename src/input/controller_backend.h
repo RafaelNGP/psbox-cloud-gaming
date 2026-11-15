@@ -60,6 +60,7 @@ void setTriggerMotors(int slot, uint8_t left, uint8_t right, uint32_t durationMs
 // The light bar: a colour, or the system's own again (the player's).
 void setLight(int slot, uint8_t r, uint8_t g, uint8_t b);
 void resetLight(int slot);
+bool readDeviceMotion(RawPad& out);
 
 }  // namespace backend
 
@@ -69,5 +70,6 @@ void resetLight(int slot);
 void slotOpened(int slot);
 bool slotLightSet(int slot);
 void slotClosed(int slot);
+void notePadActivity(int slot = 0);
 
 }  // namespace xc::input

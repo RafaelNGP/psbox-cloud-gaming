@@ -115,6 +115,10 @@ void audioStop() {
     audioQueue().clear();
 }
 
+void audioPause() {}
+void audioResume() {}
+bool audioIsPaused() { return false; }
+
 bool playPadSpeakerAudio(const float*, size_t) {
     return false;
 }

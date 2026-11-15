@@ -44,7 +44,7 @@ void idleWait(uint32_t ms);
 bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int strideY, int strideU, int strideV,
                 int width, int height, bool wait);
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
-              int width, int height, bool wait);
+              int width, int height, bool wait, bool isNv21 = false);
 // Two GPU-visible buffers of `bytes` a hardware decoder writes its pictures
 // into, in turn: drawNv12() takes a picture there to the GPU without a CPU
 // copy. False where there are none (only the PS5 has them). Video thread.

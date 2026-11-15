@@ -13,12 +13,17 @@
 #include <ws2tcpip.h>
 #include <windows.h>
 #include <wincrypt.h>
+#include <bcrypt.h>
+#include <timeapi.h>
+#include <avrt.h>
+#include <wlanapi.h>
 #include <shlobj.h>
 #include <direct.h>
 #include <io.h>
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -58,6 +63,7 @@ std::string getExeDir() {
 
 bool init() {
 #if defined(_WIN32) || defined(__CYGWIN__)
+    timeBeginPeriod(1);
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
         return false;
@@ -84,11 +90,22 @@ bool init() {
 
 void shutdown() {
 #if defined(_WIN32) || defined(__CYGWIN__)
+    setLowLatencyNetwork(false);
+    timeEndPeriod(1);
     WSACleanup();
 #endif
 }
 
-std::string dataDir() { return g_dataDir; }
+std::string dataDir() {
+    if (g_dataDir.empty()) {
+        const char* env = std::getenv("XCLOUD_DATA_DIR");
+        g_dataDir = (env && *env) ? env : ".\\psbox-data";
+#if defined(_WIN32) || defined(__CYGWIN__)
+        makeDirs(g_dataDir);
+#endif
+    }
+    return g_dataDir;
+}
 std::string dataDirNote() { return g_dataDirNote; }
 bool dataDirWritable() { return true; }
 int dataDirErrno() { return 0; }
@@ -121,18 +138,16 @@ std::string caBundlePath() {
 bool randomBytes(void* out, size_t len) {
     if (!out || len == 0) return true;
 #if defined(_WIN32) || defined(__CYGWIN__)
-    HCRYPTPROV prov = 0;
-    if (CryptAcquireContextA(&prov, nullptr, nullptr, PROV_RSA_FULL, CRYPT_VERIFYCONTEXT | CRYPT_SILENT)) {
-        BOOL ok = CryptGenRandom(prov, static_cast<DWORD>(len), static_cast<BYTE*>(out));
-        CryptReleaseContext(prov, 0);
-        if (ok) return true;
-    }
+    NTSTATUS status = BCryptGenRandom(
+        nullptr,
+        static_cast<PUCHAR>(out),
+        static_cast<ULONG>(len),
+        BCRYPT_USE_SYSTEM_PREFERRED_RNG
+    );
+    return status >= 0;
+#else
+    return false;
 #endif
-    auto* p = static_cast<uint8_t*>(out);
-    for (size_t i = 0; i < len; ++i) {
-        p[i] = static_cast<uint8_t>(std::rand() & 0xFF);
-    }
-    return true;
 }
 
 bool resolveIPv4(const std::string& host, std::vector<uint32_t>& addrs, std::string& err) {
@@ -299,6 +314,13 @@ void forceHandheld(bool) {}
 void setThreadAffinity(ThreadRole role, const char* name) {
 #if defined(_WIN32) || defined(__CYGWIN__)
     (void)name;
+    DWORD taskIndex = 0;
+    const wchar_t* taskName = (role == ThreadRole::Audio) ? L"Pro Audio" : L"Games";
+    HANDLE hTask = AvSetMmThreadCharacteristicsW(taskName, &taskIndex);
+    if (hTask && role == ThreadRole::Audio) {
+        AvSetMmThreadPriority(hTask, AVRT_PRIORITY_CRITICAL);
+    }
+
     SYSTEM_INFO sysInfo;
     GetSystemInfo(&sysInfo);
     DWORD numCores = sysInfo.dwNumberOfProcessors;
@@ -310,13 +332,13 @@ void setThreadAffinity(ThreadRole role, const char* name) {
         mask = 1ULL << 0;
         break;
     case ThreadRole::Network:
-        mask = 1ULL << (min(1UL, numCores - 1));
+        mask = 1ULL << (std::min(1UL, numCores - 1));
         break;
     case ThreadRole::VideoDecode:
-        mask = 1ULL << (min(2UL, numCores - 1));
+        mask = 1ULL << (std::min(2UL, numCores - 1));
         break;
     case ThreadRole::Audio:
-        mask = 1ULL << (min(3UL, numCores - 1));
+        mask = 1ULL << (std::min(3UL, numCores - 1));
         break;
     case ThreadRole::Worker:
         for (DWORD c = 4; c < numCores; ++c) mask |= (1ULL << c);
@@ -398,5 +420,50 @@ bool writeFileAtomic(const std::string& path, const std::string& data) {
 }
 
 void makePrivate(const std::string&) {}
+
+void setLowLatencyNetwork(bool on) {
+#if defined(_WIN32) || defined(__CYGWIN__)
+    static std::atomic<bool> s_current{false};
+    if (s_current.exchange(on) == on) return;
+
+    HANDLE hClient = nullptr;
+    DWORD negotiatedVer = 0;
+    DWORD rc = WlanOpenHandle(2, nullptr, &negotiatedVer, &hClient);
+    if (rc != ERROR_SUCCESS) {
+        XC_LOGD("wlan: WlanOpenHandle returned %lu (service may be inactive)", rc);
+        return;
+    }
+
+    PWLAN_INTERFACE_INFO_LIST pIfList = nullptr;
+    if (WlanEnumInterfaces(hClient, nullptr, &pIfList) == ERROR_SUCCESS && pIfList) {
+        BOOL mediaStreaming = on ? TRUE : FALSE;
+        for (DWORD i = 0; i < pIfList->dwNumberOfItems; ++i) {
+            PWLAN_INTERFACE_INFO pInfo = &pIfList->InterfaceInfo[i];
+            DWORD setRc = WlanSetInterface(
+                hClient,
+                &pInfo->InterfaceGuid,
+                wlan_intf_opcode_media_streaming_mode,
+                sizeof(BOOL),
+                &mediaStreaming,
+                nullptr
+            );
+            if (setRc == ERROR_SUCCESS) {
+                XC_LOGI("wlan: interface %lu low-latency streaming mode %s",
+                        i, on ? "enabled" : "disabled");
+            }
+        }
+        WlanFreeMemory(pIfList);
+    }
+    WlanCloseHandle(hClient, nullptr);
+#else
+    (void)on;
+#endif
+}
+
+void getCodeBounds(uintptr_t& base, uintptr_t& end) { base = 0; end = 0; }
+bool findModuleByAddr(uintptr_t, char*, size_t, uintptr_t&) { return false; }
+void extractSignalContext(void*, void*, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr) {
+    pc = 0; rbp = 0; rsp = 0; faultAddr = 0;
+}
 
 }  // namespace xc::platform

@@ -572,4 +572,6 @@ constexpr Column kGerman = {
     "Land des Stores", // StoreCountry
     "Automatisch (Anmeldeland)", // StoreCountryAuto
     "Wählt das Land für Preise und kostenlose Angebote im Store. Der Streaming-Server bleibt unverändert.", // SettingDescStoreCountry
+    "Kopplungscode in die Zwischenablage kopiert", // SignInCodeCopied
+    "Klicken oder tippen Sie auf den Code, um ihn zu kopieren", // SignInClickToCopy
 };

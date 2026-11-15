@@ -27,6 +27,7 @@ namespace {
 std::mutex g_mutex;  // start / stop
 SDL_AudioStream* g_stream = nullptr;
 bool g_initedAudio = false;  // SDL's audio subsystem started here (not by the shell)
+std::atomic<bool> g_audioPaused{false};
 std::vector<float> g_buffer;  // the device thread's
 
 // SDL's device thread: `needed` more bytes wanted.
@@ -82,9 +83,30 @@ void audioStop() {
     SDL_DestroyAudioStream(g_stream);  // the device with it; no more feeding once it returns
     g_stream = nullptr;
     audioQueue().clear();
+    g_audioPaused = false;
     if (g_initedAudio) SDL_QuitSubSystem(SDL_INIT_AUDIO);
     g_initedAudio = false;
     XC_LOGI("audio output closed");
+}
+
+void audioPause() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_stream || g_audioPaused) return;
+    SDL_PauseAudioStreamDevice(g_stream);
+    g_audioPaused = true;
+    XC_LOGI("audio output paused");
+}
+
+void audioResume() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (!g_stream || !g_audioPaused) return;
+    SDL_ResumeAudioStreamDevice(g_stream);
+    g_audioPaused = false;
+    XC_LOGI("audio output resumed");
+}
+
+bool audioIsPaused() {
+    return g_audioPaused.load();
 }
 
 static std::atomic<int> g_padSpeakerVolume{100};

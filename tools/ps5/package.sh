@@ -54,6 +54,7 @@ cp "$root/deps/libdatachannel/deps/libsrtp/LICENSE" "$app/licenses/libsrtp-LICEN
 cp "$root/deps/libdatachannel/deps/plog/LICENSE" "$app/licenses/plog-LICENSE.txt"
 cp "$root/deps/ffmpeg/COPYING.LGPLv2.1" "$app/licenses/FFmpeg-LGPL-2.1.txt"
 cp "$root/extern/stb/LICENSE" "$app/licenses/stb-LICENSE.txt"
+cp "$root/extern/nanosvg/LICENSE.txt" "$app/licenses/nanosvg-LICENSE.txt"
 
 # Development only: XC_INCLUDE_ACCOUNT=1 ships the host build's signed-in
 # account (a refresh token!) to skip the console sign-in. Never for releases.

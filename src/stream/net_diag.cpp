@@ -4,6 +4,7 @@
 #include <cstdint>
 #include "stream/net_diag.h"
 
+#include "net/socket.h"
 #include "platform/platform.h"
 #include "util/log.h"
 
@@ -17,15 +18,6 @@
 #include <mutex>
 #include <thread>
 #include <vector>
-
-#if !defined(_WIN32)
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/ioctl.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <unistd.h>
-#endif
 
 namespace xc::stream::netdiag {
 
@@ -64,14 +56,6 @@ int afkSeconds() { return g_afk.load(std::memory_order_relaxed); }
 int abAudioSeconds() { return g_abAudio.load(std::memory_order_relaxed); }
 int abFillerSeconds() { return g_abFiller.load(std::memory_order_relaxed); }
 
-#if defined(_WIN32)
-
-void watchSocket(uint16_t) {}
-void stopWatch() {}
-Window describeWindow(uint64_t, uint64_t) { return {}; }
-
-#else
-
 namespace {
 constexpr uint16_t kBeaconPort = 9123;
 constexpr const char* kClass[4] = {"BE", "BK", "VI", "VO"};
@@ -80,7 +64,7 @@ constexpr size_t kBeaconRing = 8192;  // 4 x 25 a second: ~80 s
 
 struct QueueSample {
     uint64_t us = 0;
-    int32_t bytes = 0;  // -1: the ioctl failed
+    int32_t bytes = 0;  // -1: read failed
 };
 struct BeaconHit {
     uint64_t us = 0;
@@ -100,48 +84,53 @@ std::atomic<bool> g_watching{false};
 std::thread g_watchThread;
 std::atomic<bool> g_beaconStarted{false};
 
-uint16_t portOf(int fd) {
-    sockaddr_storage ss{};
-    socklen_t sl = sizeof ss;
-    if (getsockname(fd, reinterpret_cast<sockaddr*>(&ss), &sl) != 0) return 0;
-    if (ss.ss_family == AF_INET) return ntohs(reinterpret_cast<sockaddr_in*>(&ss)->sin_port);
-    if (ss.ss_family == AF_INET6) return ntohs(reinterpret_cast<sockaddr_in6*>(&ss)->sin6_port);
+uint16_t portOf(xc::net::Socket s) {
+    int port = 0;
+    if (xc::net::getSocketPort(s, port) && port > 0) return static_cast<uint16_t>(port);
     return 0;
 }
 
-bool isUdp(int fd) {
+bool isUdp(xc::net::Socket s) {
+#if defined(_WIN32)
     int type = 0;
-    socklen_t tl = sizeof type;
-    return getsockopt(fd, SOL_SOCKET, SO_TYPE, &type, &tl) == 0 && type == SOCK_DGRAM;
+    int tl = sizeof(type);
+    return getsockopt(static_cast<SOCKET>(s.fd), SOL_SOCKET, SO_TYPE, reinterpret_cast<char*>(&type), &tl) == 0 && type == SOCK_DGRAM;
+#else
+    int type = 0;
+    socklen_t tl = sizeof(type);
+    return getsockopt(static_cast<int>(s.fd), SOL_SOCKET, SO_TYPE, &type, &tl) == 0 && type == SOCK_DGRAM;
+#endif
 }
 
-int findSocket(uint16_t port, std::string& seen) {
+xc::net::Socket findSocket(uint16_t port, std::string& seen) {
     for (int fd = 0; fd < 4096; ++fd) {
-        if (!isUdp(fd)) continue;
-        const uint16_t p = portOf(fd);
+        xc::net::Socket s(fd);
+        if (!isUdp(s)) continue;
+        const uint16_t p = portOf(s);
         char b[32];
         std::snprintf(b, sizeof b, " fd %d port %u", fd, p);
         seen += b;
-        if (p == port) return fd;
+        if (p == port) return s;
     }
-    return -1;
+    return xc::net::kInvalidSocket;
 }
 
-void watchLoop(int fd) {
+void watchLoop(xc::net::Socket sock) {
     uint64_t nextCheck = platform::nowUs() + 1000000;
     while (g_watching.load(std::memory_order_relaxed)) {
-        int n = 0;
-        const int rc = ioctl(fd, FIONREAD, &n);
+        size_t availBytes = 0;
+        const bool ok = xc::net::bytesAvailable(sock, availBytes);
+        const int n = ok ? static_cast<int>(availBytes) : -1;
         const uint64_t now = platform::nowUs();
         {
             std::lock_guard<std::mutex> lock(g_mutex);
-            g_queue[g_queueNext++ % kQueueRing] = {now, rc == 0 ? n : -1};
+            g_queue[g_queueNext++ % kQueueRing] = {now, n};
         }
         // The socket closed under us (the session ended): stop.
         if (now >= nextCheck) {
             nextCheck = now + 1000000;
-            if (rc != 0) {
-                XC_LOGW("netdiag: socket queue of fd %d unreadable (errno %d): stopped", fd, errno);
+            if (!ok) {
+                XC_LOGW("netdiag: socket queue of fd %ld unreadable: stopped", static_cast<long>(sock.fd));
                 break;
             }
         }
@@ -150,19 +139,13 @@ void watchLoop(int fd) {
 }
 
 void beaconLoop() {
-    const int s = socket(AF_INET, SOCK_DGRAM, 0);
-    sockaddr_in a{};
-    a.sin_family = AF_INET;
-    a.sin_port = htons(kBeaconPort);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
-    if (s < 0 || bind(s, reinterpret_cast<sockaddr*>(&a), sizeof a) != 0) {
-        XC_LOGW("netdiag: cannot listen for beacons on UDP %u (errno %d)", kBeaconPort, errno);
-        if (s >= 0) close(s);
+    xc::net::Socket s = xc::net::createUdpSocket();
+    if (!s.valid() || !xc::net::bindSocket(s, "0.0.0.0", kBeaconPort)) {
+        XC_LOGW("netdiag: cannot listen for beacons on UDP %u", kBeaconPort);
+        xc::net::closeSocket(s);
         return;
     }
-    timeval tv{};
-    tv.tv_usec = 200000;
-    setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    xc::net::setRecvTimeout(s, 200);
     XC_LOGI("netdiag: listening for the PC's beacons on UDP %u", kBeaconPort);
     bool seen[4] = {};
     uint32_t lastSeq[4] = {};
@@ -173,7 +156,7 @@ void beaconLoop() {
     for (;;) {
         sockaddr_in from{};
         socklen_t fl = sizeof from;
-        const ssize_t n = recvfrom(s, buf, sizeof buf, 0, reinterpret_cast<sockaddr*>(&from), &fl);
+        const ssize_t n = xc::net::recvFromSocket(s, buf, sizeof buf, 0, reinterpret_cast<sockaddr*>(&from), &fl);
         const uint64_t now = platform::nowUs();
         if (n >= 13 && std::memcmp(buf, "PSBXBCN1", 8) == 0) {
             const uint8_t c = buf[8] & 3;
@@ -220,17 +203,22 @@ void watchSocket(uint16_t localPort) {
         if (g_watchThread.joinable()) g_watchThread.join();
     }
     std::string seen;
-    const int fd = findSocket(localPort, seen);
-    if (fd < 0) {
+    const xc::net::Socket s = findSocket(localPort, seen);
+    if (!s.valid()) {
         XC_LOGW("netdiag: no UDP socket on port %u (UDP sockets:%s)", localPort, seen.c_str());
         return;
     }
     int rcvbuf = 0;
+#if defined(_WIN32)
+    int rl = sizeof rcvbuf;
+    getsockopt(static_cast<SOCKET>(s.fd), SOL_SOCKET, SO_RCVBUF, reinterpret_cast<char*>(&rcvbuf), &rl);
+#else
     socklen_t rl = sizeof rcvbuf;
-    getsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rl);
-    XC_LOGI("netdiag: watching the stream socket (fd %d, port %u, receive buffer %d bytes)", fd, localPort, rcvbuf);
+    getsockopt(static_cast<int>(s.fd), SOL_SOCKET, SO_RCVBUF, &rcvbuf, &rl);
+#endif
+    XC_LOGI("netdiag: watching the stream socket (fd %ld, port %u, receive buffer %d bytes)", static_cast<long>(s.fd), localPort, rcvbuf);
     g_watching = true;
-    g_watchThread = std::thread(watchLoop, fd);
+    g_watchThread = std::thread(watchLoop, s);
 }
 
 void stopWatch() {
@@ -293,7 +281,5 @@ Window describeWindow(uint64_t t0, uint64_t t1) {
     w.text = buf;
     return w;
 }
-
-#endif
 
 }  // namespace xc::stream::netdiag

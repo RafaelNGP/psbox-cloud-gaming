@@ -8,6 +8,10 @@
 #include <mutex>
 #include <string>
 
+#if defined(__ANDROID__)
+#include <android/log.h>
+#endif
+
 namespace xc::log {
 
 namespace {
@@ -53,6 +57,9 @@ void flushRepeatsLocked() {
                                 g_repeatCount, g_repeatCount == 1 ? "time" : "times");
         if (len > 0) {
             std::fprintf(stderr, "%s", repLine);
+#if defined(__ANDROID__)
+            __android_log_print(ANDROID_LOG_INFO, "PSBox", "%s", repLine);
+#endif
             if (g_file) {
                 std::fputs(repLine, g_file);
                 std::fflush(g_file);
@@ -114,7 +121,11 @@ void write(Level level, const char* fmt, ...) {
 
     std::time_t now = std::time(nullptr);
     std::tm local{};
+#if defined(_WIN32)
+    localtime_s(&local, &now);
+#else
     localtime_r(&now, &local);  // std::localtime's result is shared by every thread
+#endif
     char ts[32];
     std::strftime(ts, sizeof ts, "%H:%M:%S", &local);
 
@@ -132,6 +143,16 @@ void write(Level level, const char* fmt, ...) {
     g_hasLastMsg = true;
 
     std::fprintf(stderr, "%s", line);
+#if defined(__ANDROID__)
+    int priority = ANDROID_LOG_INFO;
+    switch (level) {
+        case Level::Debug: priority = ANDROID_LOG_DEBUG; break;
+        case Level::Info:  priority = ANDROID_LOG_INFO;  break;
+        case Level::Warn:  priority = ANDROID_LOG_WARN;  break;
+        case Level::Error: priority = ANDROID_LOG_ERROR; break;
+    }
+    __android_log_print(priority, "PSBox", "%s", msg);
+#endif
     if (g_file) {
         std::fputs(line, g_file);
         std::fflush(g_file);

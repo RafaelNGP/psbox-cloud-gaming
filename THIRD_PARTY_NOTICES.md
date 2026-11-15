@@ -24,6 +24,8 @@ the end.
 | FFmpeg (libavcodec, libswresample, libavutil; H.264 and Opus decoders only) | n7.1.2 | LGPL-2.1-or-later (built without `--enable-gpl`/`--enable-nonfree`) | `deps/ffmpeg`, `deps/ffmpeg/COPYING.LGPLv2.1`; build flags in `tools/build-ffmpeg.sh` |
 | stb_truetype, stb_image, stb_image_resize2 | upstream master (2026) | MIT or public domain (Unlicense), at your choice | `extern/stb`, `extern/stb/LICENSE` |
 | QR Code generator library (C) | upstream master (2026) | MIT | `extern/qrcodegen` (license in the headers) |
+| nanosvg, nanosvgrast | 239e102 (upstream master) | zlib | `extern/nanosvg`, `extern/nanosvg/LICENSE.txt` |
+| SQLite | 3.45.3 (amalgamation) | Public Domain | `extern/sqlite3` |
 | PS5 app runtime: `app_crt.cpp`, `app_cpp_runtime.cpp` (BlackBearReloaded, ps5-native-app-boilerplate) | from PS5_Vulkan | GPL-3.0-or-later | PS5_Vulkan `tooling/native/` |
 | PS5 payload SDK platform layer (`libps5platform.a`) and headers | SDK v0.42 + PS5_Vulkan fork | GPL-3.0-or-later | <https://github.com/ps5-payload-dev/sdk> |
 | LLVM libc++, libc++abi, libunwind, compiler-rt builtins (from the payload SDK) | SDK v0.42 | Apache-2.0 WITH LLVM-exception | the payload SDK |
@@ -49,7 +51,7 @@ the end.
 ## The Linux package (`PSBox-*-linux-x86_64.AppImage`)
 
 `psbox` statically links the same Mbed TLS, libdatachannel (libjuice,
-usrsctp, libSRTP, plog), FFmpeg slice, stb, QR Code generator, FSR 1 and
+usrsctp, libSRTP, plog), FFmpeg slice, stb, QR Code generator, nanosvg, FSR 1 and
 Anime4K shaders listed above; the PS5 runtime, the payload SDK and PS5_Mesa
 are not in it. Their texts, with this file and `LICENSE`, are in
 `PSBox/licenses/`; `FFmpeg-NOTE.txt` there gives FFmpeg's version and
@@ -104,3 +106,15 @@ Copyright (c) 2021 Advanced Micro Devices, Inc.: see `extern/fsr1/LICENSE.txt`.
 Upscale_CNN_x2 networks and Restore_CNN_S (v4.0.1); `tools/gen-anime4k.py`
 turns their passes, weights unchanged, into `src/display/shaders/a4k_*.comp`. Brought to our attention by
 sainsaji's EVO Player for PS5, which runs them in its own pipeline.
+
+## NanoSVG
+
+`extern/nanosvg/nanosvg.h` and `extern/nanosvg/nanosvgrast.h` (Mikko Mononen,
+zlib license, see `extern/nanosvg/LICENSE.txt`), used in `src/ui/svg_icon.cpp`
+for vector glyph rasterisation (e.g. controller icons, guitar icon).
+
+## SQLite
+
+`extern/sqlite3/sqlite3.c` and `extern/sqlite3/sqlite3.h` (version 3.45.3 amalgamation,
+public domain): used on PlayStation 5 and PlayStation 4 by `src/trophy/trophy_db.cpp`
+to interact with the console's application registry (`/system_data/priv/mms/app.db`).

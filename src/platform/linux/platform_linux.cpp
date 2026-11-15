@@ -26,6 +26,8 @@
 #include <sys/random.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <link.h>
+#include <ucontext.h>
 #include <unistd.h>
 
 namespace xc::platform {
@@ -264,6 +266,85 @@ void setThreadRealtimePriority() {
     int maxPrio = sched_get_priority_max(SCHED_RR);
     param.sched_priority = maxPrio > 0 ? maxPrio : 1;
     pthread_setschedparam(pthread_self(), SCHED_RR, &param);
+}
+
+void setLowLatencyNetwork(bool) {}
+
+void getCodeBounds(uintptr_t& base, uintptr_t& end) {
+    struct Bounds {
+        uintptr_t base = 0;
+        uintptr_t end = 0;
+    } b;
+    dl_iterate_phdr(
+        [](struct dl_phdr_info* info, size_t, void* data) -> int {
+            auto* bounds = static_cast<Bounds*>(data);
+            bounds->base = static_cast<uintptr_t>(info->dlpi_addr);
+            uintptr_t e = bounds->base;
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                if (info->dlpi_phdr[i].p_type != PT_LOAD) continue;
+                uintptr_t segEnd = bounds->base + info->dlpi_phdr[i].p_vaddr + info->dlpi_phdr[i].p_memsz;
+                if (segEnd > e) e = segEnd;
+            }
+            bounds->end = e;
+            return 1;
+        },
+        &b);
+    base = b.base;
+    end = b.end;
+}
+
+bool findModuleByAddr(uintptr_t addr, char* nameBuf, size_t nameCap, uintptr_t& baseAddr) {
+    if (!nameBuf || nameCap == 0) return false;
+    struct Lookup {
+        uintptr_t addr;
+        const char* name;
+        uintptr_t base;
+        bool found;
+    } q{addr, nullptr, 0, false};
+    dl_iterate_phdr(
+        [](struct dl_phdr_info* info, size_t, void* data) -> int {
+            auto* l = static_cast<Lookup*>(data);
+            uintptr_t base = static_cast<uintptr_t>(info->dlpi_addr);
+            for (int i = 0; i < info->dlpi_phnum; ++i) {
+                if (info->dlpi_phdr[i].p_type != PT_LOAD) continue;
+                uintptr_t lo = base + info->dlpi_phdr[i].p_vaddr;
+                uintptr_t hi = lo + info->dlpi_phdr[i].p_memsz;
+                if (l->addr >= lo && l->addr < hi) {
+                    l->name = info->dlpi_name;
+                    l->base = base;
+                    l->found = true;
+                    return 1;
+                }
+            }
+            return 0;
+        },
+        &q);
+    if (q.found) {
+        const char* name = (q.name && q.name[0]) ? q.name : "eboot";
+        for (const char* p = name; *p; ++p) if (*p == '/') name = p + 1;
+        std::strncpy(nameBuf, name, nameCap - 1);
+        nameBuf[nameCap - 1] = 0;
+        baseAddr = q.base;
+        return true;
+    }
+    return false;
+}
+
+void extractSignalContext(void* uctx, void* siginfo, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr) {
+    auto* info = static_cast<siginfo_t*>(siginfo);
+    faultAddr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
+    if (uctx) {
+        const auto* uc = static_cast<const ucontext_t*>(uctx);
+#if defined(__x86_64__)
+        pc = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RIP]);
+        rbp = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RBP]);
+        rsp = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RSP]);
+#elif defined(__aarch64__)
+        pc = static_cast<uintptr_t>(uc->uc_mcontext.pc);
+        rbp = static_cast<uintptr_t>(uc->uc_mcontext.regs[29]);
+        rsp = static_cast<uintptr_t>(uc->uc_mcontext.sp);
+#endif
+    }
 }
 
 }  // namespace xc::platform

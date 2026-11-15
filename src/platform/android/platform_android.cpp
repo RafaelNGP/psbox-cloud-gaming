@@ -17,12 +17,36 @@
 #include <netinet/in.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 #if defined(__ANDROID__)
 #include <android/log.h>
+#include <jni.h>
+#include <dlfcn.h>
+
+// Android Bionic libc introduced iconv in API 28 (Android 9.0).
+// When targeting minSdk 26 (Android 8.0), prebuilt FFmpeg's subtitle decoder
+// references iconv_open, iconv, and iconv_close. Providing weak fallback
+// definitions satisfies the linker for API 26-27 without breaking API 28+.
+extern "C" {
+__attribute__((weak)) void* iconv_open(const char* tocode, const char* fromcode) {
+    (void)tocode; (void)fromcode;
+    return reinterpret_cast<void*>(-1);
+}
+
+__attribute__((weak)) size_t iconv(void* cd, char** inbuf, size_t* inbytesleft, char** outbuf, size_t* outbytesleft) {
+    (void)cd; (void)inbuf; (void)inbytesleft; (void)outbuf; (void)outbytesleft;
+    return static_cast<size_t>(-1);
+}
+
+__attribute__((weak)) int iconv_close(void* cd) {
+    (void)cd;
+    return 0;
+}
+}
 #endif
 
 namespace xc::platform {
@@ -30,11 +54,6 @@ namespace xc::platform {
 namespace {
 std::string g_dataDir;
 std::string g_dataDirNote;
-
-bool isDir(const std::string& path) {
-    struct stat st {};
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
 
 void makeDirs(const std::string& path) {
     for (size_t i = 1; i <= path.size(); ++i) {
@@ -53,6 +72,9 @@ bool init() {
         g_dataDir = "/data/data/com.rafaelngp.psbox/files";
     }
     makeDirs(g_dataDir);
+#if defined(__ANDROID__)
+    __android_log_print(ANDROID_LOG_INFO, "PSBox", "platform_android init: dataDir=%s", g_dataDir.c_str());
+#endif
     return true;
 }
 
@@ -63,8 +85,16 @@ std::string dataDirNote() { return g_dataDirNote; }
 bool dataDirWritable() { return true; }
 int dataDirErrno() { return 0; }
 std::string appDir() { return g_dataDir; }
-std::string assetDir() { return g_dataDir + "/assets"; }
-std::string caBundlePath() { return assetDir() + "/cacert.pem"; }
+std::string assetDir() {
+    const char* env = std::getenv("XCLOUD_ASSETS");
+    if (env && *env) return env;
+    return g_dataDir + "/assets";
+}
+std::string caBundlePath() {
+    const char* env = std::getenv("XCLOUD_CA_BUNDLE");
+    if (env && *env) return env;
+    return assetDir() + "/cacert.pem";
+}
 
 bool randomBytes(void* out, size_t len) {
     int fd = ::open("/dev/urandom", O_RDONLY);
@@ -152,7 +182,103 @@ void setNoThreadPinning(bool) {}
 bool isHandheld() { return false; }
 void forceHandheld(bool) {}
 
-void setThreadAffinity(ThreadRole, const char*) {}
-void setThreadRealtimePriority() {}
+namespace {
+void setAndroidThreadPriority(int nicePrio) {
+#if defined(__ANDROID__)
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (pfnGetJNIEnv) {
+        if (auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv())) {
+            jclass procCls = env->FindClass("android/os/Process");
+            if (procCls) {
+                jmethodID mid = env->GetStaticMethodID(procCls, "setThreadPriority", "(I)V");
+                if (mid) {
+                    env->CallStaticVoidMethod(procCls, mid, static_cast<jint>(nicePrio));
+                }
+                if (env->ExceptionCheck()) {
+                    env->ExceptionClear();
+                }
+                env->DeleteLocalRef(procCls);
+            }
+        }
+    }
+    // Fallback or reinforce with direct POSIX setpriority
+    int rc = ::setpriority(PRIO_PROCESS, 0, nicePrio);
+    if (rc != 0 && nicePrio < 0) {
+        ::setpriority(PRIO_PROCESS, 0, std::max(nicePrio, -8));
+    }
+#else
+    (void)nicePrio;
+#endif
+}
+}  // namespace
+
+void setThreadAffinity(ThreadRole role, const char* name) {
+#if defined(__ANDROID__)
+    if (name && *name) {
+        char threadName[16]{};
+        std::strncpy(threadName, name, 15);
+        pthread_setname_np(pthread_self(), threadName);
+    }
+    switch (role) {
+    case ThreadRole::Audio:
+        setAndroidThreadPriority(-19); // THREAD_PRIORITY_URGENT_AUDIO
+        break;
+    case ThreadRole::VideoDecode:
+        setAndroidThreadPriority(-8);  // THREAD_PRIORITY_URGENT_DISPLAY
+        break;
+    case ThreadRole::Network:
+        setAndroidThreadPriority(-4);  // THREAD_PRIORITY_DISPLAY
+        break;
+    case ThreadRole::Main:
+        setAndroidThreadPriority(-10); // Top-app boost
+        break;
+    case ThreadRole::Worker:
+        setAndroidThreadPriority(0);   // THREAD_PRIORITY_DEFAULT
+        break;
+    }
+#else
+    (void)role; (void)name;
+#endif
+}
+
+void setThreadRealtimePriority() {
+#if defined(__ANDROID__)
+    setAndroidThreadPriority(-19);
+    struct sched_param param{};
+    param.sched_priority = 1;
+    pthread_setschedparam(pthread_self(), SCHED_RR, &param);
+#endif
+}
+
+void setLowLatencyNetwork(bool on) {
+#if defined(__ANDROID__)
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (!pfnGetJNIEnv) return;
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    if (!env) return;
+    jclass cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    if (!cls) {
+        env->ExceptionClear();
+        return;
+    }
+    jmethodID mid = env->GetStaticMethodID(cls, "setLowLatencyWifi", "(Z)V");
+    if (mid) {
+        env->CallStaticVoidMethod(cls, mid, static_cast<jboolean>(on));
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+    }
+    env->DeleteLocalRef(cls);
+#else
+    (void)on;
+#endif
+}
+void getCodeBounds(uintptr_t& base, uintptr_t& end) { base = 0; end = 0; }
+bool findModuleByAddr(uintptr_t, char*, size_t, uintptr_t&) { return false; }
+void extractSignalContext(void*, void*, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr) {
+    pc = 0; rbp = 0; rsp = 0; faultAddr = 0;
+}
 
 }  // namespace xc::platform

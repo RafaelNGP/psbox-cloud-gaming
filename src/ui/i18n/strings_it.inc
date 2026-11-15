@@ -572,4 +572,6 @@ constexpr Column kItalian = {
     "Paese del negozio", // StoreCountry
     "Automatico (paese di accesso)", // StoreCountryAuto
     "Sceglie il paese dei prezzi e delle offerte gratuite del negozio. Il server di streaming resta invariato.", // SettingDescStoreCountry
+    "Codice di associazione copiato negli appunti", // SignInCodeCopied
+    "Fai clic o tocca il codice per copiare", // SignInClickToCopy
 };

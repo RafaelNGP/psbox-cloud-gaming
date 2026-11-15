@@ -67,13 +67,40 @@ inline void Canvas::blend(uint32_t& dst, Color src, uint32_t a) const {
         return;
     }
     uint32_t d = dst;
+    uint32_t dstA = d >> 24;
+    if (dstA == 0) {
+        dst = (a << 24) | (src & 0x00FFFFFFu);
+        return;
+    }
     uint32_t inv = 255 - a;
-    uint32_t rb = (((src & 0x00FF00FFu) * a + (d & 0x00FF00FFu) * inv + 0x00800080u) >> 8) & 0x00FF00FFu;
-    uint32_t g = (((src & 0x0000FF00u) * a + (d & 0x0000FF00u) * inv + 0x00008000u) >> 8) & 0x0000FF00u;
-    dst = 0xFF000000u | rb | g;
+    if (dstA == 255) {
+        uint32_t rb = (((src & 0x00FF00FFu) * a + (d & 0x00FF00FFu) * inv + 0x00800080u) >> 8) & 0x00FF00FFu;
+        uint32_t g = (((src & 0x0000FF00u) * a + (d & 0x0000FF00u) * inv + 0x00008000u) >> 8) & 0x0000FF00u;
+        dst = 0xFF000000u | rb | g;
+        return;
+    }
+    uint32_t outA = a + ((dstA * inv + 127) >> 8);
+    if (outA == 0) { dst = 0; return; }
+    uint32_t dstWeight = (dstA * inv + 127) >> 8;
+    uint32_t r = ((src & 0xFFu) * a + (d & 0xFFu) * dstWeight) / outA;
+    uint32_t g = (((src >> 8) & 0xFFu) * a + ((d >> 8) & 0xFFu) * dstWeight) / outA;
+    uint32_t b = (((src >> 16) & 0xFFu) * a + (((d >> 16) & 0xFFu) * dstWeight)) / outA;
+    dst = (outA << 24) | ((b & 0xFFu) << 16) | ((g & 0xFFu) << 8) | (r & 0xFFu);
 }
 
-void Canvas::clear(Color c) { std::fill(px_.begin(), px_.end(), c | 0xFF000000u); }
+void Canvas::clear(Color c) { std::fill(px_.begin(), px_.end(), c); }
+
+void Canvas::clearTransparent() { std::fill(px_.begin(), px_.end(), 0u); }
+
+void Canvas::clearRgba(Color c) { std::fill(px_.begin(), px_.end(), c); }
+
+void Canvas::clearRect(Rect r) {
+    Rect b = intersect(r, clip_);
+    if (b.w <= 0 || b.h <= 0) return;
+    for (int y = b.y; y < b.y + b.h; ++y) {
+        std::memset(&px_[static_cast<size_t>(y) * w_ + b.x], 0, static_cast<size_t>(b.w) * sizeof(uint32_t));
+    }
+}
 
 uint32_t Canvas::cornerCoverage(Rect r, int radius, int px, int py) {
     int left = r.x + radius, right = r.x + r.w - radius;

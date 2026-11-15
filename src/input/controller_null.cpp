@@ -20,6 +20,7 @@ int setTriggerEffects(int, const TriggerCommand*) { return -1; }
 void setTriggerMotors(int, uint8_t, uint8_t, uint32_t) {}
 void setLight(int, uint8_t, uint8_t, uint8_t) {}
 void resetLight(int) {}
+bool readDeviceMotion(RawPad&) { return false; }
 
 }  // namespace backend
 

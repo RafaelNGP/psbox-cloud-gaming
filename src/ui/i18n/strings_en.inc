@@ -572,4 +572,6 @@ constexpr Column kEnglish = {
     "Store country", // StoreCountry
     "Automatic (sign-in country)", // StoreCountryAuto
     "Chooses the country used for store prices and free offers. The streaming server stays unchanged.", // SettingDescStoreCountry
+    "Pairing code copied to clipboard", // SignInCodeCopied
+    "Click or tap code to copy", // SignInClickToCopy
 };

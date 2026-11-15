@@ -81,7 +81,8 @@ set(_lic
     "deps/ffmpeg/COPYING.LGPLv2.1=FFmpeg-LGPL-2.1.txt"
     "extern/stb/LICENSE=stb-LICENSE.txt"
     "extern/fsr1/LICENSE.txt=FSR1-MIT.txt"
-    "extern/anime4k/LICENSE=Anime4K-MIT.txt")
+    "extern/anime4k/LICENSE=Anime4K-MIT.txt"
+    "extern/nanosvg/LICENSE.txt=nanosvg-LICENSE.txt")
 foreach(_pair IN LISTS _lic)
     string(REPLACE "=" ";" _pair "${_pair}")
     list(GET _pair 0 _from)

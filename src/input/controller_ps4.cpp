@@ -207,6 +207,8 @@ void resetLight(int slot) {
     }
 }
 
+bool readDeviceMotion(RawPad&) { return false; }
+
 }  // namespace backend
 
 std::string padUserName(int index) {

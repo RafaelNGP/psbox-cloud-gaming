@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 
+#include "net/socket.h"
 #include "platform/platform.h"
 #include "util/log.h"
 
@@ -15,26 +16,7 @@
 #include <thread>
 #include <vector>
 
-#if !defined(_WIN32)
-#include <arpa/inet.h>
-#include <errno.h>
-#include <fcntl.h>
-#include <netinet/in.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
-#endif
-
 namespace xc::stream {
-
-#if defined(_WIN32)
-
-void wifiFillerStart() {}
-void wifiFillerStop() {}
-void wifiFillerSetRate(int) {}
-bool wifiFillerReady() { return false; }
-
-#else
 
 namespace {
 // A router that refuses in this (median) is the home's own (it answers a
@@ -57,21 +39,26 @@ std::atomic<int> g_rate{0};
 // The address the default route leaves by: a UDP socket "connected" to a public
 // address (nothing is sent), then asked its own.
 uint32_t localAddress() {
-  const int s = socket(AF_INET, SOCK_DGRAM, 0);
-  if (s < 0)
+  xc::net::Socket s = xc::net::createUdpSocket();
+  if (!s.valid())
     return 0;
   sockaddr_in to{};
   to.sin_family = AF_INET;
   to.sin_port = htons(53);
-  inet_pton(AF_INET, "1.1.1.1", &to.sin_addr);
+  xc::net::parseIpv4Address("1.1.1.1", &to.sin_addr);
   uint32_t me = 0;
-  if (connect(s, reinterpret_cast<sockaddr *>(&to), sizeof to) == 0) {
+  if (xc::net::connectSocket(s, reinterpret_cast<const sockaddr*>(&to), sizeof(to))) {
     sockaddr_in a{};
-    socklen_t l = sizeof a;
-    if (getsockname(s, reinterpret_cast<sockaddr *>(&a), &l) == 0)
+    socklen_t l = sizeof(a);
+#if defined(_WIN32)
+    if (::getsockname(static_cast<SOCKET>(s.fd), reinterpret_cast<sockaddr*>(&a), &l) == 0)
       me = ntohl(a.sin_addr.s_addr);
+#else
+    if (::getsockname(static_cast<int>(s.fd), reinterpret_cast<sockaddr*>(&a), &l) == 0)
+      me = ntohl(a.sin_addr.s_addr);
+#endif
   }
-  close(s);
+  xc::net::closeSocket(s);
   return me;
 }
 
@@ -82,46 +69,48 @@ uint64_t nowUs() {
           .count());
 }
 
-// A connection attempt, not waited for: its socket, -1 if it could not start.
-int startAttempt(const sockaddr_in &to) {
-  const int s = socket(AF_INET, SOCK_STREAM, 0);
-  if (s < 0)
-    return -1;
-  fcntl(s, F_SETFL, fcntl(s, F_GETFL, 0) | O_NONBLOCK);
-  if (connect(s, reinterpret_cast<const sockaddr *>(&to), sizeof to) == 0 ||
-      errno != EINPROGRESS) {
-    close(s); // connected (an open port) or failed at once: not a refusal to
-              // count
-    return -1;
+// A connection attempt, not waited for: its socket, invalid if it could not start.
+xc::net::Socket startAttempt(const sockaddr_in& to) {
+  xc::net::Socket s = xc::net::createTcpSocket();
+  if (!s.valid())
+    return xc::net::kInvalidSocket;
+  xc::net::setNonBlocking(s, true);
+  if (xc::net::connectSocket(s, reinterpret_cast<const sockaddr*>(&to), sizeof(to)) ||
+      !xc::net::inProgress(xc::net::lastSocketError())) {
+    xc::net::closeSocket(s);
+    return xc::net::kInvalidSocket;
   }
   return s;
 }
 
 // Whether an attempt ended (refused: true in `refused`).
-bool attemptDone(int s, bool &refused) {
-  pollfd p{s, POLLOUT, 0};
-  if (poll(&p, 1, 0) <= 0)
+bool attemptDone(xc::net::Socket s, bool& refused) {
+  xc::net::Socket writeSock = s;
+  if (xc::net::pollSockets(nullptr, 0, &writeSock, 1, 0) <= 0)
     return false;
   int err = 0;
-  socklen_t l = sizeof err;
-  getsockopt(s, SOL_SOCKET, SO_ERROR, &err, &l);
-  refused = err == ECONNREFUSED;
+  xc::net::getSocketError(s, err);
+#if defined(_WIN32)
+  refused = (err == WSAECONNREFUSED);
+#else
+  refused = (err == ECONNREFUSED);
+#endif
   return true;
 }
 
 // Ten attempts at `to`, one after the other: the median time to the refusal
 // (ms), -1 if fewer than eight were refused within 50 ms.
-double probe(const sockaddr_in &to) {
+double probe(const sockaddr_in& to) {
   std::vector<double> times;
   for (int k = 0; k < 10 && g_running; ++k) {
     const uint64_t at = nowUs();
-    const int s = startAttempt(to);
-    if (s < 0)
+    xc::net::Socket s = startAttempt(to);
+    if (!s.valid())
       continue;
     bool refused = false;
     while (nowUs() - at < 50000 && !attemptDone(s, refused))
       std::this_thread::sleep_for(std::chrono::microseconds(500));
-    close(s);
+    xc::net::closeSocket(s);
     if (refused)
       times.push_back(static_cast<double>(nowUs() - at) / 1000.0);
   }
@@ -173,7 +162,7 @@ void loop() {
     return;
   g_ready = true;
   struct Pending {
-    int fd;
+    xc::net::Socket sock;
     uint64_t at;
   };
   std::vector<Pending> pending;
@@ -192,9 +181,10 @@ void loop() {
     if (rate > 0) {
       carry += rate / 100.0; // every 10 ms
       for (int n = static_cast<int>(carry); n > 0 && pending.size() < 256;
-           --n, carry -= 1.0)
-        if (const int fd = startAttempt(router); fd >= 0)
-          pending.push_back({fd, now}), ++sent;
+           --n, carry -= 1.0) {
+        if (xc::net::Socket s = startAttempt(router); s.valid())
+          pending.push_back({s, now}), ++sent;
+      }
       carry = std::min(carry, 1.0);
     } else {
       carry = 0;
@@ -203,9 +193,9 @@ void loop() {
     // go.
     for (size_t i = 0; i < pending.size();) {
       bool refused = false;
-      if (attemptDone(pending[i].fd, refused) || now - pending[i].at > 300000) {
+      if (attemptDone(pending[i].sock, refused) || now - pending[i].at > 300000) {
         refusedCount += refused;
-        close(pending[i].fd);
+        xc::net::closeSocket(pending[i].sock);
         pending[i] = pending.back();
         pending.pop_back();
       } else {
@@ -226,8 +216,8 @@ void loop() {
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  for (const Pending &p : pending)
-    close(p.fd);
+  for (Pending &p : pending)
+    xc::net::closeSocket(p.sock);
 }
 } // namespace
 
@@ -254,7 +244,5 @@ void wifiFillerSetRate(int perSecond) {
 }
 
 bool wifiFillerReady() { return g_ready.load(std::memory_order_relaxed); }
-
-#endif
 
 } // namespace xc::stream

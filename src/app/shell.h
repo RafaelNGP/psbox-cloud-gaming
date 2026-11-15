@@ -65,6 +65,8 @@ void setFullscreen(bool on);
 bool fullscreenSwitched(bool& on);
 // Opens `url` in the system's browser; false where there is none (PS5).
 bool openUrl(const std::string& url);
+// Sets UTF-8 text into the system clipboard; false where there is none (PS5).
+bool setClipboardText(const std::string& text);
 // The keyboard typing text into a field (the home search): on while the UI
 // wants it (main thread, each pass). True where typed text comes through
 // takeTextInput() (the desktop); false where there is none (PS5, null),
@@ -82,5 +84,18 @@ struct MouseEvent {
     float wheelX = 0, wheelY = 0;
 };
 void setMouseHandler(std::function<void(const MouseEvent&)> handler);
+
+struct TouchEvent {
+    enum class Kind { Down, Motion, Up, Cancel };
+    Kind kind = Kind::Down;
+    uint64_t fingerId = 0;
+    float x = 0.0f;        // Logical 1920x1080 coordinates
+    float y = 0.0f;
+    float dx = 0.0f;       // Logical delta since last event
+    float dy = 0.0f;
+    float pressure = 1.0f;
+};
+void setTouchHandler(std::function<void(const TouchEvent&)> handler);
+void setTextInputArea(int x, int y, int w, int h);
 
 }  // namespace xc::app::shell

@@ -16,6 +16,7 @@ layout(push_constant) uniform Constants {
     float overlayOpacity;
     float dither;    // in 8-bit steps: 1 = +-half a step (the video); 0 = none (the menus)
     uint quant8;     // measurements: the input rounded to 8 bits, as before the 16-bit images
+    ivec4 viewport;  // [x, y, w, h] destination rectangle in swapchain image
 } pc;
 
 #define A_GPU 1
@@ -35,12 +36,15 @@ void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
     ivec2 size = imageSize(target);
     if (p.x >= size.x || p.y >= size.y) return;
-    ivec2 box = imageSize(upscaled);
-    ivec2 q = p - (size - box) / 2;
-    if (q.x < 0 || q.y < 0 || q.x >= box.x || q.y >= box.y) {
+
+    // Check if pixel falls inside the presentation viewport
+    ivec2 q = p - pc.viewport.xy;
+    if (q.x < 0 || q.y < 0 || q.x >= pc.viewport.z || q.y >= pc.viewport.w) {
+        // Pixel is in letterbox / pillarbox area: clear to black
         imageStore(target, p, vec4(0.0, 0.0, 0.0, 1.0));
         return;
     }
+
     vec3 color;
     if (pc.sharpen != 0u) {
         FsrRcasF(color.r, color.g, color.b, uvec2(q), pc.con);
@@ -48,7 +52,7 @@ void main() {
         color = FsrRcasLoadF(q).rgb;
     }
     if (pc.overlayOpacity > 0.0) {
-        vec4 o = texture(overlayTex, (vec2(q) + 0.5) / vec2(box));
+        vec4 o = texture(overlayTex, (vec2(q) + 0.5) / vec2(pc.viewport.zw));
         color = mix(color, o.rgb, o.a * pc.overlayOpacity);
     }
     if (pc.dither > 0.0) {

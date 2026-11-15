@@ -281,6 +281,8 @@ void setLight(int slot, uint8_t r, uint8_t g, uint8_t b) {
 
 void resetLight(int slot) { scePadResetLightBar(g_slots[slot].handle); }
 
+bool readDeviceMotion(RawPad&) { return false; }
+
 }  // namespace backend
 
 std::string padUserName(int index) {

@@ -99,6 +99,12 @@ std::string g_stageGameName;
 std::string g_stageProduct;
 std::string g_stageXboxTitleId;
 std::string g_stageTileUrl;
+namespace {
+struct LowLatencyNetGuard {
+    LowLatencyNetGuard() { platform::setLowLatencyNetwork(true); }
+    ~LowLatencyNetGuard() { platform::setLowLatencyNetwork(false); }
+};
+}  // namespace
 
 std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQuery) {
     crash::setStage(gssv.isHome() ? "streaming own Xbox" : ("streaming " + g_stageTitle).c_str());
@@ -154,6 +160,7 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     }
     std::string err;
     if (!player.start(err)) return "ERROR: " + ui::trf(ui::Str::StreamFailed, err);
+    LowLatencyNetGuard netGuard;
     {
         std::lock_guard<std::mutex> lock(g_playerMutex);
         g_player = &player;

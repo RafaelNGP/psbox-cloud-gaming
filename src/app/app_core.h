@@ -18,6 +18,10 @@ bool coreStartup();
 bool coreFrame();
 // After the last pass.
 void coreShutdown();
+// Lifecycle hooks (mobile / desktop windowing events)
+void onEnteredBackground();
+void onEnteredForeground();
+void onSystemPressure(bool terminating);
 // The three in turn; the process's exit code.
 int runApp();
 // What the screens offer here (the pads', display's and shell's

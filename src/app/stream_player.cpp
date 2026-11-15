@@ -182,7 +182,11 @@ private:
             std::fwrite(item.data.data(), 1, item.data.size(), video_);
             const std::time_t now = std::time(nullptr);
             std::tm local{};
+#if defined(_WIN32)
+            localtime_s(&local, &now);
+#else
             localtime_r(&now, &local);
+#endif
             char clock[16];
             std::strftime(clock, sizeof clock, "%H:%M:%S", &local);
             std::fprintf(index_, "%llu %llu %s\n", static_cast<unsigned long long>(frames_),
@@ -428,7 +432,8 @@ struct StreamPlayer::Impl {
     void updateMicState() {
         std::lock_guard<std::mutex> lock(micMutex);
         if (!running) return;
-        if (!micEnabled) {
+        bool shouldRecord = micEnabled && !micMuted.load();
+        if (!shouldRecord) {
             if (audioIn.isRecording()) {
                 audioIn.close();
                 input::setEmbeddedMicActive(false);
@@ -448,7 +453,7 @@ struct StreamPlayer::Impl {
             audioIn.setGain(micGain.load());
             audioIn.setFrameSize(audioEncoder.frameSamples());
             audioIn.open([this](const int16_t* pcmFrames, size_t samples) {
-                if (!running) return;
+                if (!running || micMuted.load()) return;
                 if (!encoderInitialized) return;
                 auto s = current();
                 if (!s || !s->isOpen()) return;
@@ -692,7 +697,7 @@ struct StreamPlayer::Impl {
             }
             auto drawPic = [](const media::Picture& p, bool wait) {
                 if (p.format == media::Picture::Format::Nv12) {
-                    return display::drawNv12(p.y, p.u, p.strideY, p.strideU, p.width, p.height, wait);
+                    return display::drawNv12(p.y, p.u, p.strideY, p.strideU, p.width, p.height, wait, p.nv21);
                 }
                 return display::drawYuv420(p.y, p.u, p.v, p.strideY, p.strideU, p.strideV, p.width, p.height, wait);
             };
@@ -1046,7 +1051,7 @@ struct StreamPlayer::Impl {
             // Try acquire with zero wait first; if not ready, wait for swapchain image.
             auto drawPic = [](const media::Picture& p, bool wait) {
                 if (p.format == media::Picture::Format::Nv12) {
-                    return display::drawNv12(p.y, p.u, p.strideY, p.strideU, p.width, p.height, wait);
+                    return display::drawNv12(p.y, p.u, p.strideY, p.strideU, p.width, p.height, wait, p.nv21);
                 }
                 return display::drawYuv420(p.y, p.u, p.v, p.strideY, p.strideU, p.strideV, p.width, p.height, wait);
             };
@@ -1951,6 +1956,7 @@ bool StreamPlayer::micEnabled() const {
 void StreamPlayer::setMicMuted(bool muted) {
     impl_->micMuted = muted;
     impl_->audioIn.setMuted(muted);
+    impl_->updateMicState();
 }
 
 bool StreamPlayer::micMuted() const {

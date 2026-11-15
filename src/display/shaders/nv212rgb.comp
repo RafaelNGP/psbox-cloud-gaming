@@ -1,0 +1,86 @@
+#version 450
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 RafaelNGP
+// Decoded H.264 picture in NV21 (BT.709, limited range, 4:2:0 semiplanar with V before U)
+// to RGB, debanded first.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(binding = 0) uniform sampler2D lumaTex;      // linear R8_UNORM
+layout(binding = 1) uniform sampler2D chromaVUTex;  // linear R8G8_UNORM (r=V, g=U)
+layout(binding = 2, rgba16f) uniform writeonly image2D rgbOut;
+layout(push_constant) uniform Constants {
+    uint iterations;  // 0: no deband
+    float threshold;  // largest step smoothed, in 0..1 units (divided by the iteration)
+    float radius;     // in luma pixels (times the iteration)
+    float grain;      // luma noise amplitude
+    uint frame;       // moves the random pattern each frame
+    uint quant8;      // measurements: rounded to 8 bits here, as before the 16-bit images
+    uint chromaGuide; // colour taken from the neighbours whose brightness is like this pixel's
+} pc;
+
+vec2 lumaSize, chromaSize;
+
+// Y, U, V at a luma position (pixel units, centres at .0).
+vec3 yuvAt(vec2 q) {
+    float y = texture(lumaTex, (q + 0.5) / lumaSize).r;
+    vec2 c = (vec2(q.x * 0.5, q.y * 0.5 - 0.25) + 0.5) / chromaSize;
+    vec2 vu = texture(chromaVUTex, c).rg; // vu.r = V, vu.g = U
+    return vec3(y, vu.g, vu.r);           // return (Y, U, V)
+}
+
+vec2 guidedChroma(vec2 q, float y) {
+    vec2 c = vec2(q.x * 0.5, q.y * 0.5 - 0.25);
+    vec2 base = floor(c), f = c - base;
+    ivec2 last = ivec2(chromaSize) - 1;
+    vec2 sum = vec2(0.0);
+    float weights = 0.0;
+    for (int k = 0; k < 4; ++k) {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        ivec2 ci = clamp(ivec2(base) + o, ivec2(0), last);
+        float yc = texture(lumaTex, (vec2(2.0 * float(ci.x), 2.0 * float(ci.y) + 0.5) + 0.5) / lumaSize).r;
+        float spread = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        float d = y - yc;
+        float w = spread / (d * d + 0.002);
+        vec2 vu = texelFetch(chromaVUTex, ci, 0).rg;
+        sum += w * vec2(vu.g, vu.r); // swizzle to (U, V)
+        weights += w;
+    }
+    return sum / weights;
+}
+
+float hash(vec2 p) {
+    vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+    p3 += dot(p3, p3.yzx + 33.33);
+    return fract((p3.x + p3.y) * p3.z);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 size = imageSize(rgbOut);
+    if (p.x >= size.x || p.y >= size.y) return;
+    lumaSize = vec2(textureSize(lumaTex, 0));
+    chromaSize = vec2(textureSize(chromaVUTex, 0));
+    vec2 q = vec2(p);
+    vec3 yuv = yuvAt(q);
+    if (pc.chromaGuide != 0u) yuv.yz = guidedChroma(q, yuv.x);
+    if (pc.iterations > 0u) {
+        vec2 seed = q + float(pc.frame % 64u) * vec2(17.0, 31.0);
+        for (uint i = 1u; i <= pc.iterations; ++i) {
+            float fi = float(i);
+            float dist = pc.radius * fi * hash(seed + fi * 13.7);
+            float angle = 6.2831853 * hash(seed.yx + fi * 41.3);
+            vec2 d = vec2(cos(angle), sin(angle)) * dist;
+            vec3 avg = 0.25 * (yuvAt(q + d) + yuvAt(q - d) + yuvAt(q + vec2(-d.y, d.x)) + yuvAt(q + vec2(d.y, -d.x)));
+            vec3 diff = abs(yuv - avg);
+            yuv = mix(avg, yuv, greaterThan(diff, vec3(pc.threshold / fi)));
+        }
+        yuv.x += (hash(seed * 1.37 + 7.0) - 0.5) * pc.grain;
+    }
+    // Rec. 709 limited-range YUV-to-RGB
+    float l = (yuv.x - 16.0 / 255.0) * (255.0 / 219.0);
+    float u = yuv.y - 128.0 / 255.0, v = yuv.z - 128.0 / 255.0;
+    float s = 255.0 / 224.0;
+    vec3 rgb = vec3(l + 1.5748 * s * v, l - 0.1873 * s * u - 0.4681 * s * v, l + 1.8556 * s * u);
+    rgb = clamp(rgb, 0.0, 1.0);
+    if (pc.quant8 != 0u) rgb = floor(rgb * 255.0 + 0.5) / 255.0;
+    imageStore(rgbOut, p, vec4(rgb, 1.0));
+}

@@ -30,8 +30,8 @@
 #include <map>
 #include <memory>
 #include <thread>
-#include <unistd.h>
 #include <unordered_set>
+#include "util/fs.h"
 #include <vector>
 
 namespace xc::app {
@@ -707,8 +707,8 @@ void worker() {
                 stopHydration();
                 setQueueClient(nullptr);
                 am.signOut();
-                ::unlink((platform::dataDir() + "/library.json").c_str());
-                ::unlink(libraryCachePath().c_str());
+                fs::removeFile(platform::dataDir() + "/library.json");
+                fs::removeFile(libraryCachePath());
                 {
                     std::lock_guard<std::mutex> lock(s_libraryMutex);
                     s_library.reset();

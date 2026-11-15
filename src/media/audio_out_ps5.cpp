@@ -132,6 +132,10 @@ void audioStop() {
     audioQueue().clear();
 }
 
+void audioPause() {}
+void audioResume() {}
+bool audioIsPaused() { return false; }
+
 bool playPadSpeakerAudio(const float* interleavedStereo, size_t frames) {
     if (!interleavedStereo || frames == 0) return false;
     int volPercent = g_padSpeakerVolume.load();

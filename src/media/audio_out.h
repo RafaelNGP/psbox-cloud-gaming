@@ -15,6 +15,9 @@ enum class AudioRoute {
 
 bool audioStart();
 void audioStop();
+void audioPause();
+void audioResume();
+bool audioIsPaused();
 void audioSetRoute(AudioRoute route);
 AudioRoute audioRoute();
 // The game's volume: 1 as it comes, up to 2 (louder, clipped at full scale).

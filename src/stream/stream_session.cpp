@@ -13,9 +13,7 @@
 
 #include <rtc/rtc.hpp>
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
+#include "net/socket.h"
 
 #include <atomic>
 #include <chrono>
@@ -83,7 +81,7 @@ void initRtcLogging() {
 
 bool decodeTeredo(const std::string& ipv6, std::string& ipv4, int& port) {
     in6_addr a{};
-    if (::inet_pton(AF_INET6, ipv6.c_str(), &a) != 1) return false;
+    if (!net::parseIpv6Address(ipv6, &a)) return false;
     const uint8_t* b = a.s6_addr;
     if (!(b[0] == 0x20 && b[1] == 0x01 && b[2] == 0x00 && b[3] == 0x00)) return false;
     // Bytes 10-11: obfuscated (inverted) port; 12-15: inverted client IPv4.
@@ -555,6 +553,11 @@ struct StreamSession::Impl {
 
         audio->setMediaHandler(audioDepacketizer);
         audio->onFrame([this](rtc::binary data, rtc::FrameInfo info) {
+            static thread_local bool s_audioNetPinned = false;
+            if (!s_audioNetPinned) {
+                platform::setThreadAffinity(platform::ThreadRole::Network, "xcloud_net");
+                s_audioNetPinned = true;
+            }
             if (cb.audio) cb.audio(reinterpret_cast<const uint8_t*>(data.data()), data.size(), info.timestamp);
         });
 

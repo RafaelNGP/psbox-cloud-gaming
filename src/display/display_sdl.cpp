@@ -41,6 +41,7 @@ struct Frame {
     std::vector<uint32_t> rgba;    // Menu: kWidth x kHeight, 0xAABBGGRR
     std::vector<uint8_t> y, u, v;  // Video: the planes, rows packed
     bool nv12 = false;             // Video: u holds the interleaved UV plane (the Vulkan path)
+    bool nv21 = false;             // Video: u holds the interleaved VU plane (the Vulkan path)
     int width = 0, height = 0;     // Video
     uint64_t id = 0;               // present()'s count when handed over
 };
@@ -66,6 +67,9 @@ bool g_startFullscreen = true;  // the setting's default
 bool g_startForced = false;     // the command line chose
 bool g_shown = false;  // the window shows from its first picture on
 std::atomic<bool> g_lowLatencyPresent{true};  // setLowLatencyPresent(): MAILBOX when offered
+std::atomic<bool> g_suspended{false};
+std::atomic<bool> g_needSurfaceRecreate{false};
+SafeAreaInsets g_safeArea{};
 
 // Video frames handed to the GPU, by present id, until the screen shows them
 // (VK_KHR_present_wait, polled without waiting in every pump()): each frame
@@ -196,12 +200,13 @@ void pollShown() {
 }
 
 bool drawGpuFront() {
+    if (g_suspended.load() || g_needSurfaceRecreate.load()) return false;
     if (g_front.kind == Kind::Menu) {
-        gpu::drawRgba(g_front.rgba.data());
+        if (!gpu::drawRgba(g_front.rgba.data())) return false;
     } else if (g_front.kind == Kind::Video) {
         int cw = (g_front.width + 1) / 2;
         bool drawn = g_front.nv12 ? gpu::drawNv12(g_front.y.data(), g_front.u.data(), g_front.width, cw * 2,
-                                                  g_front.width, g_front.height, true)
+                                                  g_front.width, g_front.height, true, g_front.nv21)
                                   : gpu::drawYuv420(g_front.y.data(), g_front.u.data(), g_front.v.data(), g_front.width,
                                                     cw, cw, g_front.width, g_front.height, true);
         if (!drawn) return false;
@@ -323,6 +328,9 @@ bool init(bool preferGpu) {
     XC_LOGI("display: SDL %d.%d.%d, video driver %s, renderer %s%s", SDL_VERSIONNUM_MAJOR(SDL_GetVersion()),
             SDL_VERSIONNUM_MINOR(SDL_GetVersion()), SDL_VERSIONNUM_MICRO(SDL_GetVersion()), SDL_GetCurrentVideoDriver(),
             SDL_GetRendererName(g_renderer), g_startFullscreen ? ", fullscreen" : "");
+#if defined(__ANDROID__)
+    setHighRefresh(false);
+#endif
     return true;
 }
 
@@ -356,16 +364,17 @@ bool videoSlots(size_t, uint8_t* out[2]) {
 void waitVideoSlot(const uint8_t*) {}
 
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
-              int width, int height, bool) {
+              int width, int height, bool, bool isNv21) {
     if (!y || !uv || width <= 0 || height <= 0 || strideY < width || strideUV < width) return false;
     const int cw = (width + 1) / 2, ch = (height + 1) / 2;
     g_back.kind = Kind::Video;
     g_back.width = width, g_back.height = height;
+    g_back.nv21 = isNv21;
     g_back.y.resize(static_cast<size_t>(width) * height);
     for (int r = 0; r < height; ++r)
         std::memcpy(&g_back.y[static_cast<size_t>(r) * width], y + static_cast<size_t>(r) * strideY, width);
     // The Vulkan path takes the UV plane as it is (a hardware decoder's
-    // NV12); SDL_Renderer's IYUV texture needs it split.
+    // NV12/NV21); SDL_Renderer's IYUV texture needs it split.
     g_back.nv12 = gpu::ready();
     if (g_back.nv12) {
         const size_t row = static_cast<size_t>(cw) * 2;
@@ -380,8 +389,13 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
         uint8_t* du = &g_back.u[static_cast<size_t>(r) * cw];
         uint8_t* dv = &g_back.v[static_cast<size_t>(r) * cw];
         for (int c = 0; c < cw; ++c) {
-            du[c] = src[c * 2];
-            dv[c] = src[c * 2 + 1];
+            if (isNv21) {
+                dv[c] = src[c * 2];
+                du[c] = src[c * 2 + 1];
+            } else {
+                du[c] = src[c * 2];
+                dv[c] = src[c * 2 + 1];
+            }
         }
     }
     return true;
@@ -438,7 +452,19 @@ void serveReadBack() {
 }  // namespace
 
 void pump() {
+    if (g_suspended.load()) return;
     if ((!g_renderer && !gpu::ready()) || !onMainThread()) return;
+    if (g_needSurfaceRecreate.load()) {
+        if (gpu::ready()) {
+            if (gpu::recreateSurface()) {
+                g_needSurfaceRecreate.store(false);
+            } else {
+                return;
+            }
+        } else {
+            g_needSurfaceRecreate.store(false);
+        }
+    }
     if (gpu::ready()) pollShown();
     {
         std::lock_guard<std::mutex> lock(g_mailboxMutex);
@@ -530,6 +556,7 @@ DisplayCaps caps() {
     DisplayCaps c;
     c.upscalers = c.deband = c.sharpen = gpu::ready();
     c.presentTiming = true;  // the frame handed over, and when pump() presented it
+    c.highRefreshSwitch = canSwitchRefresh();
     return c;
 }
 void setSwapImages(int count) { gpu::setSwapImages(count); }
@@ -538,8 +565,194 @@ void setLowLatencyPresent(bool on) {
     gpu::setMailbox(on);
 }
 void setPresentWait(bool on) { gpu::setPresentWait(on); }
-bool setHighRefresh(bool) { return false; }
-bool canSwitchRefresh() { return false; }
+
+#if defined(__ANDROID__)
+#include <android/native_window.h>
+#include <dlfcn.h>
+#include <jni.h>
+
+typedef int32_t (*PFN_setFrameRate)(ANativeWindow*, float, int8_t);
+
+static void applyAndroidFrameRate(SDL_Window* window, float fps) {
+    if (!window) return;
+    SDL_PropertiesID props = SDL_GetWindowProperties(window);
+    auto* nw = static_cast<ANativeWindow*>(SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    if (!nw) return;
+
+    static auto pfnSetFrameRate = reinterpret_cast<PFN_setFrameRate>(dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate"));
+    if (pfnSetFrameRate) {
+        int32_t rc = pfnSetFrameRate(nw, fps, 1);
+        XC_LOGI("display: ANativeWindow_setFrameRate(%.1f Hz, FIXED_SOURCE) -> rc=%d", fps, rc);
+    }
+}
+
+static void applyAndroidDisplayMode(float fps) {
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (!pfnGetJNIEnv) return;
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    if (!env) return;
+    jclass cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    if (!cls) {
+        env->ExceptionClear();
+        return;
+    }
+    jmethodID mid = env->GetStaticMethodID(cls, "setDisplayRefreshRate", "(F)V");
+    if (mid) {
+        env->CallStaticVoidMethod(cls, mid, static_cast<jfloat>(fps));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+    env->DeleteLocalRef(cls);
+}
+#endif
+
+bool canSwitchRefresh() {
+#if defined(__ANDROID__)
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (pfnGetJNIEnv) {
+        if (auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv())) {
+            jclass cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+            if (cls) {
+                jmethodID mid = env->GetStaticMethodID(cls, "is120HzSupported", "()Z");
+                if (mid) {
+                    jboolean supp = env->CallStaticBooleanMethod(cls, mid);
+                    env->DeleteLocalRef(cls);
+                    if (supp) return true;
+                } else {
+                    env->DeleteLocalRef(cls);
+                }
+            }
+            if (env->ExceptionCheck()) env->ExceptionClear();
+        }
+    }
+    if (!g_window) return false;
+    SDL_DisplayID displayID = SDL_GetDisplayForWindow(g_window);
+    int count = 0;
+    SDL_DisplayMode** modes = SDL_GetFullscreenDisplayModes(displayID, &count);
+    bool has120 = false;
+    if (modes) {
+        for (int i = 0; i < count; ++i) {
+            if (modes[i] && modes[i]->refresh_rate >= 119.0f) {
+                has120 = true;
+                break;
+            }
+        }
+        SDL_free(modes);
+    }
+    return has120;
+#else
+    return false;
+#endif
+}
+
+bool setHighRefresh(bool on) {
+#if defined(__ANDROID__)
+    if (!g_window) return false;
+    float targetFps = on ? 120.0f : 60.0f;
+    applyAndroidFrameRate(g_window, targetFps);
+    applyAndroidDisplayMode(targetFps);
+    return true;
+#else
+    (void)on;
+    return false;
+#endif
+}
+
+void sdlSetSuspended(bool suspended) {
+    g_suspended.store(suspended);
+    if (!suspended) {
+        g_needSurfaceRecreate.store(true);
+        sdlRepaint();
+    }
+}
+
+bool sdlIsSuspended() {
+    return g_suspended.load();
+}
+
+void sdlRendererReset() {
+    if (gpu::ready()) {
+        g_needSurfaceRecreate.store(true);
+        sdlRepaint();
+        return;
+    }
+    if (!onMainThread() || !g_renderer) return;
+    if (g_uiTex) { SDL_DestroyTexture(g_uiTex); g_uiTex = nullptr; }
+    if (g_videoTex) { SDL_DestroyTexture(g_videoTex); g_videoTex = nullptr; g_videoW = g_videoH = 0; }
+    if (g_overlayTex) { SDL_DestroyTexture(g_overlayTex); g_overlayTex = nullptr; g_overlayW = g_overlayH = 0; }
+    if (g_readTex) { SDL_DestroyTexture(g_readTex); g_readTex = nullptr; }
+    g_frontPending = true;
+    g_overlayPending = true;
+    sdlRepaint();
+}
+
+SafeAreaInsets sdlSafeArea() {
+    return g_safeArea;
+}
+
+void sdlUpdateSafeArea() {
+    if (!g_window) return;
+#if defined(__ANDROID__)
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (pfnGetJNIEnv) {
+        if (auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv())) {
+            jclass cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+            if (cls) {
+                jmethodID mid = env->GetStaticMethodID(cls, "getDisplayCutoutInsets", "()[I");
+                if (mid) {
+                    auto insetsArr = static_cast<jintArray>(env->CallStaticObjectMethod(cls, mid));
+                    if (insetsArr) {
+                        jint* insets = env->GetIntArrayElements(insetsArr, nullptr);
+                        if (insets) {
+                            g_safeArea.left = insets[0];
+                            g_safeArea.top = insets[1];
+                            g_safeArea.right = insets[2];
+                            g_safeArea.bottom = insets[3];
+                            env->ReleaseIntArrayElements(insetsArr, insets, JNI_ABORT);
+                        }
+                        env->DeleteLocalRef(insetsArr);
+                        env->DeleteLocalRef(cls);
+                        int winW = 0, winH = 0;
+                        SDL_GetWindowSize(g_window, &winW, &winH);
+                        XC_LOGI("display: cutout insets L=%d T=%d R=%d B=%d (window %dx%d)",
+                                g_safeArea.left, g_safeArea.top, g_safeArea.right, g_safeArea.bottom, winW, winH);
+                        gpu::setSafeAreaInsets(g_safeArea.left, g_safeArea.top, g_safeArea.right, g_safeArea.bottom);
+                        if (winH > winW) {
+                            gpu::setPresentationMode(gpu::DisplayPresentationMode::TopScreenOnly);
+                        } else {
+                            gpu::setPresentationMode(gpu::DisplayPresentationMode::Standard);
+                        }
+                        return;
+                    }
+                }
+                env->DeleteLocalRef(cls);
+            }
+            if (env->ExceptionCheck()) env->ExceptionClear();
+        }
+    }
+#endif
+    SDL_Rect safeRect{0, 0, 0, 0};
+    if (SDL_GetWindowSafeArea(g_window, &safeRect)) {
+        int winW = 0, winH = 0;
+        SDL_GetWindowSize(g_window, &winW, &winH);
+        if (winW > 0 && winH > 0) {
+            g_safeArea.left = safeRect.x;
+            g_safeArea.top = safeRect.y;
+            g_safeArea.right = winW - (safeRect.x + safeRect.w);
+            g_safeArea.bottom = winH - (safeRect.y + safeRect.h);
+            XC_LOGI("display: safe area insets L=%d T=%d R=%d B=%d (window %dx%d)",
+                    g_safeArea.left, g_safeArea.top, g_safeArea.right, g_safeArea.bottom, winW, winH);
+            gpu::setSafeAreaInsets(g_safeArea.left, g_safeArea.top, g_safeArea.right, g_safeArea.bottom);
+            if (winH > winW) {
+                gpu::setPresentationMode(gpu::DisplayPresentationMode::TopScreenOnly);
+            } else {
+                gpu::setPresentationMode(gpu::DisplayPresentationMode::Standard);
+            }
+        }
+    }
+}
 bool bringUpTest(int) {
     XC_LOGW("display: vktest is the PS5's GPU check");
     return false;
@@ -559,8 +772,11 @@ namespace {
 // The picture on screen read back (main thread).
 bool readBackMain(std::vector<uint8_t>& rgb, int& width, int& height) {
     if (g_front.kind == Kind::None) return false;
+    if (g_suspended.load() || g_needSurfaceRecreate.load()) return false;
     if (gpu::ready()) {
-        if (g_frontPending || g_overlayPending || g_repaint.exchange(false)) drawGpuFront();
+        if (g_frontPending || g_overlayPending || g_repaint.exchange(false)) {
+            if (!drawGpuFront()) return false;
+        }
         return gpu::readBack(rgb, width, height);
     }
     upload();
@@ -621,13 +837,24 @@ bool sdlWindowToLogical(float winX, float winY, float& logX, float& logY) {
     int winW = 0, winH = 0;
     SDL_GetWindowSize(g_window, &winW, &winH);
     if (winW <= 0 || winH <= 0) return false;
-    float scale = std::min(static_cast<float>(winW) / static_cast<float>(kWidth),
-                           static_cast<float>(winH) / static_cast<float>(kHeight));
+
+    float safeX = static_cast<float>(g_safeArea.left);
+    float safeY = static_cast<float>(g_safeArea.top);
+    float safeW = (winW > (g_safeArea.left + g_safeArea.right))
+                      ? static_cast<float>(winW - g_safeArea.left - g_safeArea.right)
+                      : static_cast<float>(winW);
+    float safeH = (winH > (g_safeArea.top + g_safeArea.bottom))
+                      ? static_cast<float>(winH - g_safeArea.top - g_safeArea.bottom)
+                      : static_cast<float>(winH);
+
+    bool topOnly = (winH > winW);
+    float targetH = topOnly ? (safeH * 0.5f) : safeH;
+    float scale = std::min(safeW / static_cast<float>(kWidth), targetH / static_cast<float>(kHeight));
     if (scale <= 0.0f) return false;
     float viewW = static_cast<float>(kWidth) * scale;
     float viewH = static_cast<float>(kHeight) * scale;
-    float offsetX = (static_cast<float>(winW) - viewW) * 0.5f;
-    float offsetY = (static_cast<float>(winH) - viewH) * 0.5f;
+    float offsetX = safeX + (safeW - viewW) * 0.5f;
+    float offsetY = safeY + (targetH - viewH) * 0.5f;
     logX = (winX - offsetX) / scale;
     logY = (winY - offsetY) / scale;
     return (logX >= 0.0f && logX <= static_cast<float>(kWidth) && logY >= 0.0f && logY <= static_cast<float>(kHeight));

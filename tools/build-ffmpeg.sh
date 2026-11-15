@@ -9,7 +9,7 @@
 #   tools/build-ffmpeg.sh ps4  <build-dir>
 set -euo pipefail
 
-target=${1:?usage: build-ffmpeg.sh host|ps5|ps4 <build-dir>}
+target=${1:?usage: build-ffmpeg.sh host|ps5|ps4|windows|android-* <build-dir>}
 build=$(mkdir -p "${2:?build dir}" && cd "$2" && pwd)
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 prefix=$build/ffmpeg
@@ -45,6 +45,32 @@ if [[ -z $nasm ]]; then
 fi
 common+=(--x86asmexe="$nasm")
 
+# Hardware H.264 decoding through Vulkan Video (FFmpeg opens libvulkan at
+# run time: no new dependency for the AppImage). Its configure wants
+# Vulkan headers 1.3.277 or newer: a pinned copy when the system's are
+# older (ubuntu-24.04 has 1.3.275), header files only.
+vkcheck='#include <vulkan/vulkan.h>
+#if !(defined(VK_VERSION_1_4) || (defined(VK_VERSION_1_3) && VK_HEADER_VERSION >= 277))
+#error old
+#endif'
+vkflags=()
+cc_check="clang"
+if [[ $target == windows ]]; then
+    mingw=${XC_MINGW_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/xcloud-ps5/llvm-mingw-20261104}
+    if [[ -x "$mingw/bin/x86_64-w64-mingw32-clang" ]]; then
+        cc_check="$mingw/bin/x86_64-w64-mingw32-clang"
+    fi
+fi
+if [[ $target != android-* ]] && ! "$cc_check" -E -x c - <<<"$vkcheck" >/dev/null 2>&1; then
+    vkhdr=${XDG_CACHE_HOME:-$HOME/.cache}/xcloud-ps5/vulkan-headers-1.4.309
+    if [[ ! -f $vkhdr/include/vulkan/vulkan.h ]]; then
+        mkdir -p "$vkhdr"
+        curl -sSLf https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.tar.gz |
+            tar xz -C "$vkhdr" --strip-components=1
+    fi
+    vkflags=(--extra-cflags="-I$vkhdr/include")
+fi
+
 mkdir -p "$work"
 cd "$work"
 if [[ $target == ps5 ]]; then
@@ -76,25 +102,57 @@ elif [[ $target == ps4 ]]; then
         --ld="$cache/configure-ld.sh" \
         --extra-cflags="$flags" --extra-ldflags="" \
         --disable-pthreads --enable-pthreads
-else
-    # Hardware H.264 decoding through Vulkan Video (FFmpeg opens libvulkan at
-    # run time: no new dependency for the AppImage). Its configure wants
-    # Vulkan headers 1.3.277 or newer: a pinned copy when the system's are
-    # older (ubuntu-24.04 has 1.3.275), header files only.
-    vkcheck='#include <vulkan/vulkan.h>
-#if !(defined(VK_VERSION_1_4) || (defined(VK_VERSION_1_3) && VK_HEADER_VERSION >= 277))
-#error old
-#endif'
-    vkflags=()
-    if ! clang -E -x c - <<<"$vkcheck" >/dev/null 2>&1; then
-        vkhdr=${XDG_CACHE_HOME:-$HOME/.cache}/xcloud-ps5/vulkan-headers-1.4.309
-        if [[ ! -f $vkhdr/include/vulkan/vulkan.h ]]; then
-            mkdir -p "$vkhdr"
-            curl -sSLf https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.309.tar.gz |
-                tar xz -C "$vkhdr" --strip-components=1
-        fi
-        vkflags=(--extra-cflags="-I$vkhdr/include")
+elif [[ $target == windows ]]; then
+    mingw=${XC_MINGW_ROOT:-${XDG_CACHE_HOME:-$HOME/.cache}/xcloud-ps5/llvm-mingw-20261104}
+    [[ -d "$mingw" ]] || { echo "error: XC_MINGW_ROOT not found at $mingw" >&2; exit 1; }
+    "$src/configure" "${common[@]}" \
+        --enable-cross-compile --target-os=mingw32 --arch=x86_64 \
+        --cross-prefix="$mingw/bin/x86_64-w64-mingw32-" --cc="$mingw/bin/x86_64-w64-mingw32-clang" \
+        --enable-vulkan --enable-hwaccel=h264_vulkan \
+        --enable-d3d11va --enable-hwaccel=h264_d3d11va "${vkflags[@]}"
+elif [[ $target == android-* ]]; then
+    abi=${target#android-}
+    ndk=${ANDROID_NDK_HOME:-${ANDROID_NDK_ROOT:-}}
+    if [[ -z "$ndk" && -d "$HOME/Android/Sdk/ndk/27.2.12479018" ]]; then
+        ndk="$HOME/Android/Sdk/ndk/27.2.12479018"
     fi
+    if [[ -z "$ndk" && -d "/home/notebook-storm/Unity/Hub/Editor/6000.3.9f1/Editor/Data/PlaybackEngines/AndroidPlayer/NDK" ]]; then
+        ndk="/home/notebook-storm/Unity/Hub/Editor/6000.3.9f1/Editor/Data/PlaybackEngines/AndroidPlayer/NDK"
+    fi
+    [[ -n "$ndk" && -d "$ndk" ]] || { echo "error: ANDROID_NDK_HOME not set or not found ($ndk)" >&2; exit 1; }
+    tc=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin
+    [[ -d "$tc" ]] || { echo "error: NDK toolchain not found at $tc" >&2; exit 1; }
+    api=29
+    cflags=("-fPIC" "-D_GNU_SOURCE")
+    ldflags=("-Wl,-z,max-page-size=16384")
+    case $abi in
+        arm64-v8a)
+            arch="aarch64"
+            triple="aarch64-linux-android"
+            asm=(--enable-neon)
+            ;;
+        x86_64)
+            arch="x86_64"
+            triple="x86_64-linux-android"
+            asm=(--disable-x86asm)
+            ;;
+        *)
+            echo "error: unsupported Android ABI $abi" >&2; exit 1
+            ;;
+    esac
+    cc="$tc/$triple$api-clang"
+    cxx="$tc/$triple$api-clang++"
+    ar="$tc/llvm-ar"
+    nm="$tc/llvm-nm"
+    ranlib="$tc/llvm-ranlib"
+    strip="$tc/llvm-strip"
+
+    "$src/configure" "${common[@]}" \
+        --enable-cross-compile --target-os=android --arch="$arch" \
+        --cc="$cc" --cxx="$cxx" --ar="$ar" --nm="$nm" --ranlib="$ranlib" --strip="$strip" \
+        --extra-cflags="${cflags[*]}" --extra-ldflags="${ldflags[*]}" \
+        "${asm[@]}"
+else
     "$src/configure" "${common[@]}" --cc=clang --enable-vulkan --enable-hwaccel=h264_vulkan "${vkflags[@]}"
 fi
 make -j"$(nproc)" >/dev/null

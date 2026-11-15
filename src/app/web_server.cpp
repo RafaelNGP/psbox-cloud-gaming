@@ -12,24 +12,14 @@
 #include "util/json.h"
 #include "util/log.h"
 
+#include "net/socket.h"
 #include <algorithm>
-#include <arpa/inet.h>
 #include <cerrno>
 #include <csignal>
 #include <cstring>
-#include <fcntl.h>
 #include <mbedtls/base64.h>
 #include <mbedtls/sha1.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <poll.h>
-#include <sys/socket.h>
 #include <thread>
-#include <unistd.h>
-
-#ifndef MSG_NOSIGNAL
-#define MSG_NOSIGNAL 0
-#endif
 
 namespace xc::app {
 
@@ -79,31 +69,28 @@ bool WebServer::start(uint16_t port) {
     if (running_.load()) return true;
     port_ = port;
 
-    listenFd_ = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (listenFd_ < 0) {
-        XC_LOGW("web server: socket() failed (errno %d)", errno);
+    listenFd_ = net::socketCreate(AF_INET, SOCK_STREAM, 0);
+    if (!listenFd_.valid()) {
+        XC_LOGW("web server: socket() failed (errno %d)", net::lastSocketError());
         return false;
     }
 
-    int one = 1;
-    ::setsockopt(listenFd_, SOL_SOCKET, SO_REUSEADDR, &one, sizeof(one));
+    net::setReuseOrExclusiveAddr(listenFd_);
 
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_addr.s_addr = INADDR_ANY;
     addr.sin_port = htons(port_);
 
-    if (::bind(listenFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-        XC_LOGW("web server: bind(%u) failed (errno %d)", port_, errno);
-        ::close(listenFd_);
-        listenFd_ = -1;
+    if (!net::bindSocket(listenFd_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr))) {
+        XC_LOGW("web server: bind(%u) failed (errno %d)", port_, net::lastSocketError());
+        net::closeSocket(listenFd_);
         return false;
     }
 
-    if (::listen(listenFd_, 8) < 0) {
-        XC_LOGW("web server: listen() failed (errno %d)", errno);
-        ::close(listenFd_);
-        listenFd_ = -1;
+    if (!net::listenSocket(listenFd_, 8)) {
+        XC_LOGW("web server: listen() failed (errno %d)", net::lastSocketError());
+        net::closeSocket(listenFd_);
         return false;
     }
 
@@ -111,8 +98,7 @@ bool WebServer::start(uint16_t port) {
     if (!platform::startThread(thread_, [this] { threadLoop(); })) {
         XC_LOGW("web server: failed to start thread");
         running_.store(false);
-        ::close(listenFd_);
-        listenFd_ = -1;
+        net::closeSocket(listenFd_);
         return false;
     }
 
@@ -122,15 +108,14 @@ bool WebServer::start(uint16_t port) {
 
 void WebServer::stop() {
     if (!running_.exchange(false)) return;
-    if (listenFd_ >= 0) {
-        ::shutdown(listenFd_, SHUT_RDWR);
-        ::close(listenFd_);
-        listenFd_ = -1;
+    if (listenFd_.valid()) {
+        net::shutdownSocket(listenFd_);
+        net::closeSocket(listenFd_);
     }
     {
         std::lock_guard<std::mutex> lock(wsMutex_);
-        for (int fd : wsClients_) {
-            ::shutdown(fd, SHUT_RDWR);
+        for (net::Socket& fd : wsClients_) {
+            net::shutdownSocket(fd);
         }
         wsClients_.clear();
     }
@@ -143,31 +128,24 @@ void WebServer::stop() {
 void WebServer::threadLoop() {
     platform::setThreadAffinity(platform::ThreadRole::Worker, "xcloud_web");
     while (running_.load()) {
-        pollfd pfd{listenFd_, POLLIN, 0};
-        int pr = ::poll(&pfd, 1, 250);
+        int pr = net::pollSockets(&listenFd_, 1, nullptr, 0, 250);
         if (pr <= 0) continue;
-        if (pfd.revents & POLLIN) {
-            sockaddr_in clientAddr{};
-            socklen_t clientLen = sizeof(clientAddr);
-            int clientFd = ::accept(listenFd_, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
-            if (clientFd >= 0) {
-                std::thread([this, clientFd]() {
-                    handleClient(clientFd);
-                    ::close(clientFd);
-                }).detach();
-            }
+        sockaddr_in clientAddr{};
+        socklen_t clientLen = sizeof(clientAddr);
+        net::Socket clientFd = net::acceptSocket(listenFd_, reinterpret_cast<sockaddr*>(&clientAddr), &clientLen);
+        if (clientFd.valid()) {
+            std::thread([this, clientFd]() mutable {
+                handleClient(clientFd);
+                net::closeSocket(clientFd);
+            }).detach();
         }
     }
 }
 
-void WebServer::handleClient(int clientFd) {
-    timeval tv{2, 0};  // 2s timeout prevents hung clients from deadlocking server thread
-    ::setsockopt(clientFd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-    ::setsockopt(clientFd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
-#ifdef SO_NOSIGPIPE
-    int nosig = 1;
-    ::setsockopt(clientFd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof(nosig));
-#endif
+void WebServer::handleClient(net::Socket clientFd) {
+    net::setRecvTimeout(clientFd, 2000);
+    net::setSendTimeout(clientFd, 2000);
+    net::setNoSigpipe(clientFd);
 
     std::string req;
     char buf[8192];
@@ -175,7 +153,7 @@ void WebServer::handleClient(int clientFd) {
     bool headersComplete = false;
 
     while (req.size() < 65536) {
-        ssize_t n = ::recv(clientFd, buf, sizeof(buf), 0);
+        ssize_t n = net::recvSocket(clientFd, buf, sizeof(buf), 0);
         if (n <= 0) break;
         req.append(buf, static_cast<size_t>(n));
 
@@ -246,7 +224,7 @@ void WebServer::handleClient(int clientFd) {
                                        "Upgrade: websocket\r\n"
                                        "Connection: Upgrade\r\n"
                                        "Sec-WebSocket-Accept: " + accept + "\r\n\r\n";
-                    ::send(clientFd, resp.data(), resp.size(), MSG_NOSIGNAL);
+                    net::sendNoSignal(clientFd, resp.data(), resp.size());
                     handleWebSocket(clientFd);
                     return;
                 }
@@ -285,15 +263,14 @@ void WebServer::handleClient(int clientFd) {
 
     size_t sent = 0;
     while (sent < response.size()) {
-        ssize_t w = ::send(clientFd, response.data() + sent, response.size() - sent, MSG_NOSIGNAL);
+        ssize_t w = net::sendNoSignal(clientFd, response.data() + sent, response.size() - sent);
         if (w <= 0) break;
         sent += static_cast<size_t>(w);
     }
 }
 
-void WebServer::handleWebSocket(int wsFd) {
-    int nodelay = 1;
-    ::setsockopt(wsFd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+void WebServer::handleWebSocket(net::Socket wsFd) {
+    net::setTcpNoDelay(wsFd, true);
 
     {
         std::lock_guard<std::mutex> lock(wsMutex_);
@@ -305,17 +282,13 @@ void WebServer::handleWebSocket(int wsFd) {
     uint64_t lastTelMs = 0;
 
     while (running_.load()) {
-        pollfd pfd{wsFd, POLLIN, 0};
-        int pr = ::poll(&pfd, 1, 30);  // ~33 Hz tick
+        int pr = net::pollSockets(&wsFd, 1, nullptr, 0, 30);  // ~33 Hz tick
         if (pr < 0) {
-            if (errno == EINTR) continue;
+            if (net::wasInterrupted(net::lastSocketError())) continue;
             break;
         }
-        if (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            break;
-        }
-        if (pfd.revents & POLLIN) {
-            ssize_t n = ::recv(wsFd, recvBuf, sizeof(recvBuf), 0);
+        if (pr > 0) {
+            ssize_t n = net::recvSocket(wsFd, recvBuf, sizeof(recvBuf), 0);
             if (n <= 0) break;
             if (inBuf.size() + n > 65536) inBuf.clear();
             inBuf.insert(inBuf.end(), recvBuf, recvBuf + n);
@@ -326,11 +299,11 @@ void WebServer::handleWebSocket(int wsFd) {
                 inBuf.erase(inBuf.begin(), inBuf.begin() + consumed);
                 if (frame.opcode == ws::Opcode::Close) {
                     auto closeResp = ws::makeCloseFrame();
-                    ::send(wsFd, closeResp.data(), closeResp.size(), MSG_NOSIGNAL);
+                    net::sendNoSignal(wsFd, closeResp.data(), closeResp.size());
                     goto done;
                 } else if (frame.opcode == ws::Opcode::Ping) {
                     auto pong = ws::makePongFrame(frame.payload);
-                    ::send(wsFd, pong.data(), pong.size(), MSG_NOSIGNAL);
+                    net::sendNoSignal(wsFd, pong.data(), pong.size());
                 } else if (frame.opcode == ws::Opcode::Text) {
                     std::string jsonStr(reinterpret_cast<const char*>(frame.payload.data()), frame.payload.size());
                     auto j = json::parse(jsonStr);
@@ -405,8 +378,8 @@ void WebServer::handleWebSocket(int wsFd) {
             if (s_hooks.getTelemetry) s_hooks.getTelemetry(stats);
             tel.set("stats", stats);
             auto f = ws::makeTextFrame(tel.dump());
-            ssize_t sent = ::send(wsFd, f.data(), f.size(), MSG_NOSIGNAL);
-            if (sent < 0 && (errno != EAGAIN && errno != EWOULDBLOCK)) {
+            ssize_t sent = net::sendNoSignal(wsFd, f.data(), f.size());
+            if (sent < 0 && !net::wouldBlock(net::lastSocketError())) {
                 break;
             }
         }

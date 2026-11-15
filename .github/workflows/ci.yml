@@ -149,6 +149,91 @@ jobs:
           path: ${{ runner.temp }}/psbox-selftest
           if-no-files-found: ignore
 
+  windows-app:
+    runs-on: ubuntu-24.04
+    env:
+      SDL3_VERSION: 3.4.18
+      LLVM_MINGW_VERSION: 20261104
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Tools and Wine
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -q
+          sudo apt-get install -y -q cmake ninja-build wine64 wine nasm
+
+      - name: Toolchain cache (llvm-mingw)
+        id: toolchain-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/xcloud-ps5/llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+          key: windows-toolchain-llvm-mingw-${{ env.LLVM_MINGW_VERSION }}
+
+      - name: Fetch Toolchain
+        if: steps.toolchain-cache.outputs.cache-hit != 'true'
+        run: bash tools/windows/fetch-toolchain.sh
+
+      - name: SDL3 MinGW cache
+        id: sdl3-mingw-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/xcloud-ps5/sdl3-${{ env.SDL3_VERSION }}-mingw
+          key: windows-sdl3-${{ env.SDL3_VERSION }}-mingw-r1
+
+      - name: Fetch SDL3 MinGW
+        if: steps.sdl3-mingw-cache.outputs.cache-hit != 'true'
+        run: bash tools/windows/fetch-sdl3.sh
+
+      - name: FFmpeg Windows cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/xcloud-ps5/ffmpeg-windows
+          key: windows-app-ffmpeg-${{ hashFiles('.git/modules/deps/ffmpeg/HEAD', 'tools/build-ffmpeg.sh') }}
+
+      - name: Configure
+        run: |
+          cmake -S . -B build-win -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_TOOLCHAIN_FILE=cmake/windows.toolchain.cmake \
+            -DXCLOUD_DESKTOP_APP=ON \
+            -DCMAKE_PREFIX_PATH="$HOME/.cache/xcloud-ps5/sdl3-${{ env.SDL3_VERSION }}-mingw/x86_64-w64-mingw32"
+
+      - name: Build
+        run: ninja -C build-win psbox
+
+      - name: Self-test (Wine headless)
+        run: |
+          mkdir -p "${{ runner.temp }}/psbox-selftest" "${{ runner.temp }}/psbox-data"
+          target_dir=$(WINEDEBUG=-all winepath -w "${{ runner.temp }}/psbox-selftest")
+          WINEDEBUG=-all SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy \
+            XCLOUD_DATA_DIR="${{ runner.temp }}/psbox-data" \
+            wine build-win/psbox.exe --selftest "$target_dir"
+
+      - name: Package (portable zip and sha256)
+        run: bash tools/desktop/package-windows.sh build-win build-win/pkg
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: psbox-windows-x86_64
+          path: build-win/pkg/PSBox-*-windows-x86_64.zip
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: psbox-windows-x86_64-sha256
+          path: build-win/pkg/PSBox-*-windows-x86_64.zip.sha256
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: psbox-windows-selftest
+          path: ${{ runner.temp }}/psbox-selftest
+          if-no-files-found: ignore
+
   account-data:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
@@ -169,3 +254,56 @@ jobs:
             echo "::error::A file that must not be committed"; exit 1
           fi
           echo "clean"
+
+  android-app:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          submodules: recursive
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Install Android NDK 27.2.12479018
+        run: |
+          echo "y" | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install "ndk;27.2.12479018"
+          echo "ANDROID_NDK_HOME=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+          echo "ANDROID_NDK_ROOT=$ANDROID_SDK_ROOT/ndk/27.2.12479018" >> $GITHUB_ENV
+
+      - name: FFmpeg Android Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cache/xcloud-ps5/ffmpeg-android-arm64-v8a
+            ~/.cache/xcloud-ps5/ffmpeg-android-x86_64
+          key: android-ffmpeg-${{ hashFiles('.git/modules/deps/ffmpeg/HEAD', 'tools/build-ffmpeg.sh') }}
+
+      - name: Build Android Debug APK
+        run: |
+          cd android
+          ./gradlew :app:assembleDebug --stacktrace
+
+      - name: Verify 16 KB Page Alignment
+        run: |
+          unzip -q android/app/build/outputs/apk/debug/app-debug.apk "lib/*/*.so" -d /tmp/apk-libs
+          for so in /tmp/apk-libs/lib/*/*.so; do
+            align=$(readelf -l -W "$so" | awk '/LOAD/ {print $NF; exit}')
+            echo "Checking $so: alignment = $align"
+            if [[ "$align" != "0x4000" && "$align" != "0x10000" ]]; then
+              echo "::error::Binary $so is NOT 16 KB page-aligned (alignment: $align)"
+              exit 1
+            fi
+          done
+          echo "All shared libraries in APK are 16 KB page-aligned."
+
+      - name: Upload Android APK Artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: psbox-android
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+

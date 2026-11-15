@@ -21,6 +21,15 @@ public:
         uint64_t pts = 0;
         bool error = false;
         bool pending = false;
+        const uint8_t* uv = nullptr;
+        int uvPitchBytes = 0;
+        bool nv21 = false;
+        int visibleHeight = 0;
+        const uint8_t* u = nullptr;
+        const uint8_t* v = nullptr;
+        int strideU = 0;
+        int strideV = 0;
+        bool isYuv420p = false;
     };
 
     ~HwDecoder();

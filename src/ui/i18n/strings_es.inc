@@ -572,4 +572,6 @@ constexpr Column kSpanish = {
     "País de la tienda", // StoreCountry
     "Automático (país de inicio de sesión)", // StoreCountryAuto
     "Elige el país de los precios y las ofertas gratuitas de la tienda. El servidor de streaming no cambia.", // SettingDescStoreCountry
+    "Código de emparejamiento copiado al portapapeles", // SignInCodeCopied
+    "Haz clic o toca el código para copiar", // SignInClickToCopy
 };

@@ -11,20 +11,22 @@ namespace xc::media {
 
 void MicPipeline::process(int16_t* pcm, size_t n, bool muted, float gain, std::atomic<float>& level,
                           const AudioIn::AudioCallback& cb) {
-    float peak = 0.0f;
     if (muted) {
-        std::fill(pcm, pcm + n, 0);
-    } else {
-        for (size_t i = 0; i < n; ++i) {
-            int16_t& s = pcm[i];
-            if (std::fabs(gain - 1.0f) > 0.01f) {
-                float scaled = static_cast<float>(s) * gain;
-                scaled = std::clamp(scaled, -32768.0f, 32767.0f);
-                s = static_cast<int16_t>(scaled);
-            }
-            float a = std::abs(static_cast<float>(s)) / 32768.0f;
-            if (a > peak) peak = a;
+        level.store(0.0f, std::memory_order_relaxed);
+        accumulated_.clear();
+        return;
+    }
+
+    float peak = 0.0f;
+    for (size_t i = 0; i < n; ++i) {
+        int16_t& s = pcm[i];
+        if (std::fabs(gain - 1.0f) > 0.01f) {
+            float scaled = static_cast<float>(s) * gain;
+            scaled = std::clamp(scaled, -32768.0f, 32767.0f);
+            s = static_cast<int16_t>(scaled);
         }
+        float a = std::abs(static_cast<float>(s)) / 32768.0f;
+        if (a > peak) peak = a;
     }
 
     // Perceptual scale: speech in DualSense typically has 500..6000 amplitude

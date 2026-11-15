@@ -32,7 +32,7 @@ struct Rect {
 
 class Canvas {
 public:
-    Canvas(int w, int h) : w_(w), h_(h), px_(static_cast<size_t>(w) * h, rgba(0, 0, 0)) { resetClip(); }
+    Canvas(int w, int h, Color initialColor = rgba(0, 0, 0, 0)) : w_(w), h_(h), px_(static_cast<size_t>(w) * h, initialColor) { resetClip(); }
 
     int width() const { return w_; }
     int height() const { return h_; }
@@ -44,6 +44,9 @@ public:
     void clearClip() { resetClip(); }
 
     void clear(Color c);
+    void clearTransparent();
+    void clearRgba(Color c);
+    void clearRect(Rect r);
     // Alpha-blended, antialiased rounded corners when radius > 0.
     void fillRect(Rect r, Color c, int radius = 0);
     void strokeRect(Rect r, Color c, int thickness, int radius = 0);

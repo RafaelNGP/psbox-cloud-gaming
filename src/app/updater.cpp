@@ -28,14 +28,13 @@
 #pragma clang diagnostic pop
 #endif
 
+#include "util/fs.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cstdio>
 #include <cstring>
-#include <dirent.h>
 #include <set>
-#include <sys/stat.h>
-#include <unistd.h>
 
 namespace xc::app {
 
@@ -54,56 +53,6 @@ uint32_t le16(const std::string& s, size_t at) {
 }
 uint32_t le32(const std::string& s, size_t at) {
     return le16(s, at) | le16(s, at + 2) << 16;
-}
-
-bool isDir(const std::string& path) {
-    struct stat st {};
-    return ::stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
-}
-bool exists(const std::string& path) {
-    struct stat st {};
-    return ::stat(path.c_str(), &st) == 0;
-}
-
-// mkdir -p of the folder holding `file`.
-bool makeParents(const std::string& file) {
-    for (size_t at = file.find('/', 1); at != std::string::npos; at = file.find('/', at + 1)) {
-        std::string d = file.substr(0, at);
-        if (!isDir(d) && ::mkdir(d.c_str(), 0777) != 0 && errno != EEXIST) return false;
-    }
-    return true;
-}
-
-void removeTree(const std::string& path) {
-    if (DIR* d = ::opendir(path.c_str())) {
-        while (dirent* e = ::readdir(d)) {
-            std::string name = e->d_name;
-            if (name == "." || name == "..") continue;
-            std::string p = path + "/" + name;
-            if (isDir(p))
-                removeTree(p);
-            else
-                ::unlink(p.c_str());
-        }
-        ::closedir(d);
-        ::rmdir(path.c_str());
-    }
-}
-
-// Every file under `root`, relative to it.
-void listFiles(const std::string& root, const std::string& rel, std::vector<std::string>& out) {
-    DIR* d = ::opendir((root + (rel.empty() ? "" : "/" + rel)).c_str());
-    if (!d) return;
-    while (dirent* e = ::readdir(d)) {
-        std::string name = e->d_name;
-        if (name == "." || name == "..") continue;
-        std::string r = rel.empty() ? name : rel + "/" + name;
-        if (isDir(root + "/" + r))
-            listFiles(root, r, out);
-        else
-            out.push_back(r);
-    }
-    ::closedir(d);
 }
 
 bool download(const std::string& url, long size, std::string& out, const std::function<void(double)>& progress,
@@ -141,14 +90,15 @@ bool download(const std::string& url, long size, std::string& out, const std::fu
 // when there were some; `complete` false when one couldn't go back (then
 // update.old and the journal must stay, for the next start to try again).
 bool rollBack(const std::string& dir, bool& complete) {
-    std::vector<std::string> old;
-    listFiles(dir + "/update.old", "", old);
+    std::vector<std::string> old = fs::listTree(dir + "/update.old");
     complete = true;
-    for (const auto& rel : old)
-        if (!makeParents(dir + "/" + rel) || ::rename((dir + "/update.old/" + rel).c_str(), (dir + "/" + rel).c_str()) != 0) {
-            XC_LOGE("update: could not put back %s (errno %d)", rel.c_str(), errno);
+    for (const auto& rel : old) {
+        std::string target = dir + "/" + rel;
+        if (!fs::makeDirsForFile(target) || !fs::renameReplace(dir + "/update.old/" + rel, target)) {
+            XC_LOGE("update: could not put back %s", rel.c_str());
             complete = false;
         }
+    }
     return !old.empty();
 }
 
@@ -307,7 +257,7 @@ bool installRelease(const Release& release, const std::string& dir, const std::s
 
     report(UpdateStep::Installing, -1);
     recoverUpdate(dir);  // leftovers of an earlier try
-    if (exists(dir + "/update.journal")) {  // its old files couldn't all go back: not over them
+    if (fs::exists(dir + "/update.journal")) {  // its old files couldn't all go back: not over them
         err = "an earlier update could not be undone";
         return false;
     }
@@ -316,9 +266,9 @@ bool installRelease(const Release& release, const std::string& dir, const std::s
         std::string p = staged + "/" + f.path;
         // As the console's FTP servers leave a package's files: without the
         // execute bit, eboot.bin doesn't start (the restart then fails).
-        if (!makeParents(p) || !platform::writeFileAtomic(p, f.data) || ::chmod(p.c_str(), 0777) != 0) {
+        if (!fs::makeDirsForFile(p) || !platform::writeFileAtomic(p, f.data) || !fs::makeWorldWritable(p)) {
             err = "could not write " + p;
-            removeTree(staged);
+            fs::removeTree(staged);
             return false;
         }
     }
@@ -327,26 +277,26 @@ bool installRelease(const Release& release, const std::string& dir, const std::s
                      [](const ZipEntry& a, const ZipEntry& b) { return a.path != "eboot.bin" && b.path == "eboot.bin"; });
     if (!platform::writeFileAtomic(dir + "/update.journal", "swapping\n")) {
         err = "could not write the update journal";
-        removeTree(staged);
+        fs::removeTree(staged);
         return false;
     }
     for (const auto& f : files) {
         std::string target = dir + "/" + f.path;
-        bool moved = !exists(target) || (makeParents(old + "/" + f.path) &&
-                                         ::rename(target.c_str(), (old + "/" + f.path).c_str()) == 0);
-        if (!moved || !makeParents(target) || ::rename((staged + "/" + f.path).c_str(), target.c_str()) != 0) {
-            err = "could not put " + f.path + " in place (errno " + std::to_string(errno) + ")";
+        std::string backup = old + "/" + f.path;
+        bool moved = !fs::exists(target) || (fs::makeDirsForFile(backup) && fs::renameReplace(target, backup));
+        if (!moved || !fs::makeDirsForFile(target) || !fs::renameReplace(staged + "/" + f.path, target)) {
+            err = "could not put " + f.path + " in place";
             bool complete;
             rollBack(dir, complete);
             if (!complete) return false;  // the journal stays: the next start tries again
-            ::unlink((dir + "/update.journal").c_str());
-            removeTree(staged);
-            removeTree(old);
+            fs::removeFile(dir + "/update.journal");
+            fs::removeTree(staged);
+            fs::removeTree(old);
             return false;
         }
     }
-    ::unlink((dir + "/update.journal").c_str());
-    removeTree(staged);
+    fs::removeFile(dir + "/update.journal");
+    fs::removeTree(staged);
     XC_LOGI("update: %s installed", release.tag.c_str());
     return true;
 }
@@ -369,7 +319,7 @@ bool importStoreLeftovers(const std::string& dir, const std::string& previousDir
 
 bool recoverUpdate(const std::string& dir) {
     bool rolledBack = false;
-    if (exists(dir + "/update.journal")) {
+    if (fs::exists(dir + "/update.journal")) {
         XC_LOGW("update: the last one was cut short; the old files go back");
         bool complete;
         rolledBack = rollBack(dir, complete);
@@ -378,10 +328,10 @@ bool recoverUpdate(const std::string& dir) {
             XC_LOGE("update: the old files could not all go back; trying again at the next start");
             return rolledBack;
         }
-        ::unlink((dir + "/update.journal").c_str());
+        fs::removeFile(dir + "/update.journal");
     }
-    removeTree(dir + "/update.new");
-    removeTree(dir + "/update.old");
+    fs::removeTree(dir + "/update.new");
+    fs::removeTree(dir + "/update.old");
     return rolledBack;
 }
 

@@ -2,6 +2,9 @@
 # Copyright (C) 2026 RafaelNGP
 cmake_minimum_required(VERSION 3.20)
 project(xcloud_ps5 VERSION 1.7.2 LANGUAGES C CXX)
+if(WIN32)
+    enable_language(RC)
+endif()
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -12,6 +15,11 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 option(XCLOUD_PS5 "Build for the PS5 (payload SDK)" OFF)
 option(XC_TARGET_PS4 "Build for the PS4 (OpenOrbis)" OFF)
 include(cmake/platform.cmake)
+
+if(ANDROID)
+    add_link_options("-Wl,-z,max-page-size=16384")
+endif()
+
 
 # Without a build type clang compiles at -O0, and the PS4's CPU cannot keep up: v1.5.5
 # for PS4 shipped that way and drew 2-7 fps. The PS4 build is optimised by default.
@@ -33,6 +41,8 @@ add_library(xcloud_core STATIC
     ${XC_BUILTIN_CA}
     src/util/json.cpp
     src/util/log.cpp
+    src/util/fs.cpp
+    src/net/socket.cpp
     src/net/http.cpp
     src/auth/msa.cpp
     src/auth/xbox_live.cpp
@@ -55,19 +65,29 @@ add_library(xcloud_core STATIC
     src/input/sdl_mapping.cpp
     src/xcloud/social.cpp
     src/xcloud/achievements.cpp
-    src/trophy/trophy_rules.cpp
-    src/trophy/trophy_registry.cpp
-    src/trophy/trophy_builder.cpp
-    src/trophy/trophy_sync.cpp
-    src/trophy/trophy_db.cpp
-    extern/sqlite3/sqlite3.c
     src/platform/toasts.cpp
     src/input/gyro.cpp
 )
-target_include_directories(xcloud_core PUBLIC src extern/stb extern/sqlite3)
-set_source_files_properties(extern/sqlite3/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_THREADSAFE=1;SQLITE_OMIT_LOAD_EXTENSION=1;SQLITE_DEFAULT_MEMSTATUS=0;SQLITE_OS_UNIX=1;SQLITE_TEMP_STORE=3")
-if(NOT MSVC)
-    set_source_files_properties(extern/sqlite3/sqlite3.c PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter -Wno-sign-compare")
+target_include_directories(xcloud_core PUBLIC src extern/stb)
+
+if(XCLOUD_PS5 OR XC_TARGET_PS4)
+    target_sources(xcloud_core PRIVATE
+        src/trophy/trophy_rules.cpp
+        src/trophy/trophy_registry.cpp
+        src/trophy/trophy_builder.cpp
+        src/trophy/trophy_sync.cpp
+        src/trophy/trophy_db.cpp
+        extern/sqlite3/sqlite3.c
+    )
+    target_include_directories(xcloud_core PUBLIC extern/sqlite3)
+    set_source_files_properties(extern/sqlite3/sqlite3.c PROPERTIES COMPILE_DEFINITIONS "SQLITE_THREADSAFE=1;SQLITE_OMIT_LOAD_EXTENSION=1;SQLITE_DEFAULT_MEMSTATUS=0;SQLITE_OS_UNIX=1;SQLITE_TEMP_STORE=3")
+    if(NOT MSVC)
+        set_source_files_properties(extern/sqlite3/sqlite3.c PROPERTIES COMPILE_FLAGS "-Wno-unused-parameter -Wno-sign-compare")
+    endif()
+else()
+    target_sources(xcloud_core PRIVATE
+        src/trophy/trophy_off.cpp
+    )
 endif()
 if(NOT MSVC)
     target_compile_options(xcloud_core PUBLIC -g1 -fno-omit-frame-pointer PRIVATE -Wall -Wextra -Wno-unused-parameter)
@@ -135,9 +155,16 @@ foreach(icon guitar)
     list(APPEND XC_BUILTIN_ICONS "${out}")
 endforeach()
 
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
+    set(XC_CRASH_GUARD_SRC src/app/crash_guard_windows.cpp)
+else()
+    set(XC_CRASH_GUARD_SRC src/app/crash_guard_posix.cpp)
+endif()
+
 add_library(xcloud_ui STATIC
     ${XC_BUILTIN_FONTS}
     ${XC_BUILTIN_ICONS}
+    ${XC_CRASH_GUARD_SRC}
     src/ui/svg_icon.cpp
     src/ui/strings.cpp
     src/ui/canvas.cpp
@@ -151,6 +178,7 @@ add_library(xcloud_ui STATIC
     src/ui/settings_choice.cpp
     src/ui/stream_menu.cpp
     src/ui/toast_view.cpp
+    src/ui/touch_pad_overlay.cpp
     src/ui/pad_icons.cpp
     src/ui/pad_glyphs.cpp
     src/ui/accent_color.cpp
@@ -166,7 +194,6 @@ add_library(xcloud_ui STATIC
     src/ui/components/trigger_tester_dialog.cpp
     src/app/update_check.cpp
     src/app/report.cpp
-    src/app/crash_guard.cpp
     src/app/updater.cpp
     src/app/auto_deband.cpp
     src/app/gyro_calibration.cpp
@@ -289,48 +316,52 @@ elseif(XC_TARGET_PS4)
 else()
     target_link_libraries(xcloud_core PUBLIC Threads::Threads)
     if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
-        target_link_libraries(xcloud_core PUBLIC ws2_32 crypt32 iphlpapi winmm secur32)
+        target_link_libraries(xcloud_core PUBLIC ws2_32 crypt32 iphlpapi winmm secur32 bcrypt avrt wlanapi)
         target_sources(xcloud_core PRIVATE src/platform/windows/platform_windows.cpp)
+    elseif(ANDROID)
+        target_sources(xcloud_core PRIVATE src/platform/posix_common.cpp src/platform/android/platform_android.cpp)
+        target_link_libraries(xcloud_core PUBLIC log android mediandk)
     else()
         target_sources(xcloud_core PRIVATE src/platform/posix_common.cpp src/platform/linux/platform_linux.cpp)
     endif()
 
-    # No screen, pads, USB keyboard or hardware decoder: what a desktop
-    # build links in place of the PS5's backends (docs/multiplatform.md).
-    add_library(xcloud_backends_null OBJECT
-        src/display/display_null.cpp
-        src/input/controller_null.cpp
-        src/input/kbm_null.cpp
-        src/media/hw_decoder_null.cpp
-        src/media/audio_out_null.cpp
-        src/media/audio_in_null.cpp
-        src/trophy/trophy_backend_null.cpp
-    )
-    target_link_libraries(xcloud_backends_null PUBLIC xcloud_core)
-    if(NOT MSVC)
-        target_compile_options(xcloud_backends_null PRIVATE -Wall -Wextra -Wno-unused-parameter)
+    if(NOT ANDROID)
+        # No screen, pads, USB keyboard or hardware decoder: what a desktop
+        # build links in place of the PS5's backends (docs/multiplatform.md).
+        add_library(xcloud_backends_null OBJECT
+            src/display/display_null.cpp
+            src/input/controller_null.cpp
+            src/input/kbm_null.cpp
+            src/media/hw_decoder_null.cpp
+            src/media/audio_out_null.cpp
+            src/media/audio_in_null.cpp
+        )
+        target_link_libraries(xcloud_backends_null PUBLIC xcloud_core)
+        if(NOT MSVC)
+            target_compile_options(xcloud_backends_null PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        endif()
+
+        # The app with the null backends and no window: keeps the shared app
+        # building and starting on the desktop (no SDL; the desktop app is next).
+        add_executable(psbox-headless
+            $<TARGET_OBJECTS:xcloud_appcore>
+            src/app/headless_main.cpp
+            src/app/shell_null.cpp
+        )
+        target_link_libraries(psbox-headless PRIVATE xcloud_backends_null xcloud_stream xcloud_media xcloud_ui xc_ffmpeg
+                                                     datachannel-static)
+        if(NOT MSVC)
+            target_compile_options(psbox-headless PRIVATE -Wall -Wextra -Wno-unused-parameter)
+        endif()
+
+        add_executable(xcloud-cli src/app/cli_main.cpp)
+        target_link_libraries(xcloud-cli PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg)
+
+        enable_testing()
+        add_executable(xcloud-tests tests/test_main.cpp)
+        target_link_libraries(xcloud-tests PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg datachannel-static)
+        add_test(NAME unit COMMAND xcloud-tests)
     endif()
-
-    # The app with the null backends and no window: keeps the shared app
-    # building and starting on the desktop (no SDL; the desktop app is next).
-    add_executable(psbox-headless
-        $<TARGET_OBJECTS:xcloud_appcore>
-        src/app/headless_main.cpp
-        src/app/shell_null.cpp
-    )
-    target_link_libraries(psbox-headless PRIVATE xcloud_backends_null xcloud_stream xcloud_media xcloud_ui xc_ffmpeg
-                                                 datachannel-static)
-    if(NOT MSVC)
-        target_compile_options(psbox-headless PRIVATE -Wall -Wextra -Wno-unused-parameter)
-    endif()
-
-    add_executable(xcloud-cli src/app/cli_main.cpp)
-    target_link_libraries(xcloud-cli PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg)
-
-    enable_testing()
-    add_executable(xcloud-tests tests/test_main.cpp)
-    target_link_libraries(xcloud-tests PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg datachannel-static)
-    add_test(NAME unit COMMAND xcloud-tests)
 endif()
 
 # --- The desktop app on SDL3 (psbox) ----------------------------------------
@@ -354,13 +385,17 @@ if(XC_DESKTOP_APP)
 
     # The window, its Vulkan / SDL_Renderer display and events, the self-test;
     # no hardware decoder yet (FFmpeg decodes).
+    set(XC_HW_DECODER_DESKTOP_SRC src/media/hw_decoder_null.cpp)
+    if(ANDROID)
+        set(XC_HW_DECODER_DESKTOP_SRC src/media/hw_decoder_android.cpp)
+    endif()
+
     add_library(xcloud_backends_desktop OBJECT
         src/display/display_sdl.cpp
         src/display/gpu.cpp
         src/app/shell_desktop.cpp
         src/app/desktop_selftest.cpp
-        src/media/hw_decoder_null.cpp
-        src/trophy/trophy_backend_null.cpp
+        ${XC_HW_DECODER_DESKTOP_SRC}
     )
     target_link_libraries(xcloud_backends_desktop PUBLIC xcloud_core xcloud_media xcloud_ui SDL3::SDL3)
     if(NOT MSVC)
@@ -368,23 +403,61 @@ if(XC_DESKTOP_APP)
         target_compile_options(xcloud_backends_desktop PRIVATE -Wall -Wextra -Wno-unused-parameter)
     endif()
 
-    # WIN32: a GUI app on Windows (SDL_main.h gives it its entry point).
-    add_executable(psbox WIN32
-        $<TARGET_OBJECTS:xcloud_appcore>
-        src/app/desktop_main.cpp
-    )
-    target_link_libraries(psbox PRIVATE xcloud_backends_desktop xcloud_backends_sdl_io xcloud_stream xcloud_media
-                                        xcloud_ui xc_ffmpeg datachannel-static SDL3::SDL3)
+    if(ANDROID)
+        add_library(psbox SHARED
+            $<TARGET_OBJECTS:xcloud_appcore>
+            src/app/desktop_main.cpp
+        )
+        set_target_properties(psbox PROPERTIES OUTPUT_NAME "main")
+        target_link_libraries(psbox PRIVATE
+            xcloud_backends_desktop
+            xcloud_backends_sdl_io
+            xcloud_stream
+            xcloud_media
+            xcloud_ui
+            xc_ffmpeg
+            datachannel-static
+            SDL3::SDL3
+            log
+            android
+            mediandk
+            vulkan
+        )
+        target_link_options(psbox PRIVATE "-Wl,-Bsymbolic")
+    else()
+        # WIN32: a GUI app on Windows (SDL_main.h gives it its entry point).
+        add_executable(psbox WIN32
+            $<TARGET_OBJECTS:xcloud_appcore>
+            src/app/desktop_main.cpp
+        )
+        target_link_libraries(psbox PRIVATE xcloud_backends_desktop xcloud_backends_sdl_io xcloud_stream xcloud_media
+                                            xcloud_ui xc_ffmpeg datachannel-static SDL3::SDL3)
+    endif()
     if(NOT MSVC)
         target_compile_options(psbox PRIVATE -Wall -Wextra -Wno-unused-parameter)
     endif()
+    if(WIN32)
+        target_sources(psbox PRIVATE windows/psbox.rc)
+        target_include_directories(psbox PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/windows")
+        if(TARGET SDL3::SDL3-shared)
+            add_custom_command(TARGET psbox POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "$<TARGET_FILE:SDL3::SDL3-shared>"
+                    "$<TARGET_FILE_DIR:psbox>/SDL3.dll"
+                COMMENT "Copying SDL3.dll beside psbox.exe")
+        endif()
+    endif()
     # The fonts and certificates beside the executable (platform::assetDir()).
-    add_custom_command(TARGET psbox POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:psbox>/assets"
-        COMMENT "Copying assets/ beside psbox")
+    if(NOT ANDROID)
+        add_custom_command(TARGET psbox POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_CURRENT_SOURCE_DIR}/assets" "$<TARGET_FILE_DIR:psbox>/assets"
+            COMMENT "Copying assets/ beside psbox")
+    endif()
 
-    # install() rules: the Linux AppImage (tools/desktop/package-appimage.sh).
+    # install() rules: the Linux AppImage or Windows portable package.
     if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         include(cmake/desktop_package.cmake)
+    elseif(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
+        include(cmake/windows_package.cmake)
     endif()
 endif()

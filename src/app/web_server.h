@@ -15,6 +15,8 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
+#include "net/socket.h"
 
 namespace xc::app {
 
@@ -99,15 +101,15 @@ public:
 
 private:
     void threadLoop();
-    void handleClient(int clientFd);
-    void handleWebSocket(int wsFd);
+    void handleClient(net::Socket clientFd);
+    void handleWebSocket(net::Socket wsFd);
 
     std::atomic<bool> running_{false};
     uint16_t port_ = 8080;
-    int listenFd_ = -1;
+    net::Socket listenFd_{};
     platform::Thread thread_{};
     std::mutex wsMutex_;
-    std::vector<int> wsClients_;
+    std::vector<net::Socket> wsClients_;
 };
 
 extern std::unique_ptr<WebServer> g_webServer;

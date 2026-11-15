@@ -80,9 +80,12 @@ Caps caps() {
 void setFullscreen(bool) {}
 bool fullscreenSwitched(bool&) { return false; }
 bool openUrl(const std::string&) { return false; }
+bool setClipboardText(const std::string&) { return false; }
 bool setTextInput(bool) { return false; }
 std::string takeTextInput() { return {}; }
 void setMouseHandler(std::function<void(const MouseEvent&)>) {}
+void setTouchHandler(std::function<void(const TouchEvent&)>) {}
+void setTextInputArea(int, int, int, int) {}
 
 bool isInstalledCopy(const std::string& dir) {
     struct stat here {}, running {};

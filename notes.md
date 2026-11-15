@@ -61,6 +61,8 @@ Guitars and drums in Fortnite Festival, fewer and shorter freezes on Wi-Fi, a cl
 - **PlayStation 5**: Update in the app (Settings → Updates), through ProsperoStore, or download `PSBoxCloudGaming[PS5]-v1.7.2.zip` and copy the `PPSA99810` folder to `/data/homebrew/`.
 - **PlayStation 4**: Install `PSBoxCloudGaming[PS4]-v1.7.2.pkg` via GoldHEN Package Installer.
 - **Linux / Steam Deck**: Download `PSBoxCloudGaming[Linux]-v1.7.2.AppImage`, make it executable (`chmod +x`), and launch in Desktop Mode or add as a non-Steam game.
+- **Windows (Preview / Manual Testing)**: Standalone package `PSBox-v1.7.2-dev-windows-x86_64.zip` is available for testers on the local NAS share (`wolfpad-NAS/Dev`). Extract and run `psbox.exe`. Official GitHub release packages will follow after hardware validation.
+- **Android (Preview / Manual Testing)**: Standalone package `PSBoxCloudGaming[Android]-v1.7.2-dev.apk` is available for testers on the local NAS share (`wolfpad-NAS/Dev`). Sideload onto Android phone, tablet, TV, or handheld via `adb install` or file transfer. Official GitHub release packages will follow after hardware validation.
 
 > Coming from v1.6.9 or older: each PS5 profile signs in once; the existing sign-in goes to the first profile that opens the app.
 
@@ -127,5 +129,7 @@ Guitarras e baterias no Fortnite Festival, travadas menores e menos frequentes n
 - **PlayStation 5**: atualize pelo app (Configurações → Atualizações), pelo ProsperoStore, ou baixe `PSBoxCloudGaming[PS5]-v1.7.2.zip` e copie a pasta `PPSA99810` para `/data/homebrew/`.
 - **PlayStation 4**: instale `PSBoxCloudGaming[PS4]-v1.7.2.pkg` pelo GoldHEN Package Installer.
 - **Linux / Steam Deck**: baixe `PSBoxCloudGaming[Linux]-v1.7.2.AppImage`, torne executável (`chmod +x`) e abra no Modo Desktop ou adicione como jogo não-Steam.
+- **Windows (Prévia / Teste Manual)**: o pacote `PSBox-v1.7.2-dev-windows-x86_64.zip` está disponível para testes no compartilhamento local do NAS (`wolfpad-NAS/Dev`). Descompacte e execute `psbox.exe`. Os pacotes oficiais do GitHub serão anexados após validação em hardware.
+- **Android (Prévia / Teste Manual)**: o pacote `PSBoxCloudGaming[Android]-v1.7.2-dev.apk` está disponível para testes no compartilhamento local do NAS (`wolfpad-NAS/Dev`). Instale por sideload em celular, tablet, TV ou portátil Android via `adb install` ou transferência de arquivo. Os pacotes oficiais do GitHub serão anexados após validação em hardware.
 
 > Vindo da v1.6.9 ou anterior: cada perfil do PS5 faz login uma vez; o login que já existia fica com o primeiro perfil que abrir o app.

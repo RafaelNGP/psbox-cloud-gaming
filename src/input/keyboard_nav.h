@@ -26,6 +26,9 @@ namespace xc::input {
 // The key that opens the app's menu during a game (F12).
 constexpr uint8_t kVkAppMenu = 0x7B;
 
+// Android system Back button / gesture (VK_BROWSER_BACK).
+constexpr uint8_t kVkAndroidBack = 0xA6;
+
 // The keyboard and mouse as a controller of their own (another player, so
 // a second controller isn't needed): the keys as `map` says (defaultKeyMap()
 // unless changed in Settings), the mouse the right stick, a wheel notch a

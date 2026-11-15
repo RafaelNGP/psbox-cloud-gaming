@@ -95,9 +95,12 @@ void setFullscreen(bool) {}
 bool fullscreenSwitched(bool&) { return false; }
 // No browser to send a link to: the screens show a QR code instead.
 bool openUrl(const std::string&) { return false; }
+bool setClipboardText(const std::string&) { return false; }
 bool setTextInput(bool) { return false; }  // the USB keyboard keeps moving through the screens
 std::string takeTextInput() { return {}; }
 void setMouseHandler(std::function<void(const MouseEvent&)>) {}
+void setTouchHandler(std::function<void(const TouchEvent&)>) {}
+void setTextInputArea(int, int, int, int) {}
 
 bool isInstalledCopy(const std::string& dir) {
     // /app0 is the folder the system started the app from.

@@ -24,6 +24,10 @@
 #include <string_view>
 #include <vector>
 
+namespace xc::app::shell {
+struct TouchEvent;
+}
+
 namespace xc::ui {
 
 struct FriendPlaying {
@@ -184,6 +188,7 @@ struct UiCaps {
     // fullscreen). The one row only a desktop has, so false by default: the
     // PS5's Settings stay as they are.
     bool desktopWindow = false;
+    bool trophies = true;          // PlayStation trophy sync and management (PS5/PS4 consoles only)
     bool operator==(const UiCaps&) const = default;
 };
 
@@ -259,7 +264,8 @@ enum class Action {
     SyncTrophies,   // synchronize Xbox achievements to PlayStation trophies
     RemoveTrophies, // remove local PSBox trophy packages
     TestQueueAlert, // play test chime and vibration for queue-ready alert
-    ResetSettings   // restore settings to default
+    ResetSettings,  // restore settings to default
+    CopyClipboard   // copy pairing code to system clipboard
 };
 
 // How "Your games" is sorted (R3).
@@ -284,6 +290,7 @@ struct UiEvent {
     LibrarySort librarySort = LibrarySort::Recent;
     std::string reportWhat;  // Report: the error on screen (empty from Settings)
     std::string url;         // OpenUrl
+    std::string clipboardText; // CopyClipboard
 };
 
 // "SOUTHCENTRALUS" -> "South Central US".
@@ -510,6 +517,7 @@ public:
     UiEvent onMouseMove(float x, float y);
     UiEvent onMouseDown(float x, float y, int button);
     UiEvent onMouseWheel(float dx, float dy);
+    UiEvent onTouch(const app::shell::TouchEvent& ev);
     float mouseCursorX() const { return mouseCursorX_; }
     float mouseCursorY() const { return mouseCursorY_; }
     bool mouseCursorVisible() const { return mouseCursorVisible_; }
@@ -529,6 +537,7 @@ public:
     void render(Canvas& c, uint64_t nowMs);
 
 private:
+    UiEvent handlePointerDown(float x, float y, int button, bool showCursor);
     struct Anim {
         float value = 0, target = 0;
         bool step(float dt);  // true while moving
@@ -850,5 +859,21 @@ private:
     bool mouseCursorVisible_ = false;
     uint64_t mouseCursorVisibleUntil_ = 0;
     void drawMouseCursor(Canvas& c, float cursorX, float cursorY);
+
+    struct TouchTracker {
+        bool active = false;
+        uint64_t fingerId = 0;
+        float startX = 0.0f, startY = 0.0f;
+        float lastX = 0.0f, lastY = 0.0f;
+        uint64_t startTimeMs = 0;
+        uint64_t lastTimeMs = 0;
+        bool isDragging = false;
+        float velocityY = 0.0f;
+        float velocityX = 0.0f;
+    };
+    TouchTracker touchTracker_;
+
+    UiEvent handleLocked(const NavInput& in);
+    mutable std::vector<std::pair<int, Rect>> hintRects_;
 };
 }  // namespace xc::ui

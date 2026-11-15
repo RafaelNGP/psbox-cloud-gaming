@@ -572,4 +572,6 @@ constexpr Column kFrench = {
     "Pays de la boutique", // StoreCountry
     "Automatique (pays de connexion)", // StoreCountryAuto
     "Choisit le pays des prix et des offres gratuites de la boutique. Le serveur de streaming reste inchangé.", // SettingDescStoreCountry
+    "Code de jumelage copié dans le presse-papiers", // SignInCodeCopied
+    "Cliquez ou appuyez sur le code pour copier", // SignInClickToCopy
 };

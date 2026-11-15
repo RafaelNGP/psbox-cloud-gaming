@@ -140,4 +140,22 @@ bool gyroRecordingTake(std::vector<GyroSample>& out);
 // DualSense: suppresses vibration and trigger effect bleed while embedded mic is active
 void setEmbeddedMicActive(bool active, int pad = 0);
 
+enum class HapticType {
+    Click = 0,
+    Tick = 1,
+    HeavyClick = 2,
+};
+
+#if defined(__ANDROID__)
+void androidTriggerHaptic(int type);
+inline void triggerHaptic(HapticType type = HapticType::Click) {
+    androidTriggerHaptic(static_cast<int>(type));
+}
+#else
+inline void androidTriggerHaptic(int type) { (void)type; }
+inline void triggerHaptic(HapticType type = HapticType::Click) {
+    (void)type;
+}
+#endif
+
 } // namespace xc::input

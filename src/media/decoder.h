@@ -31,6 +31,10 @@ struct Picture {
     int width = 0, height = 0;
     // The `tag` the access unit it came from was decoded with.
     uint32_t tag = 0;
+    const uint8_t* uv = nullptr;
+    int uvPitchBytes = 0;
+    bool nv21 = false;
+    int visibleHeight = 0;
 };
 
 // Splits an Annex-B H.264 stream into access units (offset, length): at AUD

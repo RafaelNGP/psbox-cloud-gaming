@@ -414,7 +414,10 @@ TilePool& tilePool() {
 }
 
 void drawRgba(const uint32_t* pixels) {
-    if (gpu::ready()) return gpu::drawRgba(pixels);
+    if (gpu::ready()) {
+        gpu::drawRgba(pixels);
+        return;
+    }
     if (!g_mappedMemory) return;
     acquireBuffer();
     uint8_t* base = static_cast<uint8_t*>(g_mappedMemory) + (g_currentBuffer * kFrameBytes);
@@ -438,8 +441,8 @@ void waitVideoSlot(const uint8_t* p) {
 }
 
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
-              int width, int height, bool wait) {
-    if (gpu::ready()) return gpu::drawNv12(y, uv, strideY, strideUV, width, height, wait);
+              int width, int height, bool wait, bool isNv21) {
+    if (gpu::ready()) return gpu::drawNv12(y, uv, strideY, strideUV, width, height, wait, isNv21);
     if (!g_mappedMemory || width <= 0 || height <= 0) return false;
     int cw = (width + 1) / 2, ch = (height + 1) / 2;
     std::vector<uint8_t> u(static_cast<size_t>(cw) * ch);

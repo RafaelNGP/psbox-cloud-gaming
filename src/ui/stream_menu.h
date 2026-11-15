@@ -58,7 +58,8 @@ enum class MenuAction {
     None, Close, Leave, Resolution, Stats, Sharpness, Deband, Upscaler, XboxButton,
     ProfileToggle, Triggers, Deadzone, ConfirmButton, MicToggle, Gyro, GyroCalibrate, PadSpeakerVolume,
     TouchpadShortcuts, Player, AudioHaptics, ReloadStream, GuitarStrum, GuitarTilt, GuitarBinding,
-    VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle
+    VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle,
+    TouchOverlayToggle, TouchInvertSticksToggle, TouchLayoutStudio
 };
 
 enum class MenuTab {
@@ -93,6 +94,7 @@ public:
     void close() { open_ = false; statsCustomizing_ = false; touchpadCustomizing_ = false; gyroDialog_.close(); stickDialog_.close(); triggerDialog_.close(); }
     bool isOpen() const { return open_; }
     MenuAction handle(const NavInput& in);
+    bool onTouch(float screenX, float screenY, NavInput& outNav);
 
     MenuTab tab() const { return activeTab_; }
     void setTab(MenuTab t) { activeTab_ = t; selectFirstItem(); }
@@ -151,6 +153,10 @@ public:
     static std::string formatBitrateLabel(int mbps);
     bool highRefresh() const { return highRefresh_; }
     void setHighRefresh(bool h) { highRefresh_ = h; }
+    bool touchOverlayEnabled() const { return touchOverlayEnabled_; }
+    void setTouchOverlayEnabled(bool e) { touchOverlayEnabled_ = e; }
+    bool touchInvertSticks() const { return touchInvertSticks_; }
+    void setTouchInvertSticks(bool inv) { touchInvertSticks_ = inv; }
 
     // Gyro aiming: mode (input::GyroMode) and intensity 1..input::kGyroLevels.
     int gyroMode() const { return gyroMode_; }
@@ -262,6 +268,10 @@ public:
     enum Item {
         // Tab General
         XboxButton = 0,
+        TouchOverlayItem,
+        TouchInvertSticksItem,
+        TouchLayoutStudioItem,
+        MicMuteItem,
         Stats,
         Upscaler,
         Sharpness,
@@ -272,7 +282,6 @@ public:
         BitrateLimiterItem,
         VrrItem,
         ReloadStreamItem,
-        Leave,
 
         // Tab Controls
         PlayerItem,
@@ -294,15 +303,17 @@ public:
         AudioHapticsItem,
         PadSpeakerVolumeItem,
 
+        Leave,
+
         ItemCount,
         Profile = ItemCount
     };
 
     const char* itemDescription(int item) const;
-
-private:
     bool itemInTab(int item, MenuTab tab) const;
     bool itemShown(int item) const;
+
+private:
     void selectFirstItem();
 
     const Fonts& fonts_;
@@ -347,6 +358,8 @@ private:
     bool micMuted_ = false;
     float micLevel_ = 0.0f;
     int padSpeakerVolume_ = 100;
+    bool touchOverlayEnabled_ = true;
+    bool touchInvertSticks_ = false;
     PadSlots pads_{};
     int usbOwnerPlayer_ = -1;
     bool usbOwnerGuitar_ = false, guitarStrum_ = false, guitarTilt_ = true;

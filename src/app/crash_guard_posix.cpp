@@ -12,33 +12,7 @@
 #include <exception>
 #include <fcntl.h>
 #include <thread>
-#include <ucontext.h>
 #include <unistd.h>
-
-#if defined(XCLOUD_PS5)
-#include <ps5platform/context.h>
-extern "C" {
-extern const char __text_start[];
-extern const char __text_end[];
-struct SceModuleInfoForUnwind {
-    size_t st_size;
-    char name[256];
-    uintptr_t eh_frame_hdr_addr;
-    uintptr_t eh_frame_addr;
-    size_t eh_frame_size;
-    uintptr_t seg0_addr;
-    size_t seg0_size;
-};
-int sceKernelGetModuleInfoForUnwind(uintptr_t addr, int flags, SceModuleInfoForUnwind* info);
-}
-#elif defined(XC_TARGET_PS4) || defined(__ORBIS__)
-// PS4 kernel does not supply auxv to musl libc; dl_iterate_phdr is not supported.
-extern "C" {
-extern const char __text_start[] __attribute__((weak));
-}
-#else
-#include <link.h>
-#endif
 
 namespace xc::app::crash {
 
@@ -51,27 +25,7 @@ uintptr_t g_ebootBase = 0;
 uintptr_t g_ebootEnd = 0;
 
 void initBase() {
-#if defined(XCLOUD_PS5)
-    g_ebootBase = reinterpret_cast<uintptr_t>(__text_start);
-    g_ebootEnd = reinterpret_cast<uintptr_t>(__text_end);
-#elif defined(XC_TARGET_PS4) || defined(__ORBIS__)
-    g_ebootBase = reinterpret_cast<uintptr_t>(__text_start);
-    g_ebootEnd = g_ebootBase + 0x20000000;
-#else
-    dl_iterate_phdr(
-        [](struct dl_phdr_info* info, size_t, void*) -> int {
-            g_ebootBase = static_cast<uintptr_t>(info->dlpi_addr);
-            uintptr_t end = g_ebootBase;
-            for (int i = 0; i < info->dlpi_phnum; ++i) {
-                if (info->dlpi_phdr[i].p_type != PT_LOAD) continue;
-                uintptr_t segEnd = g_ebootBase + info->dlpi_phdr[i].p_vaddr + info->dlpi_phdr[i].p_memsz;
-                if (segEnd > end) end = segEnd;
-            }
-            g_ebootEnd = end;
-            return 1;  // first module is the main executable
-        },
-        nullptr);
-#endif
+    platform::getCodeBounds(g_ebootBase, g_ebootEnd);
 }
 
 const char* signalName(int sig) {
@@ -117,14 +71,6 @@ void appendHex(char* buf, size_t cap, size_t& len, uintptr_t val) {
     buf[len] = 0;
 }
 
-const char* baseName(const char* path) {
-    if (!path) return "";
-    const char* last = path;
-    for (const char* p = path; *p; ++p)
-        if (*p == '/') last = p + 1;
-    return last;
-}
-
 void appendCodeAddr(char* buf, size_t cap, size_t& len, uintptr_t addr) {
     if (addr != 0 && g_ebootEnd > g_ebootBase && addr >= g_ebootBase && addr < g_ebootEnd) {
         appendStr(buf, cap, len, "eboot+");
@@ -132,56 +78,14 @@ void appendCodeAddr(char* buf, size_t cap, size_t& len, uintptr_t addr) {
         return;
     }
     if (addr != 0) {
-#if defined(XCLOUD_PS5)
-        SceModuleInfoForUnwind mod{};
-        mod.st_size = sizeof(mod);
-        if (sceKernelGetModuleInfoForUnwind(addr, 1, &mod) == 0 && mod.name[0] && addr >= mod.seg0_addr) {
-            const char* name = baseName(mod.name);
-            if (std::strcmp(name, "eboot.bin") == 0 || std::strcmp(name, "eboot.elf") == 0) name = "eboot";
-            appendStr(buf, cap, len, name);
+        char modName[128];
+        uintptr_t modBase = 0;
+        if (platform::findModuleByAddr(addr, modName, sizeof(modName), modBase)) {
+            appendStr(buf, cap, len, modName);
             appendStr(buf, cap, len, "+");
-            appendHex(buf, cap, len, addr - mod.seg0_addr);
+            appendHex(buf, cap, len, addr - modBase);
             return;
         }
-#elif defined(XC_TARGET_PS4) || defined(__ORBIS__)
-        if (g_ebootBase != 0 && addr >= g_ebootBase && addr < g_ebootEnd) {
-            appendStr(buf, cap, len, "eboot+");
-            appendHex(buf, cap, len, addr - g_ebootBase);
-            return;
-        }
-#else
-        struct Lookup {
-            uintptr_t addr;
-            const char* name;
-            uintptr_t base;
-            bool found;
-        } q{addr, nullptr, 0, false};
-        dl_iterate_phdr(
-            [](struct dl_phdr_info* info, size_t, void* data) -> int {
-                auto* l = static_cast<Lookup*>(data);
-                uintptr_t base = static_cast<uintptr_t>(info->dlpi_addr);
-                for (int i = 0; i < info->dlpi_phnum; ++i) {
-                    if (info->dlpi_phdr[i].p_type != PT_LOAD) continue;
-                    uintptr_t lo = base + info->dlpi_phdr[i].p_vaddr;
-                    uintptr_t hi = lo + info->dlpi_phdr[i].p_memsz;
-                    if (l->addr >= lo && l->addr < hi) {
-                        l->name = info->dlpi_name;
-                        l->base = base;
-                        l->found = true;
-                        return 1;
-                    }
-                }
-                return 0;
-            },
-            &q);
-        if (q.found) {
-            const char* name = (q.name && q.name[0]) ? baseName(q.name) : "eboot";
-            appendStr(buf, cap, len, name);
-            appendStr(buf, cap, len, "+");
-            appendHex(buf, cap, len, addr - q.base);
-            return;
-        }
-#endif
     }
     appendHex(buf, cap, len, addr);
 }
@@ -232,42 +136,8 @@ void onSignal(int sig, siginfo_t* info, void* uctx) {
     appendStr(kind, sizeof kind, klen, signalName(sig));
     appendStr(kind, sizeof kind, klen, ")");
 
-    uintptr_t pc = 0, rbp = 0, rsp = 0;
-#if !defined(__ORBIS__) && !defined(__PS4__)
-    if (uctx) {
-        const auto* uc = static_cast<const ucontext_t*>(uctx);
-#if defined(__FreeBSD__) || defined(__PROSPERO__) || defined(XCLOUD_PS5)
-        pc = static_cast<uintptr_t>(uc->uc_mcontext.mc_rip);
-        rbp = static_cast<uintptr_t>(uc->uc_mcontext.mc_rbp);
-        rsp = static_cast<uintptr_t>(uc->uc_mcontext.mc_rsp);
-#elif defined(__x86_64__) && defined(__linux__)
-        pc = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RIP]);
-        rbp = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RBP]);
-        rsp = static_cast<uintptr_t>(uc->uc_mcontext.gregs[REG_RSP]);
-#endif
-    }
-    uintptr_t faultAddr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
-#if defined(__FreeBSD__) || defined(__PROSPERO__) || defined(XCLOUD_PS5)
-    if ((sig == SIGSEGV || sig == SIGBUS) && faultAddr == 0 && uctx) {
-        const auto* uc = static_cast<const ucontext_t*>(uctx);
-        faultAddr = static_cast<uintptr_t>(uc->uc_mcontext.mc_addr);
-    }
-#endif
-#else
-    uintptr_t faultAddr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
-    if (uctx) {
-        // FreeBSD amd64 ucontext: 16-byte sigset, then mcontext of 8-byte slots.
-        const auto* mc = reinterpret_cast<const uint64_t*>(static_cast<const char*>(uctx) + 16);
-        rbp = static_cast<uintptr_t>(mc[9]);
-        pc = static_cast<uintptr_t>(mc[20]);
-        rsp = static_cast<uintptr_t>(mc[23]);
-        if (faultAddr == 0) faultAddr = static_cast<uintptr_t>(mc[17]);
-        // Calling a null function pointer leaves the caller's return address at [rsp].
-        if (pc == 0 && rsp != 0 && (rsp & 7) == 0) {
-            pc = *reinterpret_cast<const uintptr_t*>(rsp);
-        }
-    }
-#endif
+    uintptr_t pc = 0, rbp = 0, rsp = 0, faultAddr = 0;
+    platform::extractSignalContext(uctx, info, pc, rbp, rsp, faultAddr);
 
     char crashLine[192];
     size_t clen = 0;
@@ -305,7 +175,6 @@ void install(const std::string& markerPath) {
         appendStr(crashLine, sizeof crashLine, clen, "crash: terminate pc=");
         appendCodeAddr(crashLine, sizeof crashLine, clen, caller ? caller - 1 : 0);
         appendStr(crashLine, sizeof crashLine, clen, " addr=0x0");
-#if defined(__ORBIS__) || defined(__PROSPERO__) || defined(XCLOUD_PS5)
         if (auto ep = std::current_exception()) {
             try {
                 std::rethrow_exception(ep);
@@ -316,7 +185,6 @@ void install(const std::string& markerPath) {
                 appendStr(crashLine, sizeof crashLine, clen, " what=<non-std>");
             }
         }
-#endif
         writeMarker("uncaught exception", crashLine);
         struct sigaction dfl{};
         dfl.sa_handler = SIG_DFL;
@@ -327,7 +195,6 @@ void install(const std::string& markerPath) {
 }
 
 void setStage(const char* stage) {
-    // Written before a crash can read it half-copied: the end first.
     char tmp[sizeof g_stage];
     std::strncpy(tmp, stage, sizeof tmp - 1);
     tmp[sizeof tmp - 1] = 0;
@@ -344,9 +211,6 @@ void startWatchdog(uint32_t stallMs) {
         for (;;) {
             platform::sleepMs(1000);
             uint64_t now = platform::nowMs();
-            // This second took far longer: the whole app was suspended (the
-            // console in rest mode), not the main loop stuck. A fresh start
-            // for the measure, no marker.
             if (now - last > 5000) {
                 XC_LOGI("crash guard: the app was suspended for %llu ms (rest mode)",
                         static_cast<unsigned long long>(now - last));
@@ -355,7 +219,6 @@ void startWatchdog(uint32_t stallMs) {
                 continue;
             }
             last = now;
-            // The main loop may beat between our two readings: never negative.
             uint64_t beat = g_beat.load();
             uint64_t idle = now > beat ? now - beat : 0;
             if (!stalled && idle > stallMs) {

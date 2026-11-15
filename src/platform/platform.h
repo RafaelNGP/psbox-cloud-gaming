@@ -51,6 +51,9 @@ void sleepMs(uint32_t ms);
 
 // Logs which socket operations work (PS5 diagnostics; no-op on the host).
 void probeNetworking();
+// Windows WLAN media streaming mode / Android low-latency Wi-Fi lock.
+// Suppresses background Wi-Fi scanning during active gameplay. No-op on consoles/Linux.
+void setLowLatencyNetwork(bool on);
 
 // Starts a joinable thread with an explicit stack size (the console's default
 // thread stack is too small for the H.264 decoder). Returns false on failure.
@@ -125,5 +128,10 @@ bool writeFileAtomic(const std::string& path, const std::string& data);
 // A file holding the sign-in, once written: readable by this user only on a
 // desktop (mode 0600); nothing on the PS5, which has no other users.
 void makePrivate(const std::string& path);
+
+// Crash guard address / context helpers for POSIX platforms
+void getCodeBounds(uintptr_t& base, uintptr_t& end);
+bool findModuleByAddr(uintptr_t addr, char* nameBuf, size_t nameCap, uintptr_t& baseAddr);
+void extractSignalContext(void* uctx, void* siginfo, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr);
 
 }  // namespace xc::platform

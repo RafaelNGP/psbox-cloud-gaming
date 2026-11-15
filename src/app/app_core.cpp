@@ -51,7 +51,7 @@
 #include <cstdlib>
 #include <memory>
 #include <optional>
-#include <sys/stat.h>
+#include "util/fs.h"
 #include <mutex>
 #include <string>
 #include <thread>
@@ -221,7 +221,7 @@ struct Core {
     std::optional<ui::Canvas> canvas;           // made once the UI has its settings
     std::optional<StreamScreen> streamScreen;   // the game's menu and what is laid over it; made once the worker runs
     input::ControllerState prev{}, pad{};
-    bool appMenuKeyBefore = false, homeKeyBefore = false;  // F12 / Home held at the last pass
+    bool appMenuKeyBefore = false, homeKeyBefore = false, backKeyBefore = false;  // F12 / Home / Back held at the last pass
     uint8_t mouseButtonsBefore = 0;      // the mouse buttons at the last pass (a press chooses a key)
     std::vector<uint8_t> swallowedKeys;  // keys pressed to be chosen, kept from the screens until let go
     bool kbmConnected = false;                              // a USB keyboard or mouse in use
@@ -275,6 +275,7 @@ ui::UiCaps uiCaps() {
     c.openUrl = sc.openUrl;
     c.selfUpdate = sc.selfUpdate;
     c.desktopWindow = sc.window;
+    c.trophies = sc.console;
     return c;
 }
 
@@ -283,10 +284,10 @@ bool coreStartup() {
     const std::string dataDir = platform::dataDir();
     const std::string logPath = dataDir + "/xcloud.log";
     const std::string prevLogPath = dataDir + "/xcloud.prev.log";
-    struct stat logSt{};
-    if (::stat(logPath.c_str(), &logSt) == 0 && logSt.st_size > 0) {
-        std::remove(prevLogPath.c_str());
-        std::rename(logPath.c_str(), prevLogPath.c_str());
+    uint64_t logSz = 0;
+    if (fs::fileSize(logPath, logSz) && logSz > 0) {
+        fs::removeFile(prevLogPath);
+        fs::renameReplace(logPath, prevLogPath);
     }
     bool logOk = log::setFile(logPath.c_str());
     if (!platform::dataDirNote().empty())
@@ -311,11 +312,10 @@ bool coreStartup() {
     // made later (by the first dialog or WebUI request) it would do that over the user's own.
     SettingsManager& settingsManager = SettingsManager::instance();
     g_settings = Settings{};  // nothing of the shared file left under the user's own
-    struct stat settingsStat;
-    if (!g_settings.load(settingsPath()) && ::stat(settingsPath().c_str(), &settingsStat) == 0) {
+    if (!g_settings.load(settingsPath()) && fs::exists(settingsPath())) {
         // Unreadable (cut short?): kept aside, not overwritten by the defaults.
         std::string bad = settingsPath() + ".bad";
-        std::rename(settingsPath().c_str(), bad.c_str());
+        fs::renameReplace(settingsPath(), bad);
         XC_LOGW("settings: %s could not be read; defaults used, the file kept as %s", settingsPath().c_str(), bad.c_str());
     }
     settingsManager.adoptUser(settingsPath(), g_settings);  // this console user's file and settings from here on
@@ -1071,6 +1071,21 @@ bool coreStartup() {
             g_core->dispatchUiAction(ev);
         }
     });
+    shell::setTouchHandler([](const shell::TouchEvent& tev) {
+        if (!g_core) return;
+        if (g_ui && g_ui->screen() == ui::Screen::Streaming) {
+            if (g_core->streamScreen) {
+                g_core->streamScreen->onTouch(tev);
+            }
+            return;
+        }
+        if (g_ui) {
+            ui::UiEvent ev = g_ui->onTouch(tev);
+            if (ev.action != ui::Action::None) {
+                g_core->dispatchUiAction(ev);
+            }
+        }
+    });
 
     if (!net::initTls(g_autoplay.badCa ? platform::assetDir() + "/missing.pem" : platform::caBundlePath())) {
         // The step that failed, and where the log is: what a bug report needs.
@@ -1192,6 +1207,14 @@ void Core::dispatchUiAction(const ui::UiEvent& ev) {
             // A desktop: the sign-in page, the report form, the release page.
             bool ok = shell::openUrl(ev.url);
             XC_LOGI("browser: %s (a link of %zu characters)", ok ? "opened" : "could not be opened", ev.url.size());
+            break;
+        }
+        case ui::Action::CopyClipboard: {
+            bool ok = shell::setClipboardText(ev.clipboardText);
+            if (ok && g_ui) {
+                g_ui->showToast(ui::tr(ui::Str::SignInCodeCopied));
+                XC_LOGI("auth: pairing code copied to clipboard");
+            }
             break;
         }
         case ui::Action::RefreshLibrary: {
@@ -1471,12 +1494,35 @@ bool Core::frame() {
     bool appMenuKey = std::binary_search(kbm.held.begin(), kbm.held.end(), input::kVkAppMenu);
     bool appMenuPressed = appMenuKey && !appMenuKeyBefore;
     appMenuKeyBefore = appMenuKey;
+
+    bool backKey = std::binary_search(kbm.held.begin(), kbm.held.end(), input::kVkAndroidBack);
+    bool backPressed = backKey && !backKeyBefore;
+    backKeyBefore = backKey;
+
+    if (inGame) {
+        if (backPressed) {
+            if (!streamScreen->menuOpen()) {
+                appMenuPressed = true;
+            } else {
+                pad.btnB = true;
+            }
+        }
+    } else {
+        if (backKey) {
+            pad.btnB = true;
+        }
+    }
+    if (std::find(swallowedKeys.begin(), swallowedKeys.end(), input::kVkAndroidBack) == swallowedKeys.end()) {
+        swallowedKeys.push_back(input::kVkAndroidBack);
+    }
+    kbm.held.erase(std::remove(kbm.held.begin(), kbm.held.end(), input::kVkAndroidBack), kbm.held.end());
     // The home search's keys focused: a desktop's keyboard types into the
     // query (the shell's text input); what it types (letters, Space, Enter,
     // Backspace...) then doesn't move through the screens, until let go.
     // Arrows, Esc, Tab and Page Up / Down still do. The PS5 has no text
     // input: its keyboard moves through the screens as before.
     const bool typing = shell::setTextInput(!inGame && !capturing && g_ui->wantsTextInput());
+    if (typing) shell::setTextInputArea(100, 150, 800, 60);
     if (std::string typed = shell::takeTextInput(); !typed.empty()) g_ui->typeText(typed);
     if (typing) {
         static constexpr uint8_t kStillNavigate[] = {0x09, 0x1B, 0x21, 0x22, 0x25, 0x26, 0x27, 0x28};
@@ -1696,7 +1742,11 @@ bool Core::frame() {
     autoplayNav(nav, menuCombo, now);
     if (g_ui->screen() == ui::Screen::Streaming) {
         streamScreen->update(player1, nav, menuCombo);
+#if defined(__ANDROID__)
+        display::idleWait(streamScreen->isHighRefresh() ? 8 : 16);  // Adaptive 120 Hz (8ms) / 60 Hz (16ms) frame pacing on Android
+#else
         display::idleWait(4);  // ~250 Hz input (the PS5 sleeps 4 ms; matching DualSense native 250 Hz rate)
+#endif
         display::pump();       // the desktop shows the newest video frame here
         return true;
     }
@@ -1736,6 +1786,16 @@ bool Core::frame() {
     autoplayScreens(*canvas, now);
 
     if (haveDisplay && g_ui->needsRedraw(now)) {
+#if defined(__ANDROID__)
+        // Frame pacing in UI menus: clamp redraws to 60 FPS (~16ms) to prevent Mailbox GPU churn
+        static uint64_t lastUiPresentMs = 0;
+        uint64_t elapsed = now - lastUiPresentMs;
+        if (elapsed < 16) {
+            platform::sleepMs(16 - elapsed);
+            now = platform::nowMs();
+        }
+        lastUiPresentMs = now;
+#endif
         uint64_t t0 = platform::nowMs();
         g_ui->render(*canvas, now);
         uint64_t t1 = platform::nowMs();
@@ -1750,13 +1810,54 @@ bool Core::frame() {
             display::present();  // paced by the next draw waiting for a free buffer
         }
     } else {
+#if defined(__ANDROID__)
+        platform::sleepMs(16);  // 60 Hz polling when idle in menus to reduce CPU wakeups
+#else
         platform::sleepMs(8);
+#endif
     }
     display::pump();  // the desktop shows the menu here (paced by its vsync); nothing on the PS5
     return true;
 }
 
 bool coreFrame() { return g_core->frame(); }
+
+void onEnteredBackground() {
+    XC_LOGI("lifecycle: onEnteredBackground");
+    {
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        g_settings.save(settingsPath());
+    }
+    if (g_player && g_player->running()) {
+        g_player->setMicMuted(true);
+    }
+}
+
+void onEnteredForeground() {
+    XC_LOGI("lifecycle: onEnteredForeground");
+    if (g_player && g_player->running()) {
+        bool micEnabled = false;
+        {
+            std::lock_guard<std::mutex> lock(g_settingsMutex);
+            micEnabled = g_settings.micEnabled;
+        }
+        g_player->setMicMuted(!micEnabled);
+        g_player->requestKeyframe();
+    }
+}
+
+void onSystemPressure(bool terminating) {
+    XC_LOGI("lifecycle: onSystemPressure (terminating=%d)", terminating);
+    {
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        g_settings.save(settingsPath());
+    }
+    if (terminating) {
+        g_cancel = true;
+    } else if (g_images) {
+        g_images->shrink();
+    }
+}
 
 void coreShutdown() {
     // Not on the PS5, whose loop never ends. Before the backends close, the

@@ -16,3 +16,10 @@ reddit/
 docs/archive/
 assets/media_showcase/
 trophies/
+local.properties
+.cxx/
+android/**/build/
+android/.gradle/
+*.jks
+*.keystore
+keystore.properties

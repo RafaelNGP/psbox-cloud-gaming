@@ -26,4 +26,13 @@ void sdlToggleFullscreen();
 bool sdlIsFullscreen();
 bool sdlWindowToLogical(float winX, float winY, float& logX, float& logY);
 
+void sdlSetSuspended(bool suspended);
+bool sdlIsSuspended();
+void sdlRendererReset();
+struct SafeAreaInsets {
+    int left = 0, top = 0, right = 0, bottom = 0;
+};
+SafeAreaInsets sdlSafeArea();
+void sdlUpdateSafeArea();
+
 }  // namespace xc::display

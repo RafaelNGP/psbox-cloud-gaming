@@ -169,6 +169,7 @@ void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>&
     int x = kW - kMargin;
     const int y = kH - 64;
     for (auto it = hints.rbegin(); it != hints.rend(); ++it) {
+        int itemRightX = x;
         // With Circle confirming, the pad reports it as Cross (and the
         // other way round): the hints show the button to press.
         int icon = it->first;
@@ -182,6 +183,7 @@ void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>&
             c.fillRect(cap, rgba(255, 255, 255, 30), 6);
             c.strokeRect(cap, kGray, 2, 6);
             fonts_.bold.draw(c, key, cap.x + 9, fonts_.bold.centeredY(cap.y, cap.h, 15), 15, kWhite);
+            hintRects_.push_back({it->first, Rect{cap.x - 12, y - 16, itemRightX - cap.x + 24, 60}});
             x = cap.x - kGap;
             continue;
         }
@@ -251,6 +253,7 @@ void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>&
         } else {
             drawFaceButton(c, fonts_.bold, icon, cx, cy, kR);
         }
+        hintRects_.push_back({it->first, Rect{x - 12, y - 16, itemRightX - x + 24, 60}});
         x -= kGap;
     }
 }
@@ -343,6 +346,9 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         std::string s(1, ch);
         fonts_.bold.draw(c, s, x + (cell - fonts_.bold.measure(s, kPx)) / 2, panel.y + 18, kPx, kWhite);
         x += cell;
+    }
+    if (caps_.openUrl && !code_.empty()) {
+        fonts_.regular.draw(c, tr(Str::SignInClickToCopy), left, 762, 22, kDim);
     }
     drawSpinner(c, left + 18, 830, 14, nowMs);
     fonts_.regular.draw(c, tr(Str::SignInWaiting), left + 48, 815, 26, kDim);
@@ -1810,6 +1816,7 @@ void AppUi::drawAchievementsModal(Canvas& c, uint64_t nowMs) {
 
 void AppUi::render(Canvas& c, uint64_t nowMs) {
     std::lock_guard<std::mutex> lock(mutex_);
+    hintRects_.clear();
     float dt = lastRender_ ? std::min(0.1f, (nowMs - lastRender_) / 1000.0f) : 0.0f;
     lastRender_ = nowMs;
     animating_ = rowY_.step(dt);

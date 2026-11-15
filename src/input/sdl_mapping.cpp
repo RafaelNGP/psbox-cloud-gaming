@@ -4,6 +4,7 @@
 #include "input/sdl_mapping.h"
 
 #include "input/kbm.h"
+#include "input/keyboard_nav.h"
 
 #include <algorithm>
 #include <cctype>
@@ -20,6 +21,7 @@ void sdlAccelToG(const float ms2[3], float g[3]) {
 }
 
 uint8_t scancodeToVk(int scancode) {
+    if (scancode == 270 /* SDL_SCANCODE_AC_BACK */) return kVkAndroidBack;
     if (scancode >= 224 && scancode <= 231) return modifierVk(scancode - 224);
     if (scancode < 0 || scancode > 0xFF) return 0;
     return hidToVk(static_cast<uint16_t>(scancode));

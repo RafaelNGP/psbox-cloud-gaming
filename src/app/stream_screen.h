@@ -15,9 +15,12 @@
 #include "input/pad_map.h"
 #include "ui/app_ui.h"
 #include "ui/stream_menu.h"
+#include "ui/touch_pad_overlay.h"
+#include "display/display.h"
 
 #include <atomic>
 #include <cstdint>
+#include <map>
 
 namespace xc::app {
 
@@ -29,7 +32,12 @@ int keyboardPadSlot(bool keyboardConnected);
 
 class StreamScreen {
 public:
-    explicit StreamScreen(const ui::Fonts& fonts) : fonts_(fonts), menu_(fonts) {}
+    explicit StreamScreen(const ui::Fonts& fonts);
+
+    bool onTouch(const app::shell::TouchEvent& ev);
+    ui::TouchPadOverlay& touchOverlay() { return touchOverlay_; }
+    const ui::Canvas& touchCanvas() const { return touchCanvas_; }
+    ui::Canvas& touchCanvas() { return touchCanvas_; }
 
     // The controllers' slots, for the menu.
     void setPads(const ui::PadSlots& slots);
@@ -57,6 +65,7 @@ public:
     // Each pass on any other screen: what the stream left is cleared, and a
     // console keyboard still up is closed.
     void idle();
+    bool isHighRefresh() const { return highRefresh_; }
 
 private:
     void applyDeband_();
@@ -67,6 +76,7 @@ private:
 
     const ui::Fonts& fonts_;
     ui::StreamMenu menu_;
+    ui::TouchPadOverlay touchOverlay_;
     const StreamPlayer* overlayPlayer_ = nullptr;
     int streamResolution_ = 0;  // as SettingsChoice::resolution
     bool showStats_ = false, overlayShown_ = false;
@@ -132,9 +142,15 @@ private:
     bool wasStreaming_ = false;
     uint64_t lastMenuRedrawMs_ = 0;
     uint64_t lastStatsRedrawMs_ = 0;
+    uint64_t lastTouchOverlayRedrawMs_ = 0;
+    bool lastTouchOverlayVisible_ = false;
     uint64_t toastsShown_ = 0;    // platform::toasts()'s version in the overlay
     bool mouseCaptured_ = false;  // as last asked of input::kbmSetCaptured
     bool prevL3R3_ = false;       // L3 + R3 HUD telemetry shortcut
+    ui::NavInput pendingTouchNav_{};
+    std::vector<uint64_t> activeTouchFingers_;
+    std::map<uint64_t, uint64_t> fingerDownTimeMs_;
+    ui::Canvas touchCanvas_{display::kWidth, display::kHeight};
 };
 
 }  // namespace xc::app

@@ -163,6 +163,7 @@ cp "$REPO_DIR/deps/mbedtls/LICENSE" "$STAGE_DIR/licenses/mbedtls-LICENSE.txt"
 cp "$REPO_DIR/deps/libdatachannel/LICENSE" "$STAGE_DIR/licenses/libdatachannel-MPL-2.0.txt"
 cp "$REPO_DIR/deps/ffmpeg/COPYING.LGPLv2.1" "$STAGE_DIR/licenses/FFmpeg-LGPL-2.1.txt"
 cp "$REPO_DIR/extern/stb/LICENSE" "$STAGE_DIR/licenses/stb-LICENSE.txt"
+cp "$REPO_DIR/extern/nanosvg/LICENSE.txt" "$STAGE_DIR/licenses/nanosvg-LICENSE.txt"
 
 # Development only: XC_INCLUDE_ACCOUNT=1 ships the account.json
 if [[ ${XC_INCLUDE_ACCOUNT:-0} == 1 && -f "$REPO_DIR/build-host/data/account.json" ]]; then

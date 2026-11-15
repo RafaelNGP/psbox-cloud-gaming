@@ -86,6 +86,13 @@ void updateTextInput(app::StreamPlayer* player) {
 
 }  // namespace
 
+StreamScreen::StreamScreen(const ui::Fonts& fonts)
+    : fonts_(fonts), menu_(fonts), touchOverlay_(fonts), touchCanvas_(display::kWidth, display::kHeight) {
+    touchCanvas_.clearTransparent();
+    std::lock_guard<std::mutex> lock(g_settingsMutex);
+    touchOverlay_.setSettings(g_settings);
+}
+
 void StreamScreen::setPads(const ui::PadSlots& slots) {
     menu_.setPads(slots);
     if (menu_.isOpen()) overlaySeq_ = 0;
@@ -163,12 +170,10 @@ void StreamScreen::syncFromSettings() {
         int cap = g_autoplay.bitrateMbps > 0 ? g_autoplay.bitrateMbps : g_settings.maxBitrateMbps;
         g_player->setMaxBitrate(cap);
         bool want120 = (hasCustom ? prof.highRefresh : g_settings.highRefresh) && !g_autoplay.hz60;
-        bool hr = want120 && display::setHighRefresh(true);
-        if (!want120 && highRefresh_) {
+        highRefresh_ = want120 && display::setHighRefresh(true);
+        if (!highRefresh_) {
             display::setHighRefresh(false);
-            hr = false;
         }
-        highRefresh_ = hr;
         g_player->setHighRefreshOutput(highRefresh_);
     }
 
@@ -184,6 +189,13 @@ void StreamScreen::syncFromSettings() {
     menu_.setGyroBias(prof.gyroBias);
     menu_.setTouchpadShortcuts(touchpadShortcuts_);
     menu_.setPadSpeakerVolume(g_settings.padSpeakerVolume);
+    menu_.setTouchOverlayEnabled(g_settings.touchOverlayMode != 2);
+    menu_.setTouchInvertSticks(g_settings.touchInvertSticks);
+    if (g_player) {
+        g_player->setMicMuted(!g_settings.micEnabled);
+        menu_.setMicMuted(!g_settings.micEnabled || g_player->isMicHardwareMuted());
+    }
+    touchOverlay_.setSettings(g_settings);
     overlaySeq_ = 0;
 }
 
@@ -347,14 +359,20 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         // 120 Hz (VRR) for this game's stream: active when enabled in settings/profile
         bool want120 = (hasCustom ? prof.highRefresh : g_settings.highRefresh) && !g_autoplay.hz60;
         highRefresh_ = want120 && display::setHighRefresh(true);
+        if (!highRefresh_) {
+            display::setHighRefresh(false);
+        }
 
         media::audioSetRoute(static_cast<media::AudioRoute>(g_settings.audioRoute));
         media::audioSetVoiceRouting(g_settings.voiceRouting);
         if (g_player) {
             g_player->setHighRefreshOutput(highRefresh_);
             g_player->setMicGain(g_settings.micGainFactor());
+            g_player->setMicMuted(!g_settings.micEnabled);
         }
-
+        menu_.setTouchOverlayEnabled(g_settings.touchOverlayMode != 2);
+        menu_.setTouchInvertSticks(g_settings.touchInvertSticks);
+        touchOverlay_.setSettings(g_settings);
         overlaySeq_ = 0;
     }
     if (g_player) {
@@ -432,8 +450,11 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 menu_.setMaxBitrateMbps(g_settings.maxBitrateMbps);
                 menu_.setHighRefresh(hasCustomProfile_ ? g_settings.perGame[gameKey_].highRefresh : g_settings.highRefresh);
                 menu_.setAudioHaptics(hasCustomProfile_ ? g_settings.perGame[gameKey_].audioHaptics : g_settings.audioHaptics);
+                menu_.setTouchOverlayEnabled(g_settings.touchOverlayMode != 2);
+                menu_.setTouchInvertSticks(g_settings.touchInvertSticks);
                 padVol = g_settings.padSpeakerVolume;
             }
+            touchOverlay_.reset();
             menu_.open(streamResolution_, showStats_, sharpness_, deband_, upscaler_, g_playingHome, allow1440,
                        hasCustomProfile_, triggerStrength_, deadzone_, circleConfirms_, micLvl, micMuted, padVol);
             menu_.setGameKey(gameKey_);
@@ -476,6 +497,11 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     }
                 }
             }
+            nav.accept |= pendingTouchNav_.accept;
+            nav.right |= pendingTouchNav_.right;
+            nav.left |= pendingTouchNav_.left;
+            nav.back |= pendingTouchNav_.back;
+            pendingTouchNav_ = {};
             switch (gyroCalRunning_ ? ui::MenuAction::None : menu_.handle(nav)) {
             case ui::MenuAction::GyroCalibrate: startGyroCalibration_(); break;
             case ui::MenuAction::Leave: g_cancel = true; break;
@@ -920,6 +946,67 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 app::SettingsManager::instance().syncFrom(snapshot);
                 break;
             }
+            case ui::MenuAction::TouchOverlayToggle: {
+                bool enabled = menu_.touchOverlayEnabled();
+                touchOverlay_.setVisible(enabled);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.touchOverlayMode = enabled ? 0 : 2;
+                    touchOverlay_.setSettings(g_settings);
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
+                touchOverlay_.markDirty();
+                overlaySeq_ = 0;
+                break;
+            }
+            case ui::MenuAction::TouchInvertSticksToggle: {
+                bool inv = menu_.touchInvertSticks();
+                touchOverlay_.setInvertSticks(inv);
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.touchInvertSticks = inv;
+                    touchOverlay_.setSettings(g_settings);
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
+                overlaySeq_ = 0;
+                break;
+            }
+            case ui::MenuAction::MicToggle: {
+                bool muted = menu_.micMuted();
+                if (g_player) {
+                    g_player->setMicMuted(muted);
+                    menu_.setMicMuted(muted || g_player->isMicHardwareMuted());
+                }
+                Settings snapshot;
+                {
+                    std::lock_guard<std::mutex> settingsLock(g_settingsMutex);
+                    g_settings.micEnabled = !muted;
+                    g_settings.save(settingsPath());
+                    refreshSettingsUiLocked();
+                    snapshot = g_settings;
+                }
+                app::SettingsManager::instance().syncFrom(snapshot);
+                platform::notify(ui::tr(muted ? ui::Str::MicMutedToast : ui::Str::MicUnmutedToast),
+                                 muted ? "mic muted" : "mic unmuted");
+                overlaySeq_ = 0;
+                break;
+            }
+            case ui::MenuAction::TouchLayoutStudio: {
+                menu_.close();
+                touchOverlay_.openLayoutStudio();
+                touchOverlay_.setVisible(true);
+                touchOverlay_.markDirty();
+                overlaySeq_ = 0;
+                break;
+            }
             default: break;
             }
             overlaySeq_ = 0;
@@ -929,6 +1016,8 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         if (wasOpen && !menu_.isOpen()) {
             input::usbPadsWaitRelease();
             menuUsbOwner_ = -1;
+            touchOverlay_.markDirty();
+            overlaySeq_ = 0;
         }
         input::KbmInput touchKbm;
         bool touchDrag = false;
@@ -1130,7 +1219,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         // straight to the game while the app's menu is closed; F12 is the app's.
             input::KbmInput toGame = kbm_;
             toGame.keys.erase(std::remove_if(toGame.keys.begin(), toGame.keys.end(),
-                                             [](const input::KeyEvent& k) { return k.vk == input::kVkAppMenu || k.vk == 0x24; }),
+                                             [](const input::KeyEvent& k) { return k.vk == input::kVkAppMenu || k.vk == 0x24 || k.vk == input::kVkAndroidBack; }),
                               toGame.keys.end());
             for (const auto& k : toGame.keys) {
                 auto at = std::find(keysInGame_.begin(), keysInGame_.end(), k.vk);
@@ -1252,19 +1341,51 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         const auto& sd = menu_.stickDialog();
         input::setDeadzone(sd.deadzoneLeft() / 100.0f, sd.deadzoneRight() / 100.0f);
     }
+    bool physicalPadConnected = false;
+    uint64_t lastPhysicalMs = 0;
+    for (int i = 0; i < input::kMaxPads; ++i) {
+        if (input::padConnected(i) || !input::usbPadNameFor(i).empty()) physicalPadConnected = true;
+        uint64_t a1 = input::padActiveAt(i);
+        uint64_t a2 = input::usbPadActiveAt(i);
+        if (a1 > lastPhysicalMs) lastPhysicalMs = a1;
+        if (a2 > lastPhysicalMs) lastPhysicalMs = a2;
+    }
+#if defined(__ANDROID__)
+    for (const auto& k : kbm_.keys) {
+        if (k.pressed) {
+            lastPhysicalMs = nowMs;
+            physicalPadConnected = true;
+            break;
+        }
+    }
+#endif
+    bool physicalPadActive = (lastPhysicalMs > 0 && nowMs >= lastPhysicalMs && (nowMs - lastPhysicalMs < 3000));
+    touchOverlay_.update(nowMs, physicalPadConnected, physicalPadActive, lastPhysicalMs);
+    bool touchOverlayVisible = touchOverlay_.isVisible();
     bool dialogOpen = menu_.isGyroDialogOpen() || menu_.isStickDialogOpen() || menu_.isTriggerDialogOpen();
     // Under a calibration only its progress line changes (overlaySeq_ = 0 then): no steady redraw.
     bool menuRedraw = menu_.isOpen() && !gyroCalRunning_ &&
                       (nowMs - lastMenuRedrawMs_ >= (menu_.gyroLiveTest() ? 100 : dialogOpen ? 16 : 40));
     bool statsRedraw = showStats_ && !menu_.isOpen() && (nowMs - lastStatsRedrawMs_ >= 200);
+    bool touchOverlayDirty = touchOverlay_.isDirty();
+    bool touchVisibilityChanged = (touchOverlayVisible != lastTouchOverlayVisible_);
+    bool touchRedraw = !menu_.isOpen() &&
+                      (touchVisibilityChanged || (touchOverlayVisible && touchOverlayDirty && (nowMs - lastTouchOverlayRedrawMs_ >= 16)));
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
     uint64_t toasts = platform::toastsEnabled() ? platform::toasts().version(nowMs) : 0;
-    if (overlaySeq_ != seq + 1 || menuRedraw || statsRedraw || toasts != toastsShown_) {
+    if (overlaySeq_ != seq + 1 || menuRedraw || statsRedraw || touchRedraw || toasts != toastsShown_) {
         overlaySeq_ = seq + 1;
         toastsShown_ = toasts;
+        if (!menu_.isOpen()) {
+            lastTouchOverlayVisible_ = touchOverlayVisible;
+        }
         if (menuRedraw) lastMenuRedrawMs_ = nowMs;
         if (statsRedraw) lastStatsRedrawMs_ = nowMs;
+        if (touchRedraw) {
+            lastTouchOverlayRedrawMs_ = nowMs;
+            touchOverlay_.clearDirty();
+        }
         ui::StreamInfo info;
         {
             std::lock_guard<std::mutex> infoLock(g_infoMutex);
@@ -1291,22 +1412,22 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
             } else if (menu_.gyroLiveTest()) {
                 ui::Canvas c(ui::GyroWheelDialog::kCompactW, ui::GyroWheelDialog::kCompactH);
-                c.clear(0);
+                c.clearTransparent();
                 menu_.drawGyroCompact(c);
                 display::setOverlay(c.data(), static_cast<int>(display::kWidth) - c.width() - 40, 150, c.width(), c.height(), 225);
             } else if (menu_.isGyroDialogOpen()) {
                 ui::Canvas c(display::kWidth, display::kHeight);
-                c.clear(0);
+                c.clearTransparent();
                 menu_.drawGyroDialog(c);
                 display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
             } else if (menu_.isStickDialogOpen()) {
                 ui::Canvas c(display::kWidth, display::kHeight);
-                c.clear(0);
+                c.clearTransparent();
                 menu_.drawStickDialog(c);
                 display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
             } else if (menu_.isTriggerDialogOpen()) {
                 ui::Canvas c(display::kWidth, display::kHeight);
-                c.clear(0);
+                c.clearTransparent();
                 menu_.drawTriggerDialog(c);
                 display::setOverlay(c.data(), 0, 0, c.width(), c.height(), 245);
             } else {
@@ -1333,6 +1454,24 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     }
                 }
             }
+        } else if (touchOverlayVisible) {
+            touchCanvas_.clearTransparent();
+            touchOverlay_.render(touchCanvas_);
+            touchOverlay_.clearDirty();
+            if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
+                ui::Canvas tc = ui::renderToastPanel(fonts_, shown);
+                ui::Image img{tc.width(), tc.height(), false, std::vector<uint32_t>(tc.data(), tc.data() + static_cast<size_t>(tc.width()) * tc.height())};
+                touchCanvas_.drawImage(img, (static_cast<int>(display::kWidth) - tc.width()) / 2, 28, 235);
+            } else if (showStats_ && seq) {
+                ui::Canvas sc = menu_.renderStats(info);
+                ui::Image img{sc.width(), sc.height(), false, std::vector<uint32_t>(sc.data(), sc.data() + static_cast<size_t>(sc.width()) * sc.height())};
+                touchCanvas_.drawImage(img, ui::StreamMenu::kStatsX, ui::StreamMenu::kStatsY, 200);
+            } else if (info.degraded || info.wifiHoldNow) {
+                ui::Canvas wc = menu_.renderWarning(info.wifiHoldNow && !info.degraded);
+                ui::Image img{wc.width(), wc.height(), false, std::vector<uint32_t>(wc.data(), wc.data() + static_cast<size_t>(wc.width()) * wc.height())};
+                touchCanvas_.drawImage(img, ui::StreamMenu::kWarnRight - wc.width(), ui::StreamMenu::kWarnY, 200);
+            }
+            display::setOverlay(touchCanvas_.data(), 0, 0, touchCanvas_.width(), touchCanvas_.height(), 255);
         } else if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);
             display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
@@ -1344,7 +1483,16 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             display::setOverlay(c.data(), ui::StreamMenu::kWarnRight - c.width(), ui::StreamMenu::kWarnY, c.width(),
                                 c.height(), 200);
         } else {
+#if defined(__ANDROID__)
+            // On Android, even when the virtual gamepad is idle or physical controller is attached,
+            // render a subtle translucent pull-tab handle docked flush at the top-left edge
+            static ui::Canvas s_pullTabCanvas(72, 84);
+            s_pullTabCanvas.clearTransparent();
+            touchOverlay_.drawPullTab(s_pullTabCanvas, 0.35f);
+            display::setOverlay(s_pullTabCanvas.data(), 0, 0, s_pullTabCanvas.width(), s_pullTabCanvas.height(), 255);
+#else
             display::setOverlay(nullptr, 0, 0, 0, 0, 0);
+#endif
         }
         overlayShown_ = true;
     }
@@ -1419,6 +1567,7 @@ void StreamScreen::idle() {
     if (overlayShown_) {
         display::setOverlay(nullptr, 0, 0, 0, 0, 0);
         overlayShown_ = false;
+        lastTouchOverlayVisible_ = false;
         menu_.close();
     }
     if (wasStreaming_) {
@@ -1432,9 +1581,87 @@ void StreamScreen::idle() {
         input::setTriggerFeel(g_settings.triggerStrength, g_settings.triggerHz, g_settings.triggerResistance, g_settings.triggerPulses, g_settings.triggerProfile);
         input::setCircleConfirms(g_settings.circleConfirms);
         if (g_ui) g_ui->setCircleConfirms(g_settings.circleConfirms);
-        if (highRefresh_) display::setHighRefresh(false);
+        display::setHighRefresh(false);
         highRefresh_ = false;
     }
+    touchOverlay_.reset();
+    activeTouchFingers_.clear();
+    fingerDownTimeMs_.clear();
+}
+
+bool StreamScreen::onTouch(const app::shell::TouchEvent& ev) {
+    if (touchOverlay_.isLayoutStudioActive()) {
+        bool handled = touchOverlay_.onTouch(ev);
+        overlaySeq_ = 0;
+        return handled;
+    }
+
+    // 1. Multi-touch 3-finger tap detection (instant menu toggle without sending pad inputs)
+    uint64_t nowMs = platform::nowMs();
+    if (ev.kind == app::shell::TouchEvent::Kind::Down) {
+        // Prune stale fingers older than 120ms from grace buffer
+        activeTouchFingers_.erase(
+            std::remove_if(activeTouchFingers_.begin(), activeTouchFingers_.end(),
+                           [&](uint64_t id) {
+                               auto it = fingerDownTimeMs_.find(id);
+                               return it == fingerDownTimeMs_.end() || (nowMs - it->second) > 120;
+                           }),
+            activeTouchFingers_.end());
+
+        if (std::find(activeTouchFingers_.begin(), activeTouchFingers_.end(), ev.fingerId) == activeTouchFingers_.end()) {
+            activeTouchFingers_.push_back(ev.fingerId);
+            fingerDownTimeMs_[ev.fingerId] = nowMs;
+        }
+        if (activeTouchFingers_.size() >= 3) {
+            activeTouchFingers_.clear();
+            fingerDownTimeMs_.clear();
+            touchOverlay_.reset();
+            setVirtualGamepad(0, input::ControllerState{});
+            input::triggerHaptic(input::HapticType::HeavyClick);
+            if (menu_.isOpen()) {
+                menu_.close();
+            } else {
+                swipeMenu_ = true;
+            }
+            return true;
+        }
+    } else if (ev.kind == app::shell::TouchEvent::Kind::Up || ev.kind == app::shell::TouchEvent::Kind::Cancel) {
+        auto it = std::find(activeTouchFingers_.begin(), activeTouchFingers_.end(), ev.fingerId);
+        if (it != activeTouchFingers_.end()) activeTouchFingers_.erase(it);
+        fingerDownTimeMs_.erase(ev.fingerId);
+    }
+
+    // 2. Top-left edge pull-tab zone (x <= 140 && y <= 100)
+    if (ev.kind == app::shell::TouchEvent::Kind::Down && ev.x >= 0.0f && ev.x <= 140.0f && ev.y >= 0.0f && ev.y <= 100.0f) {
+        input::triggerHaptic(input::HapticType::Click);
+        touchOverlay_.reset();
+        if (menu_.isOpen()) {
+            menu_.close();
+            touchOverlay_.markDirty();
+            overlaySeq_ = 0;
+        } else {
+            swipeMenu_ = true;
+        }
+        return true;
+    }
+
+    // 3. When menu is open, handle touch navigation
+    if (menu_.isOpen()) {
+        if (ev.kind == app::shell::TouchEvent::Kind::Up || ev.kind == app::shell::TouchEvent::Kind::Cancel) {
+            touchOverlay_.onTouch(ev);
+        } else if (ev.kind == app::shell::TouchEvent::Kind::Down) {
+            menu_.onTouch(ev.x, ev.y, pendingTouchNav_);
+        }
+        return true;
+    }
+
+    // 4. Virtual controls overlay
+    bool handled = touchOverlay_.onTouch(ev);
+    if (touchOverlay_.takeMenuToggleRequest()) {
+        swipeMenu_ = true;
+        return true;
+    }
+    return handled;
 }
 
 }  // namespace xc::app

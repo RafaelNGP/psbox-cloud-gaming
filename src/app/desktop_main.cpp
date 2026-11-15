@@ -30,7 +30,84 @@ void usage(std::FILE* to) {
 
 }  // namespace
 
+#if defined(__ANDROID__)
+#include <SDL3/SDL_system.h>
+#include <SDL3/SDL_iostream.h>
+#include "util/fs.h"
+#include <sstream>
+
+static void ensureAndroidAssets() {
+    const char* internalStorage = SDL_GetAndroidInternalStoragePath();
+    if (!internalStorage || !*internalStorage) return;
+    std::string dataDir = internalStorage;
+    SDL_setenv_unsafe("XCLOUD_DATA_DIR", dataDir.c_str(), 1);
+
+    std::string assetsDir = dataDir + "/assets";
+    SDL_setenv_unsafe("XCLOUD_ASSETS", assetsDir.c_str(), 1);
+    SDL_setenv_unsafe("XCLOUD_CA_BUNDLE", (assetsDir + "/cacert.pem").c_str(), 1);
+
+    SDL_IOStream* listIo = SDL_IOFromFile("asset-list.txt", "r");
+    if (!listIo) return;
+
+    Sint64 sz = SDL_GetIOSize(listIo);
+    std::string apkList;
+    if (sz > 0) {
+        apkList.resize(static_cast<size_t>(sz));
+        SDL_ReadIO(listIo, &apkList[0], static_cast<size_t>(sz));
+    }
+    SDL_CloseIO(listIo);
+
+    std::string targetListPath = assetsDir + "/asset-list.txt";
+    std::string currentList;
+    if (xc::fs::exists(targetListPath)) {
+        if (FILE* f = std::fopen(targetListPath.c_str(), "rb")) {
+            std::fseek(f, 0, SEEK_END);
+            long len = std::ftell(f);
+            std::fseek(f, 0, SEEK_SET);
+            if (len > 0) {
+                currentList.resize(static_cast<size_t>(len));
+                std::fread(&currentList[0], 1, static_cast<size_t>(len), f);
+            }
+            std::fclose(f);
+        }
+    }
+    if (!apkList.empty() && apkList == currentList) return;
+
+    xc::fs::makeDirs(assetsDir);
+    std::istringstream iss(apkList);
+    std::string line;
+    while (std::getline(iss, line)) {
+        if (line.empty() || line[0] == '#') continue;
+        if (line.back() == '\r') line.pop_back();
+
+        SDL_IOStream* in = SDL_IOFromFile(line.c_str(), "rb");
+        if (!in) continue;
+        std::string outPath = assetsDir + "/" + line;
+        size_t lastSlash = outPath.rfind('/');
+        if (lastSlash != std::string::npos) {
+            xc::fs::makeDirs(outPath.substr(0, lastSlash));
+        }
+        if (FILE* out = std::fopen(outPath.c_str(), "wb")) {
+            char buf[8192];
+            size_t bytes;
+            while ((bytes = SDL_ReadIO(in, buf, sizeof(buf))) > 0) {
+                std::fwrite(buf, 1, bytes, out);
+            }
+            std::fclose(out);
+        }
+        SDL_CloseIO(in);
+    }
+    if (FILE* f = std::fopen(targetListPath.c_str(), "wb")) {
+        std::fwrite(apkList.data(), 1, apkList.size(), f);
+        std::fclose(f);
+    }
+}
+#endif
+
 int main(int argc, char* argv[]) {
+#if defined(__ANDROID__)
+    ensureAndroidAssets();
+#endif
     std::string selftest;
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
@@ -58,3 +135,11 @@ int main(int argc, char* argv[]) {
     std::fflush(nullptr);
     std::_Exit(code);
 }
+
+#if defined(_WIN32)
+#if defined(UNICODE) && UNICODE
+extern "C" int __stdcall WinMain(void*, void*, void*, int) {
+    return SDL_RunApp(0, nullptr, SDL_main, nullptr);
+}
+#endif
+#endif

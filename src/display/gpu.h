@@ -42,11 +42,11 @@ void probe(int frames);
 bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int strideY, int strideU, int strideV,
                 int width, int height, bool wait);
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
-              int width, int height, bool wait);
+              int width, int height, bool wait, bool isNv21 = false);
 // As display::videoSlots / waitVideoSlot.
 bool videoSlots(size_t bytes, uint8_t* out[2]);
 void waitVideoSlot(const uint8_t* p);
-void drawRgba(const uint32_t* pixels);  // 1920x1080, 0xAABBGGRR
+bool drawRgba(const uint32_t* pixels);  // 1920x1080, 0xAABBGGRR
 void present();
 
 // As display::setOverlay / setSharpness.
@@ -90,5 +90,18 @@ bool lastShown(uint64_t& id, uint64_t& atUs);
 
 // The image last presented, 8-bit RGB rows; false when there is none.
 bool readBack(std::vector<uint8_t>& rgb, int& width, int& height);
+
+enum class DisplayPresentationMode {
+    Standard,       // Centered 16:9 letterbox/pillarbox
+    TopScreenOnly,  // Clamshell Flex Mode or Dual-Screen Top
+};
+
+void setPresentationMode(DisplayPresentationMode mode);
+
+void setSafeAreaInsets(int left, int top, int right, int bottom);
+
+// Recreates the window VkSurfaceKHR, swapchain and dependent images after window
+// invalidation (Android background/foreground transitions). Zero-op on PS5.
+bool recreateSurface();
 
 }  // namespace xc::display::gpu

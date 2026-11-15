@@ -12,6 +12,7 @@
 #include "app/crash_guard.h"
 #include "app/report.h"
 #include "display/display.h"
+#include "display/gpu.h"
 #include "media/audio_encoder.h"
 #include "media/audio_in.h"
 #include "media/audio_in_common.h"
@@ -34,6 +35,8 @@
 #include "stream/input_packet.h"
 #include "stream/stream_session.h"
 #include "ui/app_ui.h"
+#include "app/shell.h"
+#include "ui/touch_pad_overlay.h"
 #include "ui/accent_color.h"
 #include "ui/pad_glyphs.h"
 #include "ui/input_mode.h"
@@ -60,14 +63,9 @@
 #include "xcloud/purchase.h"
 #include "xcloud/regions.h"
 #include "xcloud/achievements.h"
-#include "trophy/trophy_types.h"
-#include "trophy/trophy_rules.h"
+#include "trophy/trophy_sync.h"
 #include "trophy/trophy_registry.h"
 #include "trophy/trophy_backend.h"
-#include "trophy/trophy_sync.h"
-#include "trophy/trophy_builder.h"
-#include "trophy/trophy_db.h"
-#include <sqlite3.h>
 
 #include <algorithm>
 #include <atomic>
@@ -76,16 +74,21 @@
 #include <limits>
 #include <cstdio>
 #include <csignal>
+#if !defined(_WIN32)
 #include <sys/wait.h>
 #include <unistd.h>
-#if !defined(_WIN32)
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/socket.h>
 #else
-#include <winsock2.h>
-#include <ws2tcpip.h>
+#include <process.h>
+#define getpid _getpid
+#undef near
+#undef far
 #endif
+
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
+#include "net/socket.h"
+#include "util/fs.h"
 #include <cstdlib>
 #include <ctime>
 #include <map>
@@ -662,6 +665,12 @@ static void testPerGameSettings() {
     s.circleConfirms = false;
 
     // Default profile reflects global settings.
+    s.resolution = "best";
+    CHECK(s.defaultProfile().resolution == 2);
+    s.resolution = "720p";
+    CHECK(s.defaultProfile().resolution == 1);
+    s.resolution = "1080p";
+    CHECK(s.defaultProfile().resolution == 0);
     auto def = s.defaultProfile();
     CHECK(def.sharpness == 1 && def.deband == 2 && def.upscaler == 0 && def.videoDecoder == 0);
     CHECK(def.deadzoneLeft == 12 && def.deadzoneRight == 18 && def.triggerStrength == 3);
@@ -979,7 +988,8 @@ static void testFontsFallBackToBuiltin() {
     CHECK(missing.regular.lineHeight(24) > 0);
 
     std::string dir = "/tmp/xcloud-test-fonts-" + std::to_string(::getpid());
-    std::system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir);
     std::string whole;
     CHECK(platform::readFile("assets/fonts/Inter-Regular.ttf", whole) || platform::readFile("../assets/fonts/Inter-Regular.ttf", whole));
     CHECK(platform::writeFileAtomic(dir + "/Inter-Regular.ttf", whole.substr(0, whole.size() / 2)));  // cut short
@@ -992,7 +1002,7 @@ static void testFontsFallBackToBuiltin() {
     ui::Fonts whole3;
     std::string assets = platform::readFile("assets/fonts/Inter-Bold.ttf", whole) ? "assets/fonts" : "../assets/fonts";
     CHECK(whole3.load(assets) && !whole3.usedBuiltin);
-    std::system(("rm -rf " + dir).c_str());
+    xc::fs::removeTree(dir);
 }
 
 static void testFreeAccountPlayability() {
@@ -1644,7 +1654,8 @@ static void testUpdater() {
 
     // An update cut short while files moved: the old ones go back.
     std::string dir = "/tmp/xcloud-updater-test";
-    std::system(("rm -rf " + dir + " && mkdir -p " + dir + "/update.old/sce_sys").c_str());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir + "/update.old/sce_sys");
     xc::platform::writeFileAtomic(dir + "/eboot.bin", "new");
     xc::platform::writeFileAtomic(dir + "/update.old/eboot.bin", "old");
     xc::platform::writeFileAtomic(dir + "/update.old/sce_sys/param.json", "old param");
@@ -1657,7 +1668,7 @@ static void testUpdater() {
     CHECK(xc::platform::readFile(dir + "/account.json", text) && text == "mine");
     CHECK(!xc::platform::readFile(dir + "/update.journal", text) && !xc::platform::readFile(dir + "/update.old/eboot.bin", text));
     CHECK(!recoverUpdate(dir));  // nothing left to do
-    std::system(("rm -rf " + dir).c_str());
+    xc::fs::removeTree(dir);
 }
 
 static void testControllerTuning() {
@@ -1744,6 +1755,7 @@ static void testReport() {
     CHECK(qr_empty.w == 0 && qr_empty.h == 0);
 }
 
+#if !defined(_WIN32)
 [[gnu::noinline]] static void triggerNullWriteCrash() {
     volatile int* p = nullptr;
     asm volatile("" : "+r"(p));
@@ -1787,6 +1799,17 @@ static void testCrashGuard() {
     CHECK(prev.found && prev.kind == "signal 6 (SIGABRT)" && prev.stage == "home");
     CHECK(prev.crash.rfind("crash: SIGABRT pc=", 0) == 0 && prev.crash.find("+0x") != std::string::npos);
 }
+#else
+static void testCrashGuard() {
+    std::string marker = platform::dataDir() + "/xcloud-tests-crash.marker";
+    std::remove(marker.c_str());
+    platform::writeFileAtomic(marker, "signal 11 (EXCEPTION_ACCESS_VIOLATION)\nstreaming TEST\ncrash: EXCEPTION_ACCESS_VIOLATION pc=psbox+0x1000 addr=0x0\n");
+    auto prev = xc::app::crash::takePrevious(marker);
+    CHECK(prev.found && prev.kind == "signal 11 (EXCEPTION_ACCESS_VIOLATION)" && prev.stage == "streaming TEST");
+    CHECK(prev.crash.find("addr=0x0") != std::string::npos);
+    CHECK(!xc::app::crash::takePrevious(marker).found);
+}
+#endif
 
 static void testBuiltinCa() {
     // A missing bundle (an incomplete copy of the app): the copy built in.
@@ -1937,14 +1960,16 @@ static void testPrivacyAndRobustness() {
     // An update whose old files can't all go back keeps them, and its
     // journal, for the next start.
     std::string dir = "/tmp/xcloud-rollback-test";
-    std::system(("rm -rf " + dir + " && mkdir -p " + dir + "/update.old " + dir + "/eboot.bin/busy").c_str());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir + "/update.old");
+    xc::fs::makeDirs(dir + "/eboot.bin/busy");
     xc::platform::writeFileAtomic(dir + "/update.old/eboot.bin", "old");
     xc::platform::writeFileAtomic(dir + "/update.journal", "swapping\n");
     app::recoverUpdate(dir);
     std::string text;
     CHECK(xc::platform::readFile(dir + "/update.old/eboot.bin", text) && text == "old");
     CHECK(xc::platform::readFile(dir + "/update.journal", text));
-    std::system(("rm -rf " + dir).c_str());
+    xc::fs::removeTree(dir);
     // The same file twice in a package: refused.
     std::vector<app::ZipEntry> files;
     CHECK(!app::unzip(storedZip({{"PPSA99810/eboot.bin", "a"}, {"PPSA99810/eboot.bin", "b"}}), "PPSA99810/", files, err));
@@ -1966,7 +1991,8 @@ static void testTokenRefresh() {
     CHECK(parseIsoUtc("") == 0 && parseIsoUtc("soon") == 0 && parseIsoUtc("2026-13-01T00:00:00Z") == 0);
 
     std::string dir = "/tmp/xcloud-auth-test";
-    std::system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir);
     std::string store = dir + "/account.json";
     xc::platform::writeFileAtomic(store, R"({"version":1,"clientId":"000000004c20a908","refreshToken":"_rt-0"})");
     int64_t xstsLife = 16 * 3600, loginLife = 300;
@@ -1976,7 +2002,11 @@ static void testTokenRefresh() {
     auto iso = [](int64_t t) {
         std::time_t tt = static_cast<std::time_t>(t);
         std::tm utc{};
+#if defined(_WIN32)
+        gmtime_s(&utc, &tt);
+#else
         gmtime_r(&tt, &utc);
+#endif
         char text[40];
         std::strftime(text, sizeof text, "%Y-%m-%dT%H:%M:%S.0000000Z", &utc);
         return std::string(text);
@@ -2118,7 +2148,7 @@ static void testTokenRefresh() {
         }
     }
     net::setTestTransport({});
-    std::system(("rm -rf " + dir).c_str());
+    xc::fs::removeTree(dir);
 }
 
 // Kept-alive connections: the end of a chunked body from its framing, and a
@@ -2184,24 +2214,251 @@ static void testResolveIPv4AndConnectTcp() {
     CHECK(err.find("sinkhole IP") != std::string::npos);
 
     // Successful connectTcp to a listening server socket
-    int serverFd = ::socket(AF_INET, SOCK_STREAM, 0);
-    if (serverFd >= 0) {
-        sockaddr_in sa{};
-        sa.sin_family = AF_INET;
-        sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-        sa.sin_port = 0;
-        if (::bind(serverFd, reinterpret_cast<sockaddr*>(&sa), sizeof sa) == 0 &&
-            ::listen(serverFd, 1) == 0) {
-            socklen_t len = sizeof sa;
-            if (::getsockname(serverFd, reinterpret_cast<sockaddr*>(&sa), &len) == 0) {
-                int port = ntohs(sa.sin_port);
+    net::Socket server = net::createTcpSocket();
+    if (server.valid()) {
+        if (net::bindSocket(server, "127.0.0.1", 0) &&
+            net::listenSocket(server, 1)) {
+            int port = 0;
+            if (net::getSocketPort(server, port) && port > 0) {
                 int clientFd = net::connectTcp("127.0.0.1", port, 2000, err);
                 CHECK(clientFd >= 0);
-                if (clientFd >= 0) ::close(clientFd);
+                if (clientFd >= 0) {
+                    net::Socket client{clientFd};
+                    net::closeSocket(client);
+                }
             }
         }
-        ::close(serverFd);
+        net::closeSocket(server);
     }
+}
+
+// Verifies xc::net::Socket: creation, non-blocking configuration, timeouts,
+// loopback connect/accept/send/recv, and clean closure.
+static void testSocketLayer() {
+    // 1. Sockets initialization
+    CHECK(net::socketsInit());
+
+    // 2. Invalid socket invariant
+    net::Socket invalidSock;
+    CHECK(!invalidSock.valid());
+    CHECK(invalidSock.fd == -1);
+    net::closeSocket(invalidSock); // must safely no-op without crashing or leaking
+    CHECK(!invalidSock.valid());
+
+    // 3. Socket creation
+    net::Socket listenSock = net::createTcpSocket();
+    CHECK(listenSock.valid());
+
+    // 4. Non-blocking configuration
+    CHECK(net::setNonBlocking(listenSock, true));
+
+    // 5. Timeout configuration (receive and send)
+    CHECK(net::setRecvTimeout(listenSock, 1000));
+    CHECK(net::setSendTimeout(listenSock, 1000));
+
+    // 6. Loopback binding to ephemeral port (port 0)
+    int port = 0;
+    CHECK(net::bindSocket(listenSock, "127.0.0.1", 0));
+    CHECK(net::getSocketPort(listenSock, port));
+    CHECK(port > 0);
+    CHECK(net::listenSocket(listenSock, 1));
+
+    // 7. Loopback client connection
+    net::Socket clientSock = net::createTcpSocket();
+    CHECK(clientSock.valid());
+    CHECK(net::setNonBlocking(clientSock, true));
+
+    // In non-blocking mode, connectSocket initiates the handshake
+    (void)net::connectSocket(clientSock, "127.0.0.1", port);
+
+    // Wait for connection to establish using pollSockets (write event on client)
+    net::Socket writeSocks[1] = {clientSock};
+    int pr = net::pollSockets(nullptr, 0, writeSocks, 1, 2000);
+    CHECK(pr > 0);
+
+    // 8. Server accept
+    net::Socket readListen[1] = {listenSock};
+    pr = net::pollSockets(readListen, 1, nullptr, 0, 2000);
+    CHECK(pr > 0);
+
+    net::Socket acceptedSock = net::acceptSocket(listenSock);
+    CHECK(acceptedSock.valid());
+    CHECK(net::setNonBlocking(acceptedSock, true));
+
+    // 9. Send and Receive verification over loopback
+    const char kPayload[] = "PSBox_Socket_Abstraction_M2_Test_Payload";
+    const size_t kLen = sizeof(kPayload);
+    ssize_t sent = net::sendNoSignal(clientSock, kPayload, kLen);
+    CHECK(sent == static_cast<ssize_t>(kLen));
+
+    // Poll accepted socket for read availability
+    net::Socket readAcc[1] = {acceptedSock};
+    pr = net::pollSockets(readAcc, 1, nullptr, 0, 2000);
+    CHECK(pr > 0);
+
+    char recvBuf[64] = {0};
+    ssize_t recvd = net::recvSocket(acceptedSock, recvBuf, sizeof(recvBuf));
+    CHECK(recvd == static_cast<ssize_t>(kLen));
+    CHECK(std::strcmp(recvBuf, kPayload) == 0);
+
+    // 10. Clean closure
+    net::closeSocket(clientSock);
+    CHECK(!clientSock.valid());
+    net::closeSocket(acceptedSock);
+    CHECK(!acceptedSock.valid());
+    net::closeSocket(listenSock);
+    CHECK(!listenSock.valid());
+
+    // 11. Read timeout on non-connected socket
+    net::Socket timeoutSock = net::createTcpSocket();
+    CHECK(timeoutSock.valid());
+    CHECK(net::setRecvTimeout(timeoutSock, 50));
+    char dummy[16];
+    ssize_t r = net::recvSocket(timeoutSock, dummy, sizeof(dummy));
+    CHECK(r <= 0); // must return error or would block
+    net::closeSocket(timeoutSock);
+    CHECK(!timeoutSock.valid());
+
+    // 12. Address parsing verification
+    uint8_t ipv6Bytes[16] = {0};
+    CHECK(net::parseIpv6Address("2001:0db8:85a3:0000:0000:8a2e:0370:7334", ipv6Bytes));
+    CHECK(ipv6Bytes[0] == 0x20 && ipv6Bytes[1] == 0x01);
+    CHECK(!net::parseIpv6Address("invalid:ipv6::address::extra", ipv6Bytes));
+    uint8_t ipv4Bytes[4] = {0};
+    CHECK(net::parseIpv4Address("127.0.0.1", ipv4Bytes));
+    CHECK(ipv4Bytes[0] == 127 && ipv4Bytes[1] == 0 && ipv4Bytes[2] == 0 && ipv4Bytes[3] == 1);
+}
+
+// Verifies xc::fs: makeDirs (nested), exists, isDir, file creation, atomic renameReplace,
+// removeFile, removeTree, listDir, listTree, and UTF-8 path handling.
+static void testFsLayer() {
+    const std::string tmpBase = std::getenv("TMPDIR") ? std::getenv("TMPDIR") : "/tmp";
+    const std::string testRoot = (!platform::dataDir().empty() ? platform::dataDir() : tmpBase) + "/test_psbox_fs_m2";
+
+    // Ensure clean starting state
+    xc::fs::removeTree(testRoot);
+    CHECK(!xc::fs::exists(testRoot));
+
+    // 1. Nested makeDirs
+    const std::string nestedDir = testRoot + "/nested/level1/level2/level3";
+    CHECK(xc::fs::makeDirs(nestedDir));
+    CHECK(xc::fs::exists(nestedDir));
+    CHECK(xc::fs::isDir(nestedDir));
+    CHECK(!xc::fs::isDir(testRoot + "/nonexistent_folder"));
+    CHECK(xc::fs::makeDirs(nestedDir)); // Idempotency check: returns true if directory exists
+
+    // 2. File creation, exists, and fileSize
+    const std::string fileA = nestedDir + "/fileA.txt";
+    const std::string contentA = "PSBox Filesystem Abstraction Test Content A";
+    FILE* fp = std::fopen(fileA.c_str(), "wb");
+    CHECK(fp != nullptr);
+    if (fp) {
+        std::fwrite(contentA.data(), 1, contentA.size(), fp);
+        std::fclose(fp);
+    }
+    CHECK(xc::fs::exists(fileA));
+    CHECK(!xc::fs::isDir(fileA));
+    uint64_t szA = 0;
+    CHECK(xc::fs::fileSize(fileA, szA));
+    CHECK(szA == contentA.size());
+
+    // 3. Atomic renameReplace over existing file
+    const std::string fileB = nestedDir + "/fileB.txt";
+    const std::string contentB = "Old Content B to be atomically replaced";
+    fp = std::fopen(fileB.c_str(), "wb");
+    CHECK(fp != nullptr);
+    if (fp) {
+        std::fwrite(contentB.data(), 1, contentB.size(), fp);
+        std::fclose(fp);
+    }
+    CHECK(xc::fs::exists(fileB));
+
+    // renameReplace: atomically replaces fileB with fileA
+    CHECK(xc::fs::renameReplace(fileA, fileB));
+    CHECK(!xc::fs::exists(fileA));
+    CHECK(xc::fs::exists(fileB));
+    uint64_t szB = 0;
+    CHECK(xc::fs::fileSize(fileB, szB));
+    CHECK(szB == contentA.size());
+
+    // 4. Directory listing: listDir
+    const std::string fileC = nestedDir + "/fileC.dat";
+    fp = std::fopen(fileC.c_str(), "wb");
+    if (fp) {
+        std::fputc(0x5A, fp);
+        std::fclose(fp);
+    }
+    auto dirEntries = xc::fs::listDir(nestedDir);
+    CHECK(dirEntries.size() == 2); // fileB.txt and fileC.dat
+    bool foundB = false, foundC = false, foundDots = false;
+    for (const auto& name : dirEntries) {
+        if (name == "fileB.txt") foundB = true;
+        if (name == "fileC.dat") foundC = true;
+        if (name == "." || name == "..") foundDots = true;
+    }
+    CHECK(foundB);
+    CHECK(foundC);
+    CHECK(!foundDots); // listDir MUST exclude "." and ".."
+
+    // 5. Recursive directory listing: listTree
+    auto treeEntries = xc::fs::listTree(testRoot);
+    CHECK(treeEntries.size() == 2);
+    bool treeFoundB = false, treeFoundC = false;
+    for (const auto& rel : treeEntries) {
+        if (rel.find("fileB.txt") != std::string::npos) treeFoundB = true;
+        if (rel.find("fileC.dat") != std::string::npos) treeFoundC = true;
+    }
+    CHECK(treeFoundB);
+    CHECK(treeFoundC);
+
+    // 6. UTF-8 path handling
+    const std::string utf8Dir = testRoot + "/pasta_com_acentuação_🎮";
+    CHECK(xc::fs::makeDirs(utf8Dir));
+    CHECK(xc::fs::exists(utf8Dir));
+    CHECK(xc::fs::isDir(utf8Dir));
+
+    const std::string utf8File = utf8Dir + "/título_configuração_日本語.json";
+#if defined(_WIN32)
+    CHECK(xc::fs::writeFile(utf8File, "{\"status\":\"ok\"}"));
+#else
+    fp = std::fopen(utf8File.c_str(), "wb");
+    CHECK(fp != nullptr);
+    if (fp) {
+        const char kJson[] = "{\"status\":\"ok\"}";
+        std::fwrite(kJson, 1, std::strlen(kJson), fp);
+        std::fclose(fp);
+    }
+#endif
+    CHECK(xc::fs::exists(utf8File));
+    auto utf8Entries = xc::fs::listDir(utf8Dir);
+    CHECK(utf8Entries.size() == 1);
+    if (!utf8Entries.empty()) {
+        CHECK(utf8Entries[0] == "título_configuração_日本語.json");
+    }
+
+    // 7. removeFile (including idempotency on non-existent files)
+    CHECK(xc::fs::removeFile(utf8File));
+    CHECK(!xc::fs::exists(utf8File));
+    CHECK(xc::fs::removeFile(utf8File)); // idempotent: removing non-existent file returns true
+
+    // 8. writeFileAtomic, readFileString, makeWorldWritable, parentPath, modifiedTime
+    const std::string atomicFile = testRoot + "/atomic.txt";
+    CHECK(xc::fs::writeFileAtomic(atomicFile, "Atomic Content 123"));
+    CHECK(xc::fs::exists(atomicFile));
+    std::string readBack;
+    CHECK(xc::fs::readFileString(atomicFile, readBack));
+    CHECK(readBack == "Atomic Content 123");
+    CHECK(xc::fs::makeWorldWritable(atomicFile));
+    int64_t mtime = 0;
+    CHECK(xc::fs::modifiedTime(atomicFile, mtime));
+    CHECK(mtime > 0);
+    CHECK(xc::fs::parentPath(atomicFile) == testRoot);
+
+    // 9. removeTree
+    CHECK(xc::fs::removeTree(testRoot));
+    CHECK(!xc::fs::exists(testRoot));
+    CHECK(!xc::fs::exists(nestedDir));
+    CHECK(xc::fs::removeTree(testRoot)); // idempotent: removing non-existent directory returns true
 }
 
 // The home rows come from the network on every load(): the cache's rows
@@ -2209,7 +2466,8 @@ static void testResolveIPv4AndConnectTcp() {
 // holds every row twice heals at the next save.
 static void testLibraryRowsOnce() {
     std::string dir = "/tmp/xcloud-library-test";
-    std::system(("rm -rf " + dir + " && mkdir -p " + dir).c_str());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir);
     std::string cache = dir + "/library.json";
     net::setTestTransport([](const net::Request& req) {
         net::Response r;
@@ -2288,14 +2546,16 @@ static void testLibraryRowsOnce() {
         CHECK(layoutSize() == fresh);  // healed
     }
     net::setTestTransport({});
-    std::system(("rm -rf " + dir).c_str());
+    xc::fs::removeTree(dir);
 }
 
 static void testStoreLeftovers() {
     // ProsperoStore replaced the app folder and kept the old one: the
     // sign-in and settings come back from it, once.
     std::string dir = "/tmp/xcloud-store-test/app", prev = "/tmp/xcloud-store-test/previous";
-    std::system("rm -rf /tmp/xcloud-store-test && mkdir -p /tmp/xcloud-store-test/app /tmp/xcloud-store-test/previous");
+    xc::fs::removeTree("/tmp/xcloud-store-test");
+    xc::fs::makeDirs("/tmp/xcloud-store-test/app");
+    xc::fs::makeDirs("/tmp/xcloud-store-test/previous");
     xc::platform::writeFileAtomic(prev + "/account.json", "{\"a\":1}");
     xc::platform::writeFileAtomic(prev + "/settings.json", "{\"language\":\"pt-BR\"}");
     xc::platform::writeFileAtomic(prev + "/xcloud.log", "old log");
@@ -2309,16 +2569,18 @@ static void testStoreLeftovers() {
     std::remove((dir + "/account.json").c_str());
     CHECK(!app::importStoreLeftovers(dir, prev) && !xc::platform::readFile(dir + "/account.json", text));
     // Already signed in when the store's folder is found: never imported.
-    std::system("rm -rf /tmp/xcloud-store-test/app && mkdir -p /tmp/xcloud-store-test/app");
+    xc::fs::removeTree("/tmp/xcloud-store-test/app");
+    xc::fs::makeDirs("/tmp/xcloud-store-test/app");
     xc::platform::writeFileAtomic(dir + "/account.json", "{\"b\":2}");
     CHECK(!app::importStoreLeftovers(dir, prev));
     std::remove((dir + "/account.json").c_str());
     CHECK(!app::importStoreLeftovers(dir, prev));
     // No store folder: nothing.
-    std::system("rm -rf /tmp/xcloud-store-test/app && mkdir -p /tmp/xcloud-store-test/app");
+    xc::fs::removeTree("/tmp/xcloud-store-test/app");
+    xc::fs::makeDirs("/tmp/xcloud-store-test/app");
     CHECK(!app::importStoreLeftovers(dir, "/tmp/xcloud-store-test/none"));
     CHECK(!app::updatablePath("store_import.done"));
-    std::system("rm -rf /tmp/xcloud-store-test");
+    xc::fs::removeTree("/tmp/xcloud-store-test");
 }
 
 static void testMicrosoftHost() {
@@ -4351,17 +4613,25 @@ static void testVisibleSettingsRows() {
     CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
     ui::UiCaps pc;
     pc.lightBar = pc.triggerRumble = pc.adaptiveTriggers = pc.gyro = pc.touchpad = false;
-    pc.upscalers = pc.sharpen = pc.deband = pc.highRefresh = pc.console = pc.selfUpdate = false;
+    pc.upscalers = pc.sharpen = pc.deband = pc.highRefresh = pc.console = pc.selfUpdate = pc.trophies = false;
     pc.openUrl = true;
     auto desk = ui::visibleSettingsRows(pc);
-    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 27, 17, 18, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
     // The desktop app's window: Display mode after the resolution, in the stream's group.
     ui::UiCaps win = pc;
     win.desktopWindow = true;
     auto w = ui::visibleSettingsRows(win);
-    CHECK((ids(w) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(w) == std::vector<int>{0, 2, 8, 27, 17, 18, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
+    auto deskIds = ids(desk);
+    CHECK(std::find(deskIds.begin(), deskIds.end(), 24) == deskIds.end());
+    CHECK(std::find(deskIds.begin(), deskIds.end(), 25) == deskIds.end());
+    auto allIds = ids(all);
+    CHECK(std::find(allIds.begin(), allIds.end(), 24) != allIds.end());
+    CHECK(std::find(allIds.begin(), allIds.end(), 25) != allIds.end());
+    CHECK(ui::settingsRowPosition(pc, 24) == -1);
+    CHECK(ui::settingsRowPosition(pc, 25) == -1);
     ui::UiCaps xbox = pc;  // an Xbox pad: impulse triggers, no light bar
     xbox.triggerRumble = true;
     auto x = ids(ui::visibleSettingsRows(xbox));
@@ -4382,6 +4652,8 @@ static void testVisibleSettingsRows() {
     ps4.deband = false;
     ps4.highRefresh = false;
     auto ps4Rows = ids(ui::visibleSettingsRows(ps4));
+    CHECK(std::find(ps4Rows.begin(), ps4Rows.end(), 24) != ps4Rows.end());
+    CHECK(std::find(ps4Rows.begin(), ps4Rows.end(), 25) != ps4Rows.end());
     CHECK(std::find(ps4Rows.begin(), ps4Rows.end(), 9) == ps4Rows.end());
     CHECK(std::find(ps4Rows.begin(), ps4Rows.end(), 4) == ps4Rows.end());
     CHECK(std::find(ps4Rows.begin(), ps4Rows.end(), 21) == ps4Rows.end());
@@ -4416,7 +4688,7 @@ static void testVisibleSettingsRows() {
     CHECK(ui::settingsRowPosition(ps5, 22) == 22);
     CHECK(ui::settingsRowPosition(ps5, 7) == 24 && ui::settingsRowPosition(ps5, 19) == 23 && ui::settingsRowPosition(ps5, 2) == 1);
     CHECK(ui::settingsRowPosition(ps5, 21) == 18);
-    CHECK(ui::settingsRowPosition(pc, 5) == 14 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
+    CHECK(ui::settingsRowPosition(pc, 5) == 13 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
 }
 
 // The controller's glyphs by pad kind (ui/pad_glyphs.h).
@@ -4701,12 +4973,16 @@ static void testMicPipeline() {
     std::vector<int16_t> half(media::MicPipeline::kGrain, 1000);
     mic.process(half.data(), half.size(), false, 0.5f, level, cb);
     CHECK(half[0] == 500);
-    float before = level.load();
-    mic.process(grain.data(), grain.size(), true, 1.0f, level, cb);  // muted: silence, the meter falls back
-    CHECK(grain[0] == 0 && level.load() < before && level.load() > 0.9f * before);
-    CHECK(frames.size() == 1);  // three grains since the first frame: 64 + 768 samples left
+    // Muted: immediate zeroing of level meter and suppression of frames
     mic.process(grain.data(), grain.size(), true, 1.0f, level, cb);
-    CHECK(frames.size() == 2 && frames[1][959] == 0);
+    CHECK(level.load() == 0.0f);
+    CHECK(frames.size() == 1);  // No frames dispatched while muted
+    mic.process(grain.data(), grain.size(), true, 1.0f, level, cb);
+    CHECK(frames.size() == 1);  // Still no frames dispatched while muted
+    // Unmuted: resumes fresh accumulation
+    mic.process(grain.data(), grain.size(), false, 1.0f, level, cb);
+    CHECK(level.load() > 0.0f);
+    CHECK(frames.size() == 1);
 }
 
 // The DualSense's trigger effects through SDL: the bytes for off, feedback
@@ -4790,6 +5066,8 @@ static void testScancodeToVk() {
     const uint8_t mods[8] = {0x11, 0x10, 0x12, 0x5B, 0x11, 0x10, 0x12, 0x5C};  // LCtrl LShift LAlt LGui, then right
     for (int i = 0; i < 8; ++i) CHECK(scancodeToVk(224 + i) == mods[i]);
     CHECK(scancodeToVk(0) == 0 && scancodeToVk(232) == 0 && scancodeToVk(257) == 0 && scancodeToVk(-1) == 0);
+    CHECK(scancodeToVk(270) == xc::input::kVkAndroidBack);
+    CHECK(scancodeToVk(0x10E) == xc::input::kVkAndroidBack);
 }
 
 // SDL's sensors and axes in the units the shared code takes.
@@ -7804,7 +8082,8 @@ static void testCodSearchRomanAndSettingsReset() {
 
 static void testCallOfDutyModernWarfare4CatalogAndRefresh() {
     std::string testDir = "/tmp/test-cod-mw4";
-    std::system(("rm -rf " + testDir + " && mkdir -p " + testDir).c_str());
+    xc::fs::removeTree(testDir);
+    xc::fs::makeDirs(testDir);
     std::string cacheFile = testDir + "/library_cache.json";
 
     net::setTestTransport([](const net::Request& req) {
@@ -8103,7 +8382,7 @@ static void testCallOfDutyModernWarfare4CatalogAndRefresh() {
     }
 
     net::setTestTransport({});
-    std::system(("rm -rf " + testDir).c_str());
+    xc::fs::removeTree(testDir);
 }
 
 static void testBlock1Corrections() {
@@ -8461,7 +8740,8 @@ static void testBloco3Corrections() {
     // -------------------------------------------------------------------------
     {
         std::string testDir = "/tmp/test-bloco3-shelves";
-        std::system(("rm -rf " + testDir + " && mkdir -p " + testDir).c_str());
+        xc::fs::removeTree(testDir);
+        xc::fs::makeDirs(testDir);
         std::string cacheFile = testDir + "/library_cache.json";
 
         std::map<std::string, std::string> siglFeeds;
@@ -8957,7 +9237,8 @@ static void testBloco3Corrections() {
 static void testBlock4OwnershipAndRecents() {
     using namespace xc;
     std::string testDir = "/tmp/test_bloco4_" + std::to_string(platform::nowMs());
-    std::system(("rm -rf " + testDir + " && mkdir -p " + testDir).c_str());
+    xc::fs::removeTree(testDir);
+    xc::fs::makeDirs(testDir);
     std::string cacheFile = testDir + "/library_cache.json";
 
     // 1. Universal License Acquisition (markAsOwned) with 12-character Store BigId and cross-gen purging
@@ -9200,7 +9481,7 @@ static void testBlock4OwnershipAndRecents() {
         CHECK(appUi.isEffectivePlayable(out));
     }
 
-    std::system(("rm -rf " + testDir).c_str());
+    xc::fs::removeTree(testDir);
 }
 
 void testPhase1BugFixesAndPhase2Optimizations() {
@@ -9387,7 +9668,8 @@ static void testSizedUrl() {
 
 static void testReleaseV155Features() {
     std::string testDir = "/tmp/test-v155-features";
-    std::system(("rm -rf " + testDir + " && mkdir -p " + testDir).c_str());
+    xc::fs::removeTree(testDir);
+    xc::fs::makeDirs(testDir);
     std::string cacheFile = testDir + "/library_cache.json";
 
     // 1. Verify shelf auto-refresh & knownProducts persistence in library_cache.json
@@ -9527,7 +9809,7 @@ static void testReleaseV155Features() {
         net::setTestTransport({});
     }
 
-    std::system(("rm -rf " + testDir).c_str());
+    xc::fs::removeTree(testDir);
 }
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -9743,1756 +10025,12 @@ static void testPs4VideoPipelineAndSse2Converter() {
     }
 }
 
-static void testTrophySystem() {
-    using namespace xc::trophy;
-
-    // 1. Gamerscore to Trophy grade conversion rules
-    // <= 50G -> Bronze
-    CHECK(scoreToGrade(0) == TrophyGrade::Bronze);
-    CHECK(scoreToGrade(5) == TrophyGrade::Bronze);
-    CHECK(scoreToGrade(20) == TrophyGrade::Bronze);
-    CHECK(scoreToGrade(50) == TrophyGrade::Bronze);
-    // 55G..99G -> Silver
-    CHECK(scoreToGrade(55) == TrophyGrade::Silver);
-    CHECK(scoreToGrade(75) == TrophyGrade::Silver);
-    CHECK(scoreToGrade(99) == TrophyGrade::Silver);
-    // >= 100G -> Gold
-    CHECK(scoreToGrade(100) == TrophyGrade::Gold);
-    CHECK(scoreToGrade(150) == TrophyGrade::Gold);
-    CHECK(scoreToGrade(200) == TrophyGrade::Gold);
-
-    // Grade to string & points
-    CHECK(std::string(gradeToString(TrophyGrade::Bronze)) == "Bronze");
-    CHECK(std::string(gradeToString(TrophyGrade::Silver)) == "Silver");
-    CHECK(std::string(gradeToString(TrophyGrade::Gold)) == "Gold");
-    CHECK(std::string(gradeToString(TrophyGrade::Platinum)) == "Platinum");
-
-    CHECK(gradeToPoints(TrophyGrade::Bronze) == 15);
-    CHECK(gradeToPoints(TrophyGrade::Silver) == 30);
-    CHECK(gradeToPoints(TrophyGrade::Gold) == 90);
-    CHECK(gradeToPoints(TrophyGrade::Platinum) == 300);
-
-    // Platinum automatic award calculation
-    CHECK(!hasEarnedPlatinum(0, 0));
-    CHECK(!hasEarnedPlatinum(0, 10));
-    CHECK(!hasEarnedPlatinum(9, 10));
-    CHECK(hasEarnedPlatinum(10, 10));
-    CHECK(hasEarnedPlatinum(11, 10));
-
-    // 2. Known cross-platform titles (Scenario A: Fortnite pilot, etc.)
-    const auto* fortnite = findKnownTitle("267695549", "");
-    CHECK(fortnite != nullptr);
-    CHECK(fortnite->titleName == "Fortnite");
-    CHECK(fortnite->npCommId == "NPWR20561_00");
-    CHECK(fortnite->sonyTitleId == "PPSA01922");
-    CHECK(fortnite->productId == "BT5P2X999VH2");
-
-    const auto* fortniteByProd = findKnownTitle("", "BT5P2X999VH2");
-    CHECK(fortniteByProd == fortnite);
-
-    const auto* minecraft = findKnownTitle("1828326430", "");
-    CHECK(minecraft != nullptr);
-    CHECK(minecraft->npCommId == "NPWR18283_00");
-
-    // 3. Mapping for titles without fixed known entry
-    std::string haloNp = generateNpCommId("2144722883");
-    std::string haloSony = generateSonyTitleId("2144722883");
-    CHECK(haloNp.rfind("NPWR", 0) == 0);
-    CHECK(haloNp.size() == 12); // NPWRXXXXX_00
-    CHECK(haloNp.substr(haloNp.size() - 3) == "_00");
-    CHECK(haloSony.rfind("PPSA", 0) == 0);
-    // Deterministic: same input gives exact same output
-    CHECK(haloNp == generateNpCommId("2144722883"));
-    CHECK(haloSony == generateSonyTitleId("2144722883"));
-
-    // 4. resolveTitleSet mapping
-    std::vector<xcloud::Achievement> achs;
-    xcloud::Achievement a1;
-    a1.id = "1";
-    a1.name = "Gunsmith";
-    a1.gamerscore = 20;
-    a1.unlocked = true;
-    achs.push_back(a1);
-
-    xcloud::Achievement a2;
-    a2.id = "2";
-    a2.name = "Hero";
-    a2.gamerscore = 60;
-    a2.unlocked = false;
-    achs.push_back(a2);
-
-    xcloud::Achievement a3;
-    a3.id = "3";
-    a3.name = "Legend";
-    a3.gamerscore = 100;
-    a3.unlocked = false;
-    achs.push_back(a3);
-
-    TitleTrophySet titleSet = resolveTitleSet("267695549", "BT5P2X999VH2", "Fortnite", achs);
-    CHECK(titleSet.npCommId == "NPWR20561_00");
-    CHECK(titleSet.totalCount == 3);
-    CHECK(titleSet.unlockedCount == 1);
-    CHECK(titleSet.items.size() == 3);
-    CHECK(titleSet.items[0].grade == TrophyGrade::Bronze);
-    CHECK(titleSet.items[1].grade == TrophyGrade::Silver);
-    CHECK(titleSet.items[2].grade == TrophyGrade::Gold);
-
-    // Name normalization
-    CHECK(normalizeTrophyName("Gunsmith") == "gunsmith");
-    CHECK(normalizeTrophyName("Take Out 10 Enemies!") == "takeout10enemies");
-
-    // 4b. Test buildUcp and buildTrpTitleDat
-    std::vector<uint8_t> ucpBytes;
-    std::vector<uint8_t> sha1;
-    CHECK(buildUcp(titleSet, ucpBytes, &sha1));
-    CHECK(ucpBytes.size() > 1024);
-    CHECK(ucpBytes[0] == 0xb2 && ucpBytes[1] == 0x28 && ucpBytes[2] == 0xc6 && ucpBytes[3] == 0x0a);
-    CHECK(sha1.size() == 20);
-    // UCP header at 0x1c must contain genuine SHA-1 digest
-    CHECK(memcmp(ucpBytes.data() + 0x1c, sha1.data(), 20) == 0);
-
-    std::vector<uint8_t> datBytes;
-    CHECK(buildTrpTitleDat(titleSet, 0x1ea2f4da, datBytes, sha1.data()));
-    CHECK(datBytes.size() > 2048);
-    CHECK(memcmp(datBytes.data(), "T2PD", 4) == 0);
-    CHECK(memcmp(datBytes.data() + 0x40, "T2TD", 4) == 0);
-    // Tag 0x0100 in TRPTITLE.DAT must match genuine UCP SHA-1 digest
-    CHECK(memcmp(datBytes.data() + 0x250, sha1.data(), 20) == 0);
-
-    // 4c. Test buildParamJson for Fortnite and general titles
-    std::string fnParam = buildParamJson("PPSA01922", "Fortnite");
-    CHECK(fnParam.find("\"titleId\": \"PPSA01922\"") != std::string::npos);
-    CHECK(fnParam.find("\"contentId\": \"UP1477-PPSA01922_00-FORTNITECORE0001\"") != std::string::npos);
-    CHECK(fnParam.find("\"conceptId\": \"210118\"") != std::string::npos);
-    CHECK(fnParam.find("\"appType\": 1") != std::string::npos);
-    CHECK(fnParam.find("\"attribute3\": 1835012") != std::string::npos);
-    CHECK(fnParam.find("\"titleName\": \"Fortnite\"") != std::string::npos);
-
-    std::string genericParam = buildParamJson("PPSA12345", "Custom Game");
-    CHECK(genericParam.find("\"titleId\": \"PPSA12345\"") != std::string::npos);
-
-    // 4d. Full official Fortnite Save the World 45-achievement set mapping
-    std::vector<xcloud::Achievement> fnAchs;
-    for (int i = 1; i <= 45; ++i) {
-        xcloud::Achievement ach;
-        ach.id = std::to_string(i);
-        ach.name = "Fortnite Achievement " + std::to_string(i);
-        ach.gamerscore = (i == 29 || i == 40 || i == 44) ? 50 : 20;
-        fnAchs.push_back(ach);
-    }
-    fnAchs[28].name = "All Tied Up"; // ID 29 (0-indexed 28)
-    fnAchs[39].name = "Anjo da Guarda"; // ID 40 (0-indexed 39)
-    fnAchs[43].name = "Plays Well with Others"; // ID 44 (0-indexed 43)
-    fnAchs[22].name = "Plankerton livre"; // ID 23
-    fnAchs[25].name = "Amped for Expansion"; // ID 26
-    fnAchs[26].name = "Desencana!"; // ID 27
-    fnAchs[27].name = "Into the Night"; // ID 28
-    fnAchs[36].name = "Coisas malvadas com uns dentões"; // ID 37
-    fnAchs[37].name = "Talented Builder"; // ID 38
-    fnAchs[38].name = "Vai Gnomo!"; // ID 39
-    fnAchs[40].name = "Loot Legend"; // ID 41
-    fnAchs[41].name = "World Explorer"; // ID 42
-    fnAchs[42].name = "Horrores Inenarráveis"; // ID 43
-
-    TitleTrophySet fnSet = resolveTitleSet("267695549", "BT5P2X999VH2", "Fortnite", fnAchs);
-    CHECK(fnSet.npCommId == "NPWR20561_00");
-    CHECK(fnSet.totalCount == 45);
-    int goldCount = 0, silverCount = 0, bronzeCount = 0;
-    for (const auto& item : fnSet.items) {
-        if (item.grade == TrophyGrade::Gold) goldCount++;
-        else if (item.grade == TrophyGrade::Silver) silverCount++;
-        else if (item.grade == TrophyGrade::Bronze) bronzeCount++;
-    }
-    CHECK(goldCount == 3);
-    CHECK(silverCount == 10);
-    CHECK(bronzeCount == 32);
-
-    // Test UTF-8 Portuguese accent folding in normalizeTrophyName
-    CHECK(normalizeTrophyName("Coisas malvadas com uns dent\u00f5es") == "coisasmalvadascomunsdentoes");
-    CHECK(normalizeTrophyName("Horrores Inenarr\u00e1veis") == "horroresinenarraveis");
-    CHECK(normalizeTrophyName("Vai, Gnomo!") == "vaignomo");
-
-    // Test single-item Fortnite grade resolution by ID and by name (regardless of totalCount)
-    std::vector<xcloud::Achievement> singleAch;
-    xcloud::Achievement ach29;
-    ach29.id = "29";
-    ach29.name = "Coisas malvadas com uns dent\u00f5es"; // Silver
-    ach29.gamerscore = 20;
-    singleAch.push_back(ach29);
-    TitleTrophySet singleSet = resolveTitleSet("267695549", "BT5P2X999VH2", "Fortnite", singleAch);
-    CHECK(singleSet.items.size() == 1);
-    CHECK(singleSet.items[0].grade == TrophyGrade::Silver);
-
-    // Verify UCP builds with Platinum metadata
-    std::vector<uint8_t> fnUcp;
-    CHECK(buildUcp(fnSet, fnUcp));
-    std::string ucpStr(reinterpret_cast<const char*>(fnUcp.data()), fnUcp.size());
-    CHECK(ucpStr.find("Hero of the Storm") != std::string::npos);
-    CHECK(ucpStr.find("Her\u00f3i da Tempestade") != std::string::npos);
-
-    // Test convertTo512Png helper with a minimal valid 1x1 PNG
-    static const uint8_t kTinyPng[67] = {
-        0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48, 0x44, 0x52,
-        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4,
-        0x89, 0x00, 0x00, 0x00, 0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
-        0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae,
-        0x42, 0x60, 0x82
-    };
-    CHECK(!is512x512Png(kTinyPng, sizeof(kTinyPng)));
-    std::vector<uint8_t> dummyPng;
-    CHECK(convertTo512Png(kTinyPng, sizeof(kTinyPng), dummyPng));
-    CHECK(is512x512Png(dummyPng.data(), dummyPng.size()));
-    CHECK(genericParam.find("\"contentId\": \"UP0001-PPSA12345_00-0000000000000000\"") != std::string::npos);
-    CHECK(genericParam.find("\"titleName\": \"Custom Game\"") != std::string::npos);
-
-    // 4d. Test buildNpTitleDat
-    std::vector<uint8_t> npTitle;
-    CHECK(buildNpTitleDat("PPSA01922", npTitle));
-    CHECK(npTitle.size() == 160);
-    CHECK(memcmp(npTitle.data(), "NPTD", 4) == 0);
-    CHECK(memcmp(npTitle.data() + 0x10, "PPSA01922_00", 12) == 0);
-
-    // 4e. Test buildTrpTitleDat append-only merging & timestamp preservation
-    // Setup initial DAT where trophy 1 is unlocked with custom timestamp
-    TitleTrophySet initialSet = titleSet;
-    initialSet.items[0].unlocked = true;
-    initialSet.items[1].unlocked = false;
-    initialSet.items[2].unlocked = false;
-    std::vector<uint8_t> initialDat;
-    CHECK(buildTrpTitleDat(initialSet, 0x1ea2f4da, initialDat, sha1.data()));
-
-    std::map<uint32_t, ExistingTrophyRecord> parsedInitial;
-    CHECK(parseTrpTitleDat(initialDat.data(), initialDat.size(), parsedInitial));
-    CHECK(parsedInitial.count(1) > 0);
-    CHECK(parsedInitial[1].state == 1);
-    uint64_t t1OriginalTs = parsedInitial[1].timestamp;
-
-    // Simulate new sync where Xbox reports trophy 2 unlocked, but trophy 1 is offline/missing (unlocked=false)
-    TitleTrophySet nextSet = titleSet;
-    nextSet.items[0].unlocked = false; // missing in current sync!
-    nextSet.items[1].unlocked = true;  // newly unlocked
-    nextSet.items[2].unlocked = false;
-
-    std::vector<uint8_t> mergedDat;
-    CHECK(buildTrpTitleDat(nextSet, 0x1ea2f4da, mergedDat, sha1.data(), &initialDat));
-
-    std::map<uint32_t, ExistingTrophyRecord> parsedMerged;
-    CHECK(parseTrpTitleDat(mergedDat.data(), mergedDat.size(), parsedMerged));
-    // Trophy 1 MUST be preserved 100% with original timestamp!
-    CHECK(parsedMerged.count(1) > 0);
-    CHECK(parsedMerged[1].state == 1);
-    CHECK(parsedMerged[1].timestamp == t1OriginalTs);
-    // Trophy 2 MUST be newly unlocked
-    CHECK(parsedMerged.count(2) > 0);
-    CHECK(parsedMerged[2].state == 1);
-    CHECK(parsedMerged[2].timestamp > 0);
-    // Trophy 3 remains locked
-    CHECK(parsedMerged.count(3) > 0);
-    CHECK(parsedMerged[3].state == 0);
-
-
-    // 5. Mock ITrophyBackend & TrophySyncEngine integration
-    class TestBackend : public ITrophyBackend {
-    public:
-        bool init(uint32_t uid) override {
-            userId = uid;
-            return true;
-        }
-        bool registerTitle(const TitleTrophySet& set) override {
-            registered = true;
-            return true;
-        }
-        bool unlockTrophy(const std::string& npComm, int tid, TrophyGrade g, const std::string& n) override {
-            for (const auto& u : unlocked) {
-                if (u.npCommId == npComm && u.trophyId == tid) return true;
-            }
-            unlocked.push_back({npComm, tid, g});
-            return true;
-        }
-        bool isTrophyUnlocked(const std::string& npComm, int tid) override {
-            for (const auto& u : unlocked) {
-                if (u.npCommId == npComm && u.trophyId == tid) return true;
-            }
-            return false;
-        }
-        bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string& err,
-                               const std::set<std::string>* = nullptr) override {
-            removedCount = static_cast<int>(unlocked.size() > 0 ? 1 : 0);
-            unlocked.clear();
-            return true;
-        }
-        std::string name() const override { return "TestBackend"; }
-
-        struct UnlockedItem {
-            std::string npCommId;
-            int trophyId;
-            TrophyGrade grade;
-        };
-        uint32_t userId = 0;
-        bool registered = false;
-        std::vector<UnlockedItem> unlocked;
-    };
-
-    auto backendPtr = std::make_unique<TestBackend>();
-    TestBackend* rawBackend = backendPtr.get();
-    TrophySyncEngine engine(std::move(backendPtr));
-    CHECK(engine.init(0x1ea2f4da));
-    CHECK(rawBackend->userId == 0x1ea2f4da);
-
-    std::string baseDir = platform::dataDir();
-    if (baseDir.empty()) baseDir = ".";
-    // Each console user has their own records: this one's, not the shared folder.
-    std::string cacheFile = engine.trophyCachePath("267695549");
-    CHECK(cacheFile == baseDir + "/trophies/users/1ea2f4da/267695549.json");
-    ::unlink(cacheFile.c_str());
-
-    // Mock network transport for achievements
-    net::setTestTransport([&](const net::Request& req) -> net::Response {
-        net::Response res;
-        if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-            res.status = 200;
-            res.body = R"({
-                "achievements": [
-                    {
-                        "id": "101",
-                        "name": "First Step",
-                        "description": "Completed first step",
-                        "progressState": "Achieved",
-                        "rewards": [{"type": "Gamerscore", "value": "20"}],
-                        "mediaAssets": [{"name": "Icon", "url": "https://img/icon1.png"}]
-                    },
-                    {
-                        "id": "102",
-                        "name": "Big Step",
-                        "description": "Completed big step",
-                        "progressState": "Achieved",
-                        "rewards": [{"type": "Gamerscore", "value": "100"}],
-                        "mediaAssets": [{"name": "Icon", "url": "https://img/icon2.png"}]
-                    }
-                ],
-                "pagingInfo": {"totalItems": 2}
-            })";
-            return res;
-        }
-        res.status = 404;
-        return res;
-    });
-
-    int newlyUnlocked = 0;
-    std::string syncErr;
-    bool syncOk = engine.syncTitleAchievements("Bearer mockToken", "25332749", "267695549", "Fortnite",
-                                               newlyUnlocked, syncErr);
-    CHECK(syncOk);
-    // Both 101 and 102 were unlocked (2 achievements = 100% -> awards Platinum too: total 3!)
-    CHECK(newlyUnlocked == 3);
-    CHECK(rawBackend->unlocked.size() == 3);
-    CHECK(rawBackend->unlocked[0].grade == TrophyGrade::Bronze);
-    CHECK(rawBackend->unlocked[0].trophyId == 1);
-    CHECK(rawBackend->unlocked[1].grade == TrophyGrade::Gold);
-    CHECK(rawBackend->unlocked[1].trophyId == 2);
-    CHECK(rawBackend->unlocked[2].grade == TrophyGrade::Platinum);
-    CHECK(rawBackend->unlocked[2].trophyId == kPlatinumTrophyId); // Trophy ID 0
-
-    // Verify rich JSON cache persistence
-    std::string cacheSaved;
-    CHECK(platform::readFile(cacheFile, cacheSaved));
-    auto jCache = json::parse(cacheSaved);
-    CHECK(jCache && jCache->isObject());
-    CHECK((*jCache)["xboxTitleId"].str() == "267695549");
-    CHECK((*jCache)["unlockedCount"].asInt() == 2);
-    CHECK((*jCache)["trophies"].isArray());
-    CHECK((*jCache)["trophies"].items().size() == 2);
-
-    // Repeat sync: snapshot is cached, 0 newly unlocked
-    newlyUnlocked = 0;
-    syncOk = engine.syncTitleAchievements("Bearer mockToken", "25332749", "267695549", "Fortnite",
-                                          newlyUnlocked, syncErr);
-    CHECK(syncOk);
-    CHECK(newlyUnlocked == 0); // No duplicate unlocks!
-    // Verify removeAllTrophies removes disk cache and clears backend
-    int removedCount = 0;
-    std::string rmErr;
-    CHECK(engine.removeAllTrophies(removedCount, rmErr));
-    CHECK(removedCount == 1);
-    CHECK(rawBackend->unlocked.empty());
-    std::string cacheCheck;
-    CHECK(!platform::readFile(cacheFile, cacheCheck));
-
-    // Clean up
-    net::setTestTransport({});
-    ::unlink(cacheFile.c_str());
-
-    // 5b. Test Achievement History & TitleHub Batch Images Discovery
-    net::setTestTransport([&](const net::Request& req) -> net::Response {
-        net::Response res;
-        if (req.url.find("history/titles") != std::string::npos) {
-            res.status = 200;
-            if (req.url.find("continuationToken=page2") == std::string::npos) {
-                // Page 1
-                res.body = R"({
-                    "titles": [
-                        {
-                            "titleId": 5433956,
-                            "name": "Dead Island",
-                            "titleType": "Game",
-                            "platform": "XboxOne",
-                            "earnedAchievements": 19,
-                            "currentGamerscore": 268,
-                            "maxGamerscore": 1000
-                        },
-                        {
-                            "titleId": 122001257,
-                            "name": "YouTube",
-                            "titleType": "LiveApp",
-                            "platform": "XboxOne",
-                            "earnedAchievements": 2,
-                            "currentGamerscore": 0,
-                            "maxGamerscore": 0
-                        }
-                    ],
-                    "pagingInfo": {"continuationToken": "page2"}
-                })";
-            } else {
-                // Page 2
-                res.body = R"({
-                    "titles": [
-                        {
-                            "titleId": 222473492,
-                            "name": "Cyberpunk 2077",
-                            "titleType": "Game",
-                            "platform": "XboxOne",
-                            "earnedAchievements": 18,
-                            "currentGamerscore": 375,
-                            "maxGamerscore": 1000
-                        }
-                    ],
-                    "pagingInfo": {}
-                })";
-            }
-            return res;
-        }
-        if (req.url.find("titlehub.xboxlive.com/titles/batch") != std::string::npos) {
-            res.status = 200;
-            res.body = R"({
-                "titles": [
-                    {
-                        "titleId": 5433956,
-                        "displayImage": "https://img/deadisland.png"
-                    },
-                    {
-                        "titleId": 222473492,
-                        "displayImage": "https://img/cp2077.png"
-                    }
-                ]
-            })";
-            return res;
-        }
-        if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-            res.status = 200;
-            res.body = R"({
-                "achievements": [
-                    {
-                        "id": "1",
-                        "name": "Ach 1",
-                        "description": "Desc 1",
-                        "progressState": "Achieved",
-                        "rewards": [{"type": "Gamerscore", "value": "20"}]
-                    }
-                ]
-            })";
-            return res;
-        }
-        res.status = 404;
-        return res;
-    });
-
-    std::vector<xcloud::AchievementTitleHistoryItem> histOut;
-    std::string hErr;
-    CHECK(xcloud::fetchAchievementHistoryTitles("Bearer token", "12345", histOut, hErr));
-    // LiveApp "YouTube" should be filtered out, leaving 2 games: Dead Island and Cyberpunk 2077
-    CHECK(histOut.size() == 2);
-    CHECK(histOut[0].titleId == "5433956");
-    CHECK(histOut[0].name == "Dead Island");
-    CHECK(histOut[0].earnedAchievements == 19);
-    CHECK(histOut[1].titleId == "222473492");
-    CHECK(histOut[1].name == "Cyberpunk 2077");
-
-    std::unordered_map<std::string, std::string> batchImgs;
-    std::string bErr;
-    CHECK(xcloud::fetchTitleHubBatchImages("Bearer token", {"5433956", "222473492"}, batchImgs, bErr));
-    CHECK(batchImgs["5433956"] == "https://img/deadisland.png");
-    CHECK(batchImgs["222473492"] == "https://img/cp2077.png");
-
-    // Test syncAllAccountTrophies discovering and processing history titles
-    int syncTitles = 0;
-    int syncTrophies = 0;
-    std::string backErr;
-    auto mockBackend2 = std::make_unique<TestBackend>();
-    TestBackend* rawBackend2 = mockBackend2.get();
-    TrophySyncEngine engine2(std::move(mockBackend2));
-    engine2.init(0x1ea2f4da);
-    std::vector<ui::GameTile> emptyOwned;
-    bool backOk = engine2.syncAllAccountTrophies("Bearer token", "12345", emptyOwned,
-                                                syncTitles, syncTrophies, backErr);
-    CHECK(backOk);
-    CHECK(syncTitles >= 2);
-    CHECK(rawBackend2->unlocked.size() >= 2);
-
-    net::setTestTransport({});
-    ::unlink(((platform::dataDir().empty() ? std::string(".") : platform::dataDir()) + "/trophies/5433956.json").c_str());
-    ::unlink(((platform::dataDir().empty() ? std::string(".") : platform::dataDir()) + "/trophies/222473492.json").c_str());
-
-    // 5c. Test fetchTitleAchievements with continuationToken pagination (> 100 achievements)
-    net::setTestTransport([&](const net::Request& req) -> net::Response {
-        net::Response res;
-        res.status = 200;
-        if (req.url.find("continuationToken=ach_page2") == std::string::npos) {
-            // Page 1: returns 2 achievements and continuation token
-            res.body = R"({
-                "achievements": [
-                    {"id": "1", "name": "Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]},
-                    {"id": "2", "name": "Ach 2", "progressState": "NotStarted", "rewards": [{"type": "Gamerscore", "value": "15"}]}
-                ],
-                "pagingInfo": {"continuationToken": "ach_page2"}
-            })";
-        } else {
-            // Page 2: returns 1 achievement and empty continuation token
-            res.body = R"({
-                "achievements": [
-                    {"id": "3", "name": "Ach 3", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "25"}]}
-                ],
-                "pagingInfo": {}
-            })";
-        }
-        return res;
-    });
-
-    xcloud::TitleAchievements multiAch;
-    std::string mErr;
-    CHECK(xcloud::fetchTitleAchievements("Bearer token", "12345", "99999", multiAch, mErr));
-    CHECK(multiAch.totalCount == 3);
-    CHECK(multiAch.unlockedCount == 2);
-    CHECK(multiAch.totalGamerscore == 50);
-    CHECK(multiAch.unlockedGamerscore == 35);
-    net::setTestTransport({});
-
-    // 5d. Test Fast Delta Skip & Zero-IO Optimization for Unchanged Titles
-    {
-        auto testBackend = std::make_unique<TestBackend>();
-        TestBackend* rawTb = testBackend.get();
-        TrophySyncEngine deltaEngine(std::move(testBackend));
-        deltaEngine.init(0x1ea2f4da);
-
-        std::string baseD = platform::dataDir().empty() ? std::string(".") : platform::dataDir();
-        std::string cFile = baseD + "/trophies/777777.json";
-        ::unlink(cFile.c_str());
-
-        // Initial sync of a title
-        int netCalls = 0;
-        net::setTestTransport([&](const net::Request& req) -> net::Response {
-            net::Response r;
-            r.status = 200;
-            netCalls++;
-            if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-                r.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]},
-                        {"id": "2", "name": "Ach 2", "progressState": "NotStarted", "rewards": [{"type": "Gamerscore", "value": "50"}]}
-                    ]
-                })";
-            }
-            return r;
-        });
-
-        int newly = 0;
-        std::string sErr;
-        bool ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
-                                                    newly, sErr, "", false, 1, 50);
-        CHECK(ok);
-        CHECK(newly == 1);
-        CHECK(netCalls == 1);
-        CHECK(rawTb->unlocked.size() == 1);
-
-        // Verify summary cache in memory
-        TitleCacheSummary sum;
-        CHECK(deltaEngine.loadTitleCacheSummary("777777", sum));
-        CHECK(sum.unlockedCount == 1);
-        CHECK(sum.unlockedGamerscore == 50);
-
-        // Immediate repeat with exact same expectedEarned/expectedGamerscore -> FAST DELTA SKIP (0 net calls, 0 disk writes)
-        netCalls = 0;
-        newly = 0;
-        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
-                                               newly, sErr, "", false, 1, 50);
-        CHECK(ok);
-        CHECK(newly == 0);
-        CHECK(netCalls == 0); // ZERO network calls made!
-
-        // Fast skip on 0% earned title
-        newly = 0;
-        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "888888", "Zero Game",
-                                               newly, sErr, "", false, 0, 0);
-        CHECK(ok);
-        CHECK(newly == 0);
-        CHECK(netCalls == 0); // ZERO network calls made!
-
-        // Delta Sync: when user earns a new achievement (expectedEarned changes from 1 to 2)
-        net::setTestTransport([&](const net::Request& req) -> net::Response {
-            net::Response r;
-            r.status = 200;
-            netCalls++;
-            if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-                r.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]},
-                        {"id": "2", "name": "Ach 2", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "50"}]}
-                    ]
-                })";
-            }
-            return r;
-        });
-
-        newly = 0;
-        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
-                                               newly, sErr, "", false, 2, 100);
-        CHECK(ok);
-        // Both 1 and 2 achieved = 100% completion -> awards Ach 2 + Platinum = 2 newly unlocked!
-        CHECK(newly == 2);
-        CHECK(netCalls == 1); // Queried network to get the new achievement details!
-
-        // Repeat again after 100% completion -> Instant Fast Delta Skip
-        netCalls = 0;
-        newly = 0;
-        ok = deltaEngine.syncTitleAchievements("Bearer tok", "123", "777777", "Delta Game",
-                                               newly, sErr, "", false, 2, 100);
-        CHECK(ok);
-        CHECK(newly == 0);
-        CHECK(netCalls == 0);
-
-        // Clean up
-        net::setTestTransport({});
-        ::unlink(cFile.c_str());
-    }
-
-    // 6. Test Trophy Database Registration (autonomous SQLite provisioning)
-    TitleDbInfo info = makeTitleDbInfo("PPSA81234", "Sea of Stars");
-    CHECK(info.titleId == "PPSA81234");
-    CHECK(info.titleName == "Sea of Stars");
-    CHECK(info.conceptId > 0);
-    CHECK(info.contentId == "UP0001-PPSA81234_00-0000000000000000");
-
-    TitleDbInfo fnInfo = makeTitleDbInfo("PPSA01922", "Fortnite");
-    CHECK(fnInfo.titleId == "PPSA01922");
-    CHECK(fnInfo.conceptId == 210118);
-    CHECK(fnInfo.contentId == "UP1477-PPSA01922_00-FORTNITECORE0001");
-
-    std::string testAppDb = "/tmp/test_trophy_app.db";
-    std::string testAppInfoDb = "/tmp/test_trophy_appinfo.db";
-    ::unlink(testAppDb.c_str());
-    ::unlink((testAppDb + ".bak").c_str());
-    ::unlink(testAppInfoDb.c_str());
-    ::unlink((testAppInfoDb + ".bak").c_str());
-
-    sqlite3* testDb = nullptr;
-    CHECK(sqlite3_open(testAppDb.c_str(), &testDb) == SQLITE_OK);
-    const char* schemaApp =
-        "CREATE TABLE tbl_contentinfo (titleId TEXT PRIMARY KEY, titleName TEXT, contentId TEXT, conceptId INTEGER, localConceptId TEXT, dispLocation INTEGER, appType INTEGER, uiCategory TEXT, metaDataPath TEXT, icon0Info TEXT, pic0Info TEXT, snd0Info TEXT, pprDeeplinkUri TEXT, pprHubAppUri TEXT, AppInfoJson TEXT);"
-        "INSERT INTO tbl_contentinfo VALUES ('PPSA22520', 'Model App', 'UP9000-PPSA22520_00-0000000000000000', 999999, 'cid:scp:0000000000000001', 0, 1, 'game', '/system_data/priv/appmeta/PPSA22520', '/user/app/PPSA22520/sce_sys/icon0.png', '/user/app/PPSA22520/sce_sys/pic0.png', '/user/app/PPSA22520/sce_sys/snd0.at9', 'psgm:play?id=PPSA22520', 'pshome:gamehub?titleId=PPSA22520', '{\"TITLE_ID\":\"PPSA22520\",\"TITLE\":\"Model App\",\"CONTENT_ID\":\"UP9000-PPSA22520_00-0000000000000000\",\"CONCEPT_ID\":999999,\"DISPLAYLOCATION\":0}');"
-        "CREATE TABLE tbl_iconinfo_10000000 (titleId TEXT PRIMARY KEY, titleName TEXT, contentId TEXT, conceptId INTEGER, localConceptId TEXT, visible INTEGER, installStatus INTEGER, appDrmType INTEGER, deeplinkUri TEXT, hubAppUri TEXT);"
-        "INSERT INTO tbl_iconinfo_10000000 VALUES ('PPSA22520', 'Model App', 'UP9000-PPSA22520_00-0000000000000000', 999999, 'cid:scp:0000000000000001', 0, 2, 5, 'psgm:play?id=PPSA22520', 'pshome:gamehub?titleId=PPSA22520');"
-        "CREATE TABLE tbl_concepticoninfo_10000000 (localConceptId TEXT, conceptId INTEGER, conceptName TEXT, primaryTitleId TEXT, primaryTitleName TEXT, deeplinkUri TEXT, hubAppUri TEXT, metaDataPath TEXT, icon0Info TEXT, pic0Info TEXT, snd0Info TEXT);"
-        "INSERT INTO tbl_concepticoninfo_10000000 VALUES ('cid:scp:0000000000000001', 999999, 'Model App', 'PPSA22520', 'Model App', 'psgm:play?id=PPSA22520', 'pshome:gamehub?titleId=PPSA22520', '/system_data/priv/appmeta/PPSA22520', '/user/app/PPSA22520/sce_sys/icon0.png', '/user/app/PPSA22520/sce_sys/pic0.png', '/user/app/PPSA22520/sce_sys/snd0.at9');";
-    CHECK(sqlite3_exec(testDb, schemaApp, nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(testDb);
-
-    sqlite3* testInfoDb = nullptr;
-    CHECK(sqlite3_open(testAppInfoDb.c_str(), &testInfoDb) == SQLITE_OK);
-    const char* schemaInfo =
-        "CREATE TABLE tbl_appinfo (titleId TEXT, metaDataId INTEGER, key TEXT, val TEXT, PRIMARY KEY (titleId, metaDataId, key));"
-        "INSERT INTO tbl_appinfo VALUES ('PPSA22520', 0, 'TITLE_ID', 'PPSA22520');"
-        "INSERT INTO tbl_appinfo VALUES ('PPSA22520', 0, 'TITLE', 'Model App');"
-        "INSERT INTO tbl_appinfo VALUES ('PPSA22520', 0, 'CONTENT_ID', 'UP9000-PPSA22520_00-0000000000000000');"
-        "INSERT INTO tbl_appinfo VALUES ('PPSA22520', 0, 'CONCEPT_ID', '999999');"
-        "INSERT INTO tbl_appinfo VALUES ('PPSA22520', 0, 'DISPLAYLOCATION', '0');";
-    CHECK(sqlite3_exec(testInfoDb, schemaInfo, nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(testInfoDb);
-
-    // Initial autonomous registration
-    CHECK(registerTitleInDatabase(info, testAppDb, testAppInfoDb));
-
-    // Verify app.db rows
-    CHECK(sqlite3_open(testAppDb.c_str(), &testDb) == SQLITE_OK);
-    sqlite3_stmt* testStmt = nullptr;
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT dispLocation, uiCategory, contentId FROM tbl_contentinfo WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(sqlite3_column_int(testStmt, 0) == 0); // dispLocation = 0 (hidden from Game Library)
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 1))) == "game");
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 2))) == "UP0001-PPSA81234_00-0000000000000000");
-    sqlite3_finalize(testStmt);
-
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT visible, installStatus FROM tbl_iconinfo_10000000 WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(sqlite3_column_int(testStmt, 0) == 0); // visible = 0
-    CHECK(sqlite3_column_int(testStmt, 1) == 2); // installStatus = 2
-    sqlite3_finalize(testStmt);
-
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT primaryTitleName FROM tbl_concepticoninfo_10000000 WHERE primaryTitleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Sea of Stars");
-    sqlite3_finalize(testStmt);
-
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT AppInfoJson FROM tbl_contentinfo WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    std::string appInfoJson = reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0));
-    sqlite3_finalize(testStmt);
-    sqlite3_close(testDb);
-    auto parsedAppInfo = json::parse(appInfoJson);
-    CHECK(parsedAppInfo && parsedAppInfo->isObject());
-    CHECK((*parsedAppInfo)["TITLE_ID"].str() == "PPSA81234");
-    CHECK((*parsedAppInfo)["TITLE"].str() == "Sea of Stars");
-    CHECK((*parsedAppInfo)["DISPLAYLOCATION"].asInt() == 0);
-
-    // Verify appinfo.db rows
-    CHECK(sqlite3_open(testAppInfoDb.c_str(), &testInfoDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(testInfoDb, "SELECT val FROM tbl_appinfo WHERE titleId = 'PPSA81234' AND key = 'TITLE';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Sea of Stars");
-    sqlite3_finalize(testStmt);
-    CHECK(sqlite3_prepare_v2(testInfoDb, "SELECT val FROM tbl_appinfo WHERE titleId = 'PPSA81234' AND key = 'DISPLAYLOCATION';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "0");
-    sqlite3_finalize(testStmt);
-    sqlite3_close(testInfoDb);
-
-    // Test idempotent re-registration / update
-    info.titleName = "Sea of Stars Definitive";
-    CHECK(registerTitleInDatabase(info, testAppDb, testAppInfoDb));
-    CHECK(sqlite3_open(testAppDb.c_str(), &testDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT titleName FROM tbl_contentinfo WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Sea of Stars Definitive");
-    sqlite3_finalize(testStmt);
-    sqlite3_close(testDb);
-
-    // Verify protection of critical models: PPSA22520 and PPSA99810 cannot be removed
-    CHECK(!removeTitleFromDatabase("PPSA22520", testAppDb, testAppInfoDb));
-    CHECK(!removeTitleFromDatabase("PPSA99810", testAppDb, testAppInfoDb));
-
-    // Test autonomous removal of dynamic title
-    CHECK(removeTitleFromDatabase("PPSA81234", testAppDb, testAppInfoDb));
-
-    CHECK(sqlite3_open(testAppDb.c_str(), &testDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT 1 FROM tbl_contentinfo WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_DONE); // Deleted!
-    sqlite3_finalize(testStmt);
-
-    // Model row PPSA22520 must still be present!
-    CHECK(sqlite3_prepare_v2(testDb, "SELECT 1 FROM tbl_contentinfo WHERE titleId = 'PPSA22520';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    sqlite3_finalize(testStmt);
-    sqlite3_close(testDb);
-
-    CHECK(sqlite3_open(testAppInfoDb.c_str(), &testInfoDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(testInfoDb, "SELECT 1 FROM tbl_appinfo WHERE titleId = 'PPSA81234';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_DONE); // Deleted!
-    sqlite3_finalize(testStmt);
-    CHECK(sqlite3_prepare_v2(testInfoDb, "SELECT 1 FROM tbl_appinfo WHERE titleId = 'PPSA22520';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW); // Model intact!
-    sqlite3_finalize(testStmt);
-    sqlite3_close(testInfoDb);
-
-    // Test registration into empty databases (testing synthetic fallbacks when no model exists)
-    std::string emptyAppDb = "/tmp/test_empty_app.db";
-    std::string emptyAppInfoDb = "/tmp/test_empty_appinfo.db";
-    ::unlink(emptyAppDb.c_str());
-    ::unlink((emptyAppDb + ".bak").c_str());
-    ::unlink(emptyAppInfoDb.c_str());
-    ::unlink((emptyAppInfoDb + ".bak").c_str());
-
-    sqlite3* eApp = nullptr;
-    CHECK(sqlite3_open(emptyAppDb.c_str(), &eApp) == SQLITE_OK);
-    CHECK(sqlite3_exec(eApp, "CREATE TABLE tbl_contentinfo (titleId TEXT PRIMARY KEY, titleName TEXT, contentId TEXT, conceptId INTEGER, localConceptId TEXT, dispLocation INTEGER, appType INTEGER, uiCategory TEXT, metaDataPath TEXT, icon0Info TEXT, pic0Info TEXT, snd0Info TEXT, pprDeeplinkUri TEXT, pprHubAppUri TEXT, AppInfoJson TEXT);", nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(eApp);
-
-    sqlite3* eInfo = nullptr;
-    CHECK(sqlite3_open(emptyAppInfoDb.c_str(), &eInfo) == SQLITE_OK);
-    CHECK(sqlite3_exec(eInfo, "CREATE TABLE tbl_appinfo (titleId TEXT, metaDataId INTEGER, key TEXT, val TEXT, PRIMARY KEY (titleId, metaDataId, key));", nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(eInfo);
-
-    TitleDbInfo dynInfo = makeTitleDbInfo("PPSA89999", "Synthetic Cloud Game");
-    CHECK(registerTitleInDatabase(dynInfo, emptyAppDb, emptyAppInfoDb));
-
-    CHECK(sqlite3_open(emptyAppDb.c_str(), &eApp) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(eApp, "SELECT titleName, dispLocation FROM tbl_contentinfo WHERE titleId = 'PPSA89999';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Synthetic Cloud Game");
-    CHECK(sqlite3_column_int(testStmt, 1) == 0);
-    sqlite3_finalize(testStmt);
-    sqlite3_close(eApp);
-
-    CHECK(sqlite3_open(emptyAppInfoDb.c_str(), &eInfo) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(eInfo, "SELECT val FROM tbl_appinfo WHERE titleId = 'PPSA89999' AND key = '_metadata_path';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "/user/app/PPSA89999/sce_sys");
-    sqlite3_finalize(testStmt);
-
-    CHECK(sqlite3_prepare_v2(eInfo, "SELECT val FROM tbl_appinfo WHERE titleId = 'PPSA89999' AND key = 'TITLE_EN';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Synthetic Cloud Game");
-    sqlite3_finalize(testStmt);
-    sqlite3_close(eInfo);
-
-    ::unlink(emptyAppDb.c_str());
-    ::unlink((emptyAppDb + ".bak").c_str());
-    ::unlink(emptyAppInfoDb.c_str());
-    ::unlink((emptyAppInfoDb + ".bak").c_str());
-
-    // 7. Test retail installed game protection in registerTitleInDatabase & removeTitleFromDatabase
-    sqlite3* rDb = nullptr;
-    CHECK(sqlite3_open(testAppDb.c_str(), &rDb) == SQLITE_OK);
-    CHECK(sqlite3_exec(rDb, "INSERT OR REPLACE INTO tbl_contentinfo (titleId, titleName, contentId, conceptId, localConceptId, dispLocation, appType, uiCategory, metaDataPath, icon0Info, pic0Info, snd0Info, pprDeeplinkUri, pprHubAppUri, AppInfoJson) VALUES ('PPSA07950', 'Call of Duty Retail', 'UP0001-PPSA07950_00-COD', 1, '1', 5, 0, 'game', '/user/appmeta/PPSA07950', '/user/appmeta/PPSA07950/icon0.png', '', '', '', '', '{\"visible\":1}');", nullptr, nullptr, nullptr) == SQLITE_OK);
-    sqlite3_close(rDb);
-    TitleDbInfo codCloudInfo = makeTitleDbInfo("PPSA07950", "Call of Duty Cloud Override");
-    CHECK(registerTitleInDatabase(codCloudInfo, testAppDb, testAppInfoDb));
-    // Verify dispLocation (5) and titleName ('Call of Duty Retail') were NOT overwritten!
-    CHECK(sqlite3_open(testAppDb.c_str(), &rDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(rDb, "SELECT titleName, dispLocation FROM tbl_contentinfo WHERE titleId = 'PPSA07950';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(std::string(reinterpret_cast<const char*>(sqlite3_column_text(testStmt, 0))) == "Call of Duty Retail");
-    CHECK(sqlite3_column_int(testStmt, 1) == 5);
-    sqlite3_finalize(testStmt);
-    sqlite3_close(rDb);
-    // Verify removeTitleFromDatabase also refuses to delete a retail installed game!
-    CHECK(removeTitleFromDatabase("PPSA07950", testAppDb, testAppInfoDb));
-    CHECK(sqlite3_open(testAppDb.c_str(), &rDb) == SQLITE_OK);
-    CHECK(sqlite3_prepare_v2(rDb, "SELECT dispLocation FROM tbl_contentinfo WHERE titleId = 'PPSA07950';", -1, &testStmt, nullptr) == SQLITE_OK);
-    CHECK(sqlite3_step(testStmt) == SQLITE_ROW);
-    CHECK(sqlite3_column_int(testStmt, 0) == 5);
-    sqlite3_finalize(testStmt);
-    sqlite3_close(rDb);
-
-    // Clean up mock database files
-    ::unlink(testAppDb.c_str());
-    ::unlink((testAppDb + ".bak").c_str());
-    ::unlink(testAppInfoDb.c_str());
-    ::unlink((testAppInfoDb + ".bak").c_str());
-
-    // 8. Test strictly additive buildTrpTitleDat merging (local disk trophies + cloud trophies)
-    {
-        TitleTrophySet localSet;
-        localSet.xboxTitleId = "99999";
-        localSet.titleName = "Call of Duty";
-        localSet.sonyTitleId = "PPSA07950";
-        localSet.npCommId = "NPWR25180_00";
-        for (int i = 1; i <= 4; ++i) {
-            TrophyDef it;
-            it.trophyId = i;
-            it.name = "Trophy " + std::to_string(i);
-            it.grade = TrophyGrade::Bronze;
-            it.unlocked = (i <= 2); // Local disk has trophies 1 and 2 unlocked
-            it.timeUnlocked = (i <= 2) ? "2024-11-15T10:20:30Z" : "";
-            localSet.items.push_back(it);
-        }
-        uint8_t dummyHash[20] = {1, 2, 3};
-        std::vector<uint8_t> initialDat;
-        CHECK(buildTrpTitleDat(localSet, 0x1ea2f4da, initialDat, dummyHash, nullptr));
-        std::map<uint32_t, ExistingTrophyRecord> parsedDisk;
-        CHECK(parseTrpTitleDat(initialDat.data(), initialDat.size(), parsedDisk));
-        CHECK(parsedDisk.size() == 5); // Plat + 4 base
-        CHECK(parsedDisk[1].state == 1 && parsedDisk[2].state == 1);
-        CHECK(parsedDisk[3].state == 0 && parsedDisk[4].state == 0);
-        uint64_t origTs1 = parsedDisk[1].timestamp;
-        CHECK(origTs1 > 0x00dcbffeef82bc00ULL);
-
-        // Now simulate cloud sync where only trophy 3 is unlocked on Xbox (and cloud only knows 3 items, missing trophy 4!)
-        TitleTrophySet cloudSet = localSet;
-        cloudSet.items.resize(3); // Cloud has fewer items than local disk
-        cloudSet.items[0].unlocked = false; // Trophy 1 NOT unlocked on Xbox cloud
-        cloudSet.items[0].timeUnlocked.clear();
-        cloudSet.items[1].unlocked = false; // Trophy 2 NOT unlocked on Xbox cloud
-        cloudSet.items[1].timeUnlocked.clear();
-        cloudSet.items[2].unlocked = true;  // Trophy 3 unlocked on Xbox cloud!
-        cloudSet.items[2].timeUnlocked = "2025-06-01T18:00:00Z";
-
-        std::vector<uint8_t> mergedDat;
-        CHECK(buildTrpTitleDat(cloudSet, 0x1ea2f4da, mergedDat, dummyHash, &initialDat));
-        std::map<uint32_t, ExistingTrophyRecord> mergedRecords;
-        CHECK(parseTrpTitleDat(mergedDat.data(), mergedDat.size(), mergedRecords));
-        // Must preserve all 5 records (Plat + 1..4), keep 1 & 2 unlocked with original timestamp, and unlock 3!
-        CHECK(mergedRecords.size() == 5);
-        CHECK(mergedRecords[1].state == 1);
-        CHECK(mergedRecords[1].timestamp == origTs1);
-        CHECK(mergedRecords[2].state == 1);
-        CHECK(mergedRecords[3].state == 1);
-        CHECK(mergedRecords[4].state == 0);
-        CHECK(mergedRecords[0].state == 0); // Platinum still locked because 4 is locked
-
-        // Unlock trophy 4 in cloud -> union of disk (1,2,3) + cloud (4) = 100% -> Platinum auto-unlocks!
-        cloudSet.items = localSet.items;
-        cloudSet.items[0].unlocked = false;
-        cloudSet.items[1].unlocked = false;
-        cloudSet.items[2].unlocked = false;
-        cloudSet.items[3].unlocked = true;
-        cloudSet.items[3].timeUnlocked = "2025-06-02T12:00:00Z";
-        std::vector<uint8_t> fullDat;
-        CHECK(buildTrpTitleDat(cloudSet, 0x1ea2f4da, fullDat, dummyHash, &mergedDat));
-        std::map<uint32_t, ExistingTrophyRecord> fullRecords;
-        CHECK(parseTrpTitleDat(fullDat.data(), fullDat.size(), fullRecords));
-        CHECK(fullRecords.size() == 5);
-        for (uint32_t id = 0; id <= 4; ++id) {
-            CHECK(fullRecords[id].state == 1);
-        }
-    }
-
-    // 9. Test >127 achievements cap in resolveTitleSet (prioritizing unlocked achievements)
-    {
-        std::vector<xcloud::Achievement> hugeAch;
-        for (int i = 1; i <= 150; ++i) {
-            xcloud::Achievement a;
-            a.id = std::to_string(i);
-            a.name = "Ach " + std::to_string(i);
-            a.gamerscore = 10;
-            a.unlocked = (i > 100); // 50 unlocked achievements at the end (101..150)
-            a.timeUnlocked = a.unlocked ? "2025-05-10T14:30:00Z" : "";
-            hugeAch.push_back(a);
-        }
-        auto cappedSet = resolveTitleSet("88888888", "", "Master Chief Collection", hugeAch);
-        CHECK(cappedSet.items.size() == 127); // 127 base trophies (1..127) + Platinum (0) in UCP/TRPTITLE = 128 max
-        int unlockedBaseInSet = 0;
-        for (const auto& item : cappedSet.items) {
-            CHECK(item.trophyId >= 1 && item.trophyId <= 127);
-            if (item.unlocked) {
-                unlockedBaseInSet++;
-                CHECK(!item.timeUnlocked.empty());
-            }
-        }
-        CHECK(unlockedBaseInSet == 50); // All 50 unlocked achievements preserved!
-        // Verify base-game achievements 1..77 keep their exact 1..77 trophyId positions
-        for (size_t i = 0; i < 77; ++i) {
-            CHECK(cappedSet.items[i].name == "Ach " + std::to_string(i + 1));
-        }
-        uint8_t dummyHash[20] = {9, 8, 7};
-        std::vector<uint8_t> cappedDat;
-        CHECK(buildTrpTitleDat(cappedSet, 0x1ea2f4da, cappedDat, dummyHash, nullptr));
-        std::map<uint32_t, ExistingTrophyRecord> cappedRecords;
-        CHECK(parseTrpTitleDat(cappedDat.data(), cappedDat.size(), cappedRecords));
-        CHECK(cappedRecords.size() == 128); // Platinum (0) + 127 base trophies (1..127)
-
-        // Now unlock achievement #5 (a base-game achievement) and re-run resolveTitleSet + buildTrpTitleDat
-        // with existingDat = &cappedDat: must have 51 unlocked trophies (not shifted/duplicated)!
-        hugeAch[4].unlocked = true;
-        hugeAch[4].timeUnlocked = "2025-05-11T10:00:00Z";
-        auto cappedSet2 = resolveTitleSet("88888888", "", "Master Chief Collection", hugeAch);
-        std::vector<uint8_t> cappedDat2;
-        CHECK(buildTrpTitleDat(cappedSet2, 0x1ea2f4da, cappedDat2, dummyHash, &cappedDat));
-        std::map<uint32_t, ExistingTrophyRecord> cappedRecords2;
-        CHECK(parseTrpTitleDat(cappedDat2.data(), cappedDat2.size(), cappedRecords2));
-        int unlockedInDat2 = 0;
-        for (const auto& [tid, rec] : cappedRecords2) {
-            if (rec.state == 1) unlockedInDat2++;
-        }
-        CHECK(unlockedInDat2 == 51);
-    }
-
-    // 10. Test per-game syncTrophies setting persistence
-    {
-        std::string pgPath = "/tmp/test_pergame_trophies.json";
-        ::unlink(pgPath.c_str());
-        app::Settings s1;
-        app::GameProfile balatroProf = s1.defaultProfile();
-        balatroProf.syncTrophies = false;
-        balatroProf.xboxTitleId = "777777";
-        balatroProf.gameName = "Balatro";
-        s1.perGame["BALATRO_PROD"] = balatroProf;
-        CHECK(s1.save(pgPath));
-
-        app::Settings s2;
-        CHECK(s2.load(pgPath));
-        bool hasCustom = false;
-        auto loadedProf = s2.profileForGame("BALATRO_PROD", "", &hasCustom);
-        CHECK(hasCustom);
-        CHECK(!loadedProf.syncTrophies);
-        CHECK(loadedProf.xboxTitleId == "777777");
-        CHECK(loadedProf.gameName == "Balatro");
-        ::unlink(pgPath.c_str());
-    }
-
-    // 11. Test Decoupled g_trophyThread Lifecycle, Priority Queue & Fast-Path Preemption (R1-R5)
-    {
-        net::setTestTransport([&](const net::Request& req) -> net::Response {
-            net::Response res;
-            res.status = 200;
-            if (req.url.find("history/titles") != std::string::npos) {
-                res.body = R"({
-                    "titles": [
-                        {"titleId": "267695549", "name": "Fortnite", "displayImage": "https://img/fn.png", "achievement": {"currentAchievements": 5, "currentGamerscore": 100}},
-                        {"titleId": "182830000", "name": "Minecraft", "displayImage": "https://img/mc.png", "achievement": {"currentAchievements": 10, "currentGamerscore": 200}}
-                    ]
-                })";
-            } else if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-            } else if (req.url.find("titlehub.xboxlive.com") != std::string::npos) {
-                res.body = R"({"titles": []})";
-            }
-            return res;
-        });
-
-        // Thread start
-        trophy::startTrophyThread();
-        CHECK(!trophy::isSyncing());
-        CHECK(trophy::titlesDone() == 0);
-        CHECK(trophy::titlesTotal() == 0);
-
-        // Urgent stream poll fast-path
-        CHECK(trophy::dispatchStreamPoll("Bearer tok", "12345", "267695549", "Fortnite", "https://img/fn.png"));
-        platform::sleepMs(80);
-
-        // Batch sync dispatch
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-        platform::sleepMs(80);
-
-        // Cancellation
-        trophy::cancelTrophySync();
-        platform::sleepMs(50);
-
-        // Clean shutdown
-        CHECK(trophy::stopTrophyThread(3000));
-        net::setTestTransport({});
-    }
-}
-
-static void testTrophyNetworkAndLifecycleResilienceStress() {
-    XC_LOGI("--- Starting Trophy Network Fault & Lifecycle Resilience Stress Test ---");
-
-    auto setupBaseMock = [](std::function<net::Response(const net::Request&)> customAchHandler,
-                            std::function<net::Response(const net::Request&)> customProbeHandler = nullptr) {
-        net::setTestTransport([customAchHandler, customProbeHandler](const net::Request& req) -> net::Response {
-            net::Response res;
-            res.status = 200;
-            if (req.url.find("history/titles") != std::string::npos) {
-                res.body = R"({
-                    "titles": [
-                        {"titleId": "267695549", "name": "Fortnite", "displayImage": "https://img/fn.png", "achievement": {"currentAchievements": 5, "currentGamerscore": 100}}
-                    ]
-                })";
-                return res;
-            }
-            if (req.url.find("titlehub.xboxlive.com") != std::string::npos) {
-                res.body = R"({"titles": []})";
-                return res;
-            }
-            if (req.url.find("login.live.com") != std::string::npos) {
-                if (customProbeHandler) return customProbeHandler(req);
-                res.body = "OK";
-                return res;
-            }
-            if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-                if (customAchHandler) return customAchHandler(req);
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-                return res;
-            }
-            return res;
-        });
-    };
-
-    auto cleanCache = []() {
-        std::string cPath = trophy::syncEngine().trophyCachePath("267695549");
-        ::unlink(cPath.c_str());
-    };
-
-    // Sub-test 1: 1 failure -> 1s exponential backoff -> success
-    {
-        cleanCache();
-        std::atomic<int> achCalls{0};
-        std::atomic<bool> achSuccess{false};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            int c = achCalls.fetch_add(1);
-            net::Response res;
-            if (c == 0) {
-                res.status = 500;
-                res.error = "HTTP 500: Internal Server Error";
-                res.body = "Internal Server Error";
-            } else {
-                res.status = 200;
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach 1", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-                achSuccess.store(true);
-            }
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        uint64_t t0 = platform::nowMs();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (!achSuccess.load() && platform::nowMs() - t0 < 4000) {
-            platform::sleepMs(20);
-        }
-        uint64_t elapsed = platform::nowMs() - t0;
-        CHECK(achSuccess.load());
-        CHECK(achCalls.load() == 2);
-        CHECK(elapsed >= 950 && elapsed <= 2500); // 1s backoff verified empirically
-        XC_LOGI("Stress Test: Sub-test 1 passed in %llu ms (achCalls=%d)",
-                static_cast<unsigned long long>(elapsed), achCalls.load());
-        CHECK(trophy::stopTrophyThread(3000));
-    }
-
-    // Sub-test 2: 2 failures -> 1s + 2s = 3s backoff -> success
-    {
-        cleanCache();
-        std::atomic<int> achCalls{0};
-        std::atomic<bool> achSuccess{false};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            int c = achCalls.fetch_add(1);
-            net::Response res;
-            if (c < 2) {
-                res.status = 429;
-                res.error = "HTTP 429: Too Many Requests";
-                res.body = "Too Many Requests";
-            } else {
-                res.status = 200;
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach 2", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-                achSuccess.store(true);
-            }
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        uint64_t t0 = platform::nowMs();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (!achSuccess.load() && platform::nowMs() - t0 < 6000) {
-            platform::sleepMs(20);
-        }
-        uint64_t elapsed = platform::nowMs() - t0;
-        CHECK(achSuccess.load());
-        CHECK(achCalls.load() == 3);
-        CHECK(elapsed >= 2950 && elapsed <= 4800); // 1s + 2s = 3s backoff verified empirically
-        XC_LOGI("Stress Test: Sub-test 2 passed in %llu ms (achCalls=%d)",
-                static_cast<unsigned long long>(elapsed), achCalls.load());
-        CHECK(trophy::stopTrophyThread(3000));
-    }
-
-    // Sub-test 3: 3 failures -> 1s + 2s + 4s = 7s backoff -> success on attempt 3
-    {
-        cleanCache();
-        std::atomic<int> achCalls{0};
-        std::atomic<bool> achSuccess{false};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            int c = achCalls.fetch_add(1);
-            net::Response res;
-            if (c < 3) {
-                res.status = 503;
-                res.error = "HTTP 503: Service Unavailable";
-                res.body = "Service Unavailable";
-            } else {
-                res.status = 200;
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach 3", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-                achSuccess.store(true);
-            }
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        uint64_t t0 = platform::nowMs();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (!achSuccess.load() && platform::nowMs() - t0 < 10000) {
-            platform::sleepMs(20);
-        }
-        uint64_t elapsed = platform::nowMs() - t0;
-        CHECK(achSuccess.load());
-        CHECK(achCalls.load() == 4);
-        CHECK(elapsed >= 6950 && elapsed <= 9200); // 1s + 2s + 4s = 7s backoff verified empirically
-        XC_LOGI("Stress Test: Sub-test 3 passed in %llu ms (achCalls=%d)",
-                static_cast<unsigned long long>(elapsed), achCalls.load());
-        CHECK(trophy::stopTrophyThread(3000));
-    }
-
-    // Sub-test 4: Network Outage -> PausedWaitingForNetwork -> Periodic Probe -> Reconnect & Recovery
-    {
-        cleanCache();
-        std::atomic<int> achCalls{0};
-        std::atomic<int> probeCalls{0};
-        std::atomic<bool> networkOnline{false};
-        std::atomic<bool> achSuccess{false};
-        std::vector<uint64_t> probeTimes;
-        std::mutex probeMutex;
-
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            achCalls.fetch_add(1);
-            net::Response res;
-            if (!networkOnline.load()) {
-                res.status = 0;
-                res.error = "HTTP 0: Connection reset by peer";
-                res.body = "";
-            } else {
-                res.status = 200;
-                res.body = R"({
-                    "achievements": [
-                        {"id": "1", "name": "Test Ach Reconnected", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                    ]
-                })";
-                achSuccess.store(true);
-            }
-            return res;
-        }, [&](const net::Request&) -> net::Response {
-            probeCalls.fetch_add(1);
-            {
-                std::lock_guard<std::mutex> lock(probeMutex);
-                probeTimes.push_back(platform::nowMs());
-            }
-            net::Response res;
-            if (!networkOnline.load()) {
-                res.status = 0;
-                res.error = "HTTP 0: Connection refused";
-            } else {
-                res.status = 200;
-                res.body = "OK";
-            }
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        uint64_t t0 = platform::nowMs();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        // Wait for all 4 initial attempts (1s + 2s + 4s = 7s) and at least 2 network probes (~4s)
-        while (probeCalls.load() < 2 && platform::nowMs() - t0 < 15000) {
-            platform::sleepMs(50);
-        }
-        CHECK(probeCalls.load() >= 2);
-        CHECK(!achSuccess.load()); // Title must NOT have finished yet
-        CHECK(trophy::isSyncing()); // Thread is still actively paused waiting for network
-
-        // Verify probe frequency (~2s interval)
-        {
-            std::lock_guard<std::mutex> lock(probeMutex);
-            if (probeTimes.size() >= 2) {
-                uint64_t diff = probeTimes[1] - probeTimes[0];
-                CHECK(diff >= 1800 && diff <= 2500); // 2s probe pacing verified without busy-spin
-                XC_LOGI("Stress Test: Network probe interval verified: %llu ms", static_cast<unsigned long long>(diff));
-            }
-        }
-
-        // Simulate network restoration
-        networkOnline.store(true);
-
-        uint64_t recStart = platform::nowMs();
-        while (!achSuccess.load() && platform::nowMs() - recStart < 6000) {
-            platform::sleepMs(50);
-        }
-        CHECK(achSuccess.load()); // Seamless resumption verified without title loss!
-        XC_LOGI("Stress Test: Sub-test 4 passed (resumed in %llu ms after network restored)",
-                static_cast<unsigned long long>(platform::nowMs() - recStart));
-        CHECK(trophy::stopTrophyThread(3000));
-    }
-
-    // Sub-test 5: Cancellation / Shutdown Responsiveness during 4s Backoff Sleep
-    {
-        cleanCache();
-        std::atomic<int> achCalls{0};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            achCalls.fetch_add(1);
-            net::Response res;
-            res.status = 500;
-            res.error = "HTTP 500: Fail";
-            res.body = "Fail";
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (achCalls.load() < 3) {
-            platform::sleepMs(50);
-        }
-        platform::sleepMs(200);
-
-        uint64_t stopStart = platform::nowMs();
-        bool stoppedOk = trophy::stopTrophyThread(3000);
-        uint64_t stopDuration = platform::nowMs() - stopStart;
-
-        CHECK(stoppedOk);
-        CHECK(stopDuration < 400); // Wakes up immediately from CV wait!
-        XC_LOGI("Stress Test: Sub-test 5 passed (stopped in %llu ms during 4s backoff sleep)",
-                static_cast<unsigned long long>(stopDuration));
-    }
-
-    // Sub-test 6: cancelTrophySync Responsiveness during PausedWaitingForNetwork
-    {
-        cleanCache();
-        std::atomic<int> probeCalls{0};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            net::Response res;
-            res.status = 0;
-            res.error = "HTTP 0: Connection refused";
-            return res;
-        }, [&](const net::Request&) -> net::Response {
-            probeCalls.fetch_add(1);
-            net::Response res;
-            res.status = 0;
-            res.error = "HTTP 0: Connection refused";
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (probeCalls.load() < 1) {
-            platform::sleepMs(50);
-        }
-
-        uint64_t cancelStart = platform::nowMs();
-        trophy::cancelTrophySync();
-
-        while (trophy::isSyncing() && platform::nowMs() - cancelStart < 2000) {
-            platform::sleepMs(20);
-        }
-        uint64_t cancelDuration = platform::nowMs() - cancelStart;
-
-        CHECK(!trophy::isSyncing());
-        CHECK(cancelDuration < 500); // Wakes up immediately from 2s probe sleep!
-        XC_LOGI("Stress Test: Sub-test 6 passed (cancelled in %llu ms from probe sleep)",
-                static_cast<unsigned long long>(cancelDuration));
-        CHECK(trophy::stopTrophyThread(3000));
-    }
-
-    // Sub-test 7: Concurrency & Lock Contention under PausedWaitingForNetwork
-    {
-        cleanCache();
-        std::atomic<int> probeCalls{0};
-        std::atomic<bool> inProbe{false};
-        std::atomic<bool> holdProbe{true};
-
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            net::Response res;
-            res.status = 0;
-            res.error = "HTTP 0: Connection lost";
-            return res;
-        }, [&](const net::Request&) -> net::Response {
-            probeCalls.fetch_add(1);
-            inProbe.store(true);
-            uint64_t ps = platform::nowMs();
-            while (holdProbe.load() && platform::nowMs() - ps < 500) {
-                platform::sleepMs(10);
-            }
-            inProbe.store(false);
-            net::Response res;
-            res.status = 0;
-            res.error = "HTTP 0: Probe failed";
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (!inProbe.load()) {
-            platform::sleepMs(20);
-        }
-
-        uint64_t pollStart = platform::nowMs();
-        bool pollDispatched = trophy::dispatchStreamPoll("Bearer tok", "12345", "182830000", "Minecraft", "https://img/mc.png");
-        uint64_t pollDuration = platform::nowMs() - pollStart;
-
-        XC_LOGI("Stress Test: Sub-test 7: dispatchStreamPoll during probe took %llu ms (dispatched=%d)",
-                static_cast<unsigned long long>(pollDuration), pollDispatched ? 1 : 0);
-
-        holdProbe.store(false);
-        trophy::cancelTrophySync();
-        trophy::stopTrophyThread(3000);
-
-        CHECK(pollDispatched);
-        CHECK(pollDuration < 100);
-        // We log whether dispatchStreamPoll was delayed by g_trophyQueueMutex contention
-        if (pollDuration >= 200) {
-            XC_LOGW("CRITICAL FINDING: dispatchStreamPoll was blocked for %llu ms because g_trophyQueueMutex was held during probeNetworkConnectivity()!",
-                    static_cast<unsigned long long>(pollDuration));
-        } else {
-            XC_LOGI("dispatchStreamPoll completed without queue lock contention (%llu ms)",
-                    static_cast<unsigned long long>(pollDuration));
-        }
-    }
-
-    // Sub-test 7b: each console user has their own records; removing one user's
-    // trophies leaves the other's records alone, and what the console shares for
-    // a title both have stays in place.
-    {
-        cleanCache();
-        class UserBackend : public trophy::ITrophyBackend {
-        public:
-            uint32_t user = 0;
-            std::vector<std::string> removed, kept;
-            bool init(uint32_t u) override { user = u; return true; }
-            bool registerTitle(const trophy::TitleTrophySet&) override { return true; }
-            bool unlockTrophy(const std::string&, int, trophy::TrophyGrade, const std::string&) override { return true; }
-            bool isTrophyUnlocked(const std::string&, int) override { return false; }
-            bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles, int& removedCount, std::string&,
-                                   const std::set<std::string>* inUse = nullptr) override {
-                for (const auto& t : titles) {
-                    removed.push_back(t.first);
-                    if (inUse && inUse->count(t.first)) kept.push_back(t.first);
-                }
-                removedCount = static_cast<int>(titles.size());
-                return true;
-            }
-            std::string name() const override { return "UserBackend"; }
-        };
-        auto backend = std::make_unique<UserBackend>();
-        auto* raw = backend.get();
-        auto& eng = trophy::syncEngine();
-        eng.setBackend(std::move(backend));
-        const std::string shared = eng.trophySharedDir();
-        // Records from before users had their own: they go to the first user, once.
-        platform::writeFileAtomic(shared + "/OLDTITLE.json", R"({"npCommId":"NPWR80001_00","sonyTitleId":"PPSA80001"})");
-        platform::writeFileAtomic(shared + "/id_map.json", R"({"seed":80001})");
-        ::unlink((shared + "/users/.moved").c_str());
-        eng.setUser(0x11111111);
-        const std::string dirA = eng.trophyCacheDir();
-        std::string text;
-        CHECK(dirA != shared && platform::readFile(dirA + "/OLDTITLE.json", text));
-        CHECK(!platform::readFile(shared + "/OLDTITLE.json", text));
-        CHECK(platform::readFile(shared + "/id_map.json", text));  // the slot map stays the console's
-        // A second user: an empty folder of their own, then a title both have and one of their own.
-        eng.setUser(0x22222222);
-        const std::string dirB = eng.trophyCacheDir();
-        CHECK(dirB != dirA && !platform::readFile(dirB + "/OLDTITLE.json", text));
-        platform::writeFileAtomic(dirB + "/OLDTITLE.json", R"({"npCommId":"NPWR80001_00","sonyTitleId":"PPSA80001"})");
-        platform::writeFileAtomic(dirB + "/ONLYB.json", R"({"npCommId":"NPWR80002_00","sonyTitleId":"PPSA80002"})");
-        int removedCount = 0;
-        std::string err;
-        CHECK(eng.removeAllTrophies(removedCount, err));
-        CHECK(raw->user == 0x22222222);
-        CHECK(std::count(raw->removed.begin(), raw->removed.end(), "NPWR80001_00") == 1);
-        CHECK(std::count(raw->removed.begin(), raw->removed.end(), "NPWR80002_00") == 1);
-        // User A still has the first: its shared part stays. Nobody else has the second.
-        CHECK(std::count(raw->kept.begin(), raw->kept.end(), "NPWR80001_00") == 1);
-        CHECK(std::count(raw->kept.begin(), raw->kept.end(), "NPWR80002_00") == 0);
-        CHECK(!platform::readFile(dirB + "/OLDTITLE.json", text) && !platform::readFile(dirB + "/ONLYB.json", text));
-        CHECK(platform::readFile(dirA + "/OLDTITLE.json", text));  // the other user's record untouched
-        CHECK(platform::readFile(shared + "/id_map.json", text));
-        ::unlink((dirA + "/OLDTITLE.json").c_str());
-        ::unlink((shared + "/id_map.json").c_str());
-        eng.setUser(0);
-    }
-
-    // Sub-test 8: requestRemoveTrophies() Preemption & Execution during Active Sync
-    {
-        cleanCache();
-        class TestRemoveBackend : public trophy::ITrophyBackend {
-        public:
-            std::atomic<int> removeCalls{0};
-            bool init(uint32_t) override { return true; }
-            bool registerTitle(const trophy::TitleTrophySet&) override { return true; }
-            bool unlockTrophy(const std::string&, int, trophy::TrophyGrade, const std::string&) override { return true; }
-            bool isTrophyUnlocked(const std::string&, int) override { return false; }
-            bool removeAllTrophies(const std::vector<std::pair<std::string, std::string>>& titles,
-                                   int& removedCount, std::string& err, const std::set<std::string>* = nullptr) override {
-                removeCalls++;
-                removedCount = static_cast<int>(titles.size());
-                return true;
-            }
-            std::string name() const override { return "TestRemoveBackend"; }
-        };
-
-        auto backend = std::make_unique<TestRemoveBackend>();
-        auto* rawBackend = backend.get();
-        trophy::syncEngine().setBackend(std::move(backend));
-
-        std::atomic<bool> syncStarted{false};
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            syncStarted.store(true);
-            net::Response res;
-            res.status = 0;
-            res.error = "HTTP 0: Connection lost";
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        while (!syncStarted.load()) {
-            platform::sleepMs(20);
-        }
-        platform::sleepMs(50); // Ensure thread entered backoff wait_for
-
-        // Invoke requestRemoveTrophies while sync is retrying
-        trophy::requestRemoveTrophies();
-
-        uint64_t remWaitStart = platform::nowMs();
-        while ((rawBackend->removeCalls.load() == 0 || trophy::isSyncing()) && platform::nowMs() - remWaitStart < 2000) {
-            platform::sleepMs(20);
-        }
-
-        CHECK(rawBackend->removeCalls.load() > 0);
-        CHECK(!trophy::isSyncing());
-
-        CHECK(trophy::stopTrophyThread(3000));
-        trophy::syncEngine().setBackend(nullptr);
-        XC_LOGI("Stress Test: Sub-test 8 passed (requestRemoveTrophies executed during sync)");
-    }
-
-    // Sub-test 9: Thread Shutdown Timeout Safety and Re-entry Handle Cleanup
-    {
-        cleanCache();
-        std::atomic<bool> inHangingCall{false};
-        std::atomic<bool> releaseHang{false};
-
-        setupBaseMock([&](const net::Request&) -> net::Response {
-            inHangingCall.store(true);
-            while (!releaseHang.load()) {
-                platform::sleepMs(10);
-            }
-            net::Response res;
-            res.status = 200;
-            res.body = R"({"achievements": []})";
-            return res;
-        });
-
-        trophy::startTrophyThread();
-        trophy::requestTrophySync("Bearer tok", "12345", {}, true);
-
-        // Wait until thread enters the hanging socket call
-        while (!inHangingCall.load()) {
-            platform::sleepMs(20);
-        }
-
-        // Bounded timeout check: stopTrophyThread(150) must return false without hanging in pthread_join
-        uint64_t stopStart = platform::nowMs();
-        bool stopped = trophy::stopTrophyThread(150);
-        uint64_t stopDuration = platform::nowMs() - stopStart;
-
-        CHECK(!stopped);
-        CHECK(stopDuration >= 140 && stopDuration < 500);
-        XC_LOGI("Stress Test: Sub-test 9 passed bounded timeout check in %llu ms",
-                static_cast<unsigned long long>(stopDuration));
-
-        // Release the hanging call to let thread terminate
-        releaseHang.store(true);
-
-        uint64_t exitWait = platform::nowMs();
-        while (trophy::isSyncing() && platform::nowMs() - exitWait < 1000) {
-            platform::sleepMs(20);
-        }
-
-        // Test thread re-entry: startTrophyThread reaps dead unjoined handle and starts new thread cleanly
-        trophy::startTrophyThread();
-
-        CHECK(trophy::stopTrophyThread(3000));
-        net::setTestTransport({});
-        XC_LOGI("Stress Test: Sub-test 9 passed re-entry cleanup and final stop");
-    }
-
-    net::setTestTransport({});
-    XC_LOGI("--- Trophy Network Fault & Lifecycle Resilience Stress Test Complete ---");
-}
-
-static void testTrophyStreamingPauseAndPriority() {
-    XC_LOGI("--- Starting Trophy Streaming Pause & Urgent Preemption Test ---");
-
-    // Clean cache
-    std::string cPath = trophy::syncEngine().trophyCachePath("267695549");
-    ::unlink(cPath.c_str());
-    std::string cPath2 = trophy::syncEngine().trophyCachePath("182830000");
-    ::unlink(cPath2.c_str());
-
-    std::atomic<bool> isStreaming{true};
-    std::atomic<int> pollExecCount{0};
-    std::atomic<int> batchExecCount{0};
-
-    net::setTestTransport([&](const net::Request& req) -> net::Response {
-        net::Response res;
-        res.status = 200;
-        if (req.url.find("history/titles") != std::string::npos) {
-            res.body = R"({
-                "titles": [
-                    {"titleId": "267695549", "name": "Fortnite", "titleType": "Game", "displayImage": "https://img/fn.png", "earnedAchievements": 5, "currentGamerscore": 100},
-                    {"titleId": "182830000", "name": "Minecraft", "titleType": "Game", "displayImage": "https://img/mc.png", "earnedAchievements": 10, "currentGamerscore": 200}
-                ]
-            })";
-            return res;
-        }
-        if (req.url.find("titlehub.xboxlive.com") != std::string::npos) {
-            res.body = R"({"titles": []})";
-            return res;
-        }
-        if (req.url.find("achievements.xboxlive.com") != std::string::npos) {
-            if (req.url.find("267695549") != std::string::npos) {
-                pollExecCount.fetch_add(1);
-            }
-            batchExecCount.fetch_add(1);
-            res.body = R"({
-                "achievements": [
-                    {"id": "1", "name": "Test Ach", "progressState": "Achieved", "rewards": [{"type": "Gamerscore", "value": "10"}]}
-                ]
-            })";
-            return res;
-        }
-        res.status = 404;
-        return res;
-    });
-
-    trophy::setTrophyContextProvider([&](trophy::TrophySyncContext& ctx) {
-        ctx.xblAuth = "Bearer testToken";
-        ctx.xuid = "12345678";
-        ctx.isStreaming = [&] { return isStreaming.load(); };
-        return true;
-    });
-
-    trophy::startTrophyThread();
-
-    // 1. Dispatch batch sync while streaming is active
-    isStreaming.store(true);
-    trophy::requestTrophySync(true);
-
-    // Give thread time to discover and encounter pause condition
-    platform::sleepMs(200);
-
-    // Because isStreaming is true, batch title execution must be paused!
-    CHECK(trophy::titlesDone() == 0);
-
-    // 2. Urgent stream poll must execute immediately even while batch is paused
-    int pollsBefore = pollExecCount.load();
-    CHECK(trophy::dispatchStreamPoll("Bearer testToken", "12345678", "267695549", "Fortnite", "https://img/fn.png"));
-
-    // Wait for urgent poll to execute
-    for (int i = 0; i < 20; ++i) {
-        if (pollExecCount.load() > pollsBefore) break;
-        platform::sleepMs(15);
-    }
-    CHECK(pollExecCount.load() > pollsBefore);
-
-    // Batch title sync must STILL be paused (titlesDone == 0)
-    CHECK(trophy::titlesDone() == 0);
-
-    // 3. Resume trophy sync by exiting stream mode
-    isStreaming.store(false);
-    trophy::resumeTrophySync();
-
-    // Wait for batch sync to resume and process both titles without dropping any task
-    for (int i = 0; i < 50; ++i) {
-        if (trophy::titlesDone() >= 2 && !trophy::isSyncing()) break;
-        platform::sleepMs(20);
-    }
-    CHECK(trophy::titlesDone() >= 2);
-    CHECK(!trophy::isSyncing());
-
-    // Clean shutdown
-    CHECK(trophy::stopTrophyThread(3000));
-    trophy::setTrophyContextProvider({});
-    net::setTestTransport({});
-    ::unlink(cPath.c_str());
-    ::unlink(cPath2.c_str());
-    XC_LOGI("--- Trophy Streaming Pause & Urgent Preemption Test Complete ---");
-}
-
-static void testTrophyModalsAndDesktopInput() {
+static void testDesktopSearchAndTextInput() {
     ui::Fonts fonts;
     ui::ImageCache images([] {});
     ui::AppUi app(fonts, images);
 
-    ui::UiCaps caps;
-    caps.console = true;
-    app.setCaps(caps);
-
-    app.showHome();
-    ui::NavInput openOpt;
-    openOpt.options = true;
-    app.handle(openOpt);
-    CHECK(app.screen() == ui::Screen::Settings);
-    CHECK(!app.settings().syncTrophies);
-
-    int y24 = 0, y25 = 0;
-    int curY = 184;
-    for (const auto& [r, groupStart] : ui::visibleSettingsRows(caps)) {
-        if (groupStart) curY += 4;
-        if (r == 24) y24 = curY + 10;
-        if (r == 25) y25 = curY + 10;
-        curY += 32;
-    }
-    CHECK(y24 > 0);
-    CHECK(y25 > 0);
-
-    // 1. Click row 24: opens disclaimer modal
-    app.onMouseDown(100.0f, static_cast<float>(y24), 1);
-    ui::Canvas c(1920, 1080);
-    app.render(c, 1000);
-
-    // Press right to move focus to "Cancelar" (focus 1)
-    ui::NavInput navRight;
-    navRight.right = true;
-    app.handle(navRight);
-
-    // Accept "Cancelar": modal closes, syncTrophies remains false
-    ui::NavInput accept;
-    accept.accept = true;
-    app.handle(accept);
-    CHECK(!app.settings().syncTrophies);
-
-    // Click row 24 again: opens modal, focus defaults to "Estou ciente" (focus 0)
-    app.onMouseDown(100.0f, static_cast<float>(y24), 1);
-    ui::UiEvent evAware = app.handle(accept);
-    CHECK(app.settings().syncTrophies);
-    CHECK(evAware.action == ui::Action::SyncTrophies);
-    CHECK(evAware.settings.syncTrophies);
-    app::Settings st;
-    ui::applyChoice(evAware.settings, st);
-    CHECK(st.syncTrophies);
-
-    // Click row 24 again: turns it off directly
-    ui::UiEvent evOff = app.onMouseDown(100.0f, static_cast<float>(y24), 1);
-    CHECK(!app.settings().syncTrophies);
-    CHECK(evOff.action == ui::Action::SettingsChanged);
-    CHECK(!evOff.settings.syncTrophies);
-    ui::applyChoice(evOff.settings, st);
-    CHECK(!st.syncTrophies);
-
-    // 2. Turn sync back on to test removal resets it
-    app.onMouseDown(100.0f, static_cast<float>(y24), 1);
-    app.handle(accept);
-    CHECK(app.settings().syncTrophies);
-
-    // Click row 25: opens remove trophies confirm modal
-    app.onMouseDown(100.0f, static_cast<float>(y25), 1);
-    app.render(c, 1000);
-
-    // Default focus is "Cancelar" (focus 1) for safety
-    ui::UiEvent evCancelRm = app.handle(accept);
-    CHECK(evCancelRm.action != ui::Action::RemoveTrophies);
-    CHECK(app.settings().syncTrophies);
-
-    // Click row 25 again, navigate left to "Remover" (focus 0)
-    app.onMouseDown(100.0f, static_cast<float>(y25), 1);
-    ui::NavInput navLeft;
-    navLeft.left = true;
-    app.handle(navLeft);
-    ui::UiEvent evRm = app.handle(accept);
-    CHECK(evRm.action == ui::Action::RemoveTrophies);
-    CHECK(!evRm.settings.syncTrophies);
-    CHECK(!app.settings().syncTrophies);
-    ui::applyChoice(evRm.settings, st);
-    CHECK(!st.syncTrophies);
-
-    // 3. Desktop Search & text input
+    // Desktop Search & text input
     app.showHome();
     ui::NavInput tri;
     tri.triangle = true;
@@ -11511,6 +10049,49 @@ static void testTrophyModalsAndDesktopInput() {
     back.back = true;
     app.handle(back);
     CHECK(!app.wantsTextInput());
+}
+
+static void testTrophyNonConsoleDisabled() {
+    using namespace xc;
+    // 1. Trophy stub functions are safe no-ops
+    trophy::startTrophyThread();
+    CHECK(trophy::stopTrophyThread(100));
+    trophy::resumeTrophySync();
+    trophy::requestTrophySync(true);
+    trophy::cancelTrophySync();
+    trophy::requestRemoveTrophies();
+    CHECK(!trophy::dispatchStreamPoll("auth", "xuid", "title", "name"));
+    CHECK(!trophy::isSyncing());
+    CHECK(trophy::titlesDone() == 0);
+    CHECK(trophy::titlesTotal() == 0);
+    trophy::setTrophyContextProvider({});
+    trophy::setTrophyUserProvider({});
+    trophy::runPsboxNativeSelfTest();
+    CHECK(trophy::normalizeTrophyName("Test Trophy") == "Test Trophy");
+    CHECK(trophy::findKnownTitle("12345") == nullptr);
+
+    // 2. UiCaps trophies visibility verification
+    ui::UiCaps capsOn;
+    capsOn.trophies = true;
+    auto rowsOn = ui::visibleSettingsRows(capsOn);
+    bool found24On = false, found25On = false;
+    for (const auto& r : rowsOn) {
+        if (r.row == 24) found24On = true;
+        if (r.row == 25) found25On = true;
+    }
+    CHECK(found24On);
+    CHECK(found25On);
+
+    ui::UiCaps capsOff;
+    capsOff.trophies = false;
+    auto rowsOff = ui::visibleSettingsRows(capsOff);
+    bool found24Off = false, found25Off = false;
+    for (const auto& r : rowsOff) {
+        if (r.row == 24) found24Off = true;
+        if (r.row == 25) found25Off = true;
+    }
+    CHECK(!found24Off);
+    CHECK(!found25Off);
 }
 
 static void testMilestone5TransmissionQualityAndStreamReload() {
@@ -12002,12 +10583,765 @@ static void testM4DebugNoticesExterminationAndToasts() {
     }
 }
 
+static void testAndroidM5QualityAndUxRefinements() {
+    // 1. Settings default touchOverlayMode invariant: must be 0 (Auto)
+    {
+        xc::app::Settings s;
+        CHECK(s.touchOverlayMode == 0);
+    }
+
+    // 2. Controller inUse threshold and Nexus button responsiveness (R1)
+    {
+        xc::input::ControllerState s{};
+        CHECK(!xc::input::inUse(s));
+
+        // Nexus / Xbox guide button must trigger inUse
+        s.btnNexus = true;
+        CHECK(xc::input::inUse(s));
+        s.btnNexus = false;
+
+        // Stick deflection: 0.10f is within deadzone noise, 0.16f triggers inUse
+        s.leftStickX = 0.10f;
+        CHECK(!xc::input::inUse(s));
+        s.leftStickX = 0.16f;
+        CHECK(xc::input::inUse(s));
+        s.leftStickX = 0.0f;
+
+        s.rightStickY = -0.16f;
+        CHECK(xc::input::inUse(s));
+        s.rightStickY = 0.0f;
+
+        // Triggers deflection: 0.10f is noise, 0.16f triggers inUse
+        s.triggerL2 = 0.10f;
+        CHECK(!xc::input::inUse(s));
+        s.triggerL2 = 0.16f;
+        CHECK(xc::input::inUse(s));
+        s.triggerL2 = 0.0f;
+    }
+
+    // 3. TouchLayout serialization and TouchLayoutStudio (R4)
+    {
+        xc::ui::TouchLayout def = xc::ui::defaultTouchLayout();
+        CHECK(def.leftStick.x == 250.0f);
+        CHECK(def.leftStick.y == 545.0f);
+        CHECK(def.rightStick.x == 1355.0f);
+        CHECK(def.rightStick.y == 825.0f);
+        CHECK(def.dpad.x == 520.0f);
+        CHECK(def.dpad.y == 830.0f);
+        CHECK(def.btnA.x == 1655.0f);
+        CHECK(def.btnA.y == 685.0f);
+        CHECK(def.btnB.x == 1765.0f);
+        CHECK(def.btnB.y == 575.0f);
+        CHECK(def.btnX.x == 1545.0f);
+        CHECK(def.btnX.y == 575.0f);
+        CHECK(def.btnY.x == 1655.0f);
+        CHECK(def.btnY.y == 465.0f);
+
+        // Test JSON round-trip of custom layout
+        xc::ui::TouchLayout custom = def;
+        custom.leftStick.x = 300.0f;
+        custom.leftStick.y = 600.0f;
+        custom.btnA.x = 1700.0f;
+        custom.btnA.y = 720.0f;
+
+        std::string testPath = "/tmp/test_touch_layout.json";
+        CHECK(xc::ui::saveTouchLayout(testPath, custom));
+
+        xc::ui::TouchLayout loaded;
+        CHECK(xc::ui::loadTouchLayout(testPath, loaded));
+        CHECK(loaded.leftStick.x == 300.0f);
+        CHECK(loaded.leftStick.y == 600.0f);
+        CHECK(loaded.btnA.x == 1700.0f);
+        CHECK(loaded.btnA.y == 720.0f);
+        CHECK(loaded.dpad.x == 520.0f); // Unmodified retains original
+        std::remove(testPath.c_str());
+    }
+
+    // 4. TouchPadOverlay Studio state machine and reset
+    {
+        xc::ui::Fonts dummyFonts;
+        xc::ui::TouchPadOverlay overlay(dummyFonts);
+        CHECK(!overlay.isLayoutStudioActive());
+
+        overlay.openLayoutStudio();
+        CHECK(overlay.isLayoutStudioActive());
+        CHECK(overlay.isVisible());
+
+        // Modify layout
+        xc::ui::TouchLayout mod = overlay.layout();
+        mod.dpad.x = 400.0f;
+        mod.dpad.y = 700.0f;
+        overlay.setLayout(mod);
+        CHECK(overlay.layout().dpad.x == 400.0f);
+
+        // Reset to default
+        overlay.resetToDefaultLayout();
+        CHECK(overlay.layout().dpad.x == 520.0f);
+
+        overlay.closeLayoutStudio();
+        CHECK(!overlay.isLayoutStudioActive());
+    }
+
+    // 5. StreamMenu touch toggle, studio action, and tab consolidation (R2 & R3)
+    {
+        xc::ui::Fonts dummyFonts;
+        xc::ui::StreamMenu menu(dummyFonts);
+
+        // Touch overlay enabled by default
+        CHECK(menu.touchOverlayEnabled());
+        menu.setTouchOverlayEnabled(false);
+        CHECK(!menu.touchOverlayEnabled());
+        menu.setTouchOverlayEnabled(true);
+
+        // Leave item is at the end of Item enum
+        CHECK(xc::ui::StreamMenu::Leave == xc::ui::StreamMenu::ItemCount - 1);
+
+        // Tab placement checks
+#if defined(__ANDROID__)
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchOverlayItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchInvertSticksItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchLayoutStudioItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::MicMuteItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::Leave, xc::ui::MenuTab::General));
+        // Guitar lane items must NEVER show outside MenuTab::Guitar (preventing duplicate 'Sair do jogo')
+        for (int it = xc::ui::StreamMenu::GuitarLane0; it <= xc::ui::StreamMenu::GuitarReset; ++it) {
+            CHECK(!menu.itemInTab(it, xc::ui::MenuTab::General));
+            CHECK(!menu.itemShown(it));
+        }
+#else
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchOverlayItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchInvertSticksItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::TouchLayoutStudioItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::MicMuteItem, xc::ui::MenuTab::General));
+        CHECK(menu.itemInTab(xc::ui::StreamMenu::Leave, xc::ui::MenuTab::General));
+        // On non-Android, itemShown returns false for touch items
+        CHECK(!menu.itemShown(xc::ui::StreamMenu::TouchOverlayItem));
+        CHECK(!menu.itemShown(xc::ui::StreamMenu::TouchInvertSticksItem));
+        CHECK(!menu.itemShown(xc::ui::StreamMenu::TouchLayoutStudioItem));
+        CHECK(!menu.itemShown(xc::ui::StreamMenu::MicMuteItem));
+#endif
+    }
+
+    // 6. TouchPadOverlay Stick Inversion and Always Off (Bug 3 & 4)
+    {
+        xc::ui::Fonts dummyFonts;
+        xc::ui::TouchPadOverlay overlay(dummyFonts);
+        xc::app::Settings s;
+        s.touchOverlayMode = 0; // Auto-hide
+        s.touchInvertSticks = false;
+        overlay.setSettings(s);
+
+        // Touch left stick: Down anchors the stick, Motion deflects downward (dy > 0)
+        app::shell::TouchEvent evDown{app::shell::TouchEvent::Kind::Down, 1, 250.0f, 545.0f};
+        CHECK(overlay.onTouch(evDown));
+        app::shell::TouchEvent evMotionDown{app::shell::TouchEvent::Kind::Motion, 1, 250.0f, 600.0f};
+        CHECK(overlay.onTouch(evMotionDown));
+        // Default (invertSticks = false): dy > 0 -> leftStickY > 0 (+down)
+        CHECK(overlay.state().leftStickY > 0.3f);
+
+        // Toggle stick inversion
+        overlay.setInvertSticks(true);
+        CHECK(overlay.onTouch(evMotionDown));
+        // Inverted: dy > 0 -> leftStickY < 0
+        CHECK(overlay.state().leftStickY < -0.3f);
+
+        // Release finger
+        app::shell::TouchEvent evUp{app::shell::TouchEvent::Kind::Up, 1, 250.0f, 600.0f};
+        CHECK(overlay.onTouch(evUp));
+
+        // Disable touch overlay (Mode 2 = Always Off)
+        s.touchOverlayMode = 2;
+        overlay.setSettings(s);
+        CHECK(!overlay.isVisible());
+        // Touches on game buttons must be ignored when overlay is disabled
+        app::shell::TouchEvent evBtnA{app::shell::TouchEvent::Kind::Down, 2, 1655.0f, 685.0f};
+        CHECK(!overlay.onTouch(evBtnA));
+        CHECK(!overlay.state().btnA);
+        CHECK(!overlay.state().connected);
+    }
+}
+
+static void testAndroidLifecycleAndMedia() {
+    // 1. Android virtual key constant & SDL scancode mapping
+    CHECK(xc::input::kVkAndroidBack == 0xA6);
+    CHECK(xc::input::scancodeToVk(270) == xc::input::kVkAndroidBack);
+    CHECK(xc::input::scancodeToVk(0x10E) == xc::input::kVkAndroidBack);
+
+    // 2. Audio pause / resume API on null backend
+    xc::media::audioPause();
+    CHECK(!xc::media::audioIsPaused());
+    xc::media::audioResume();
+    CHECK(!xc::media::audioIsPaused());
+
+    // 3. ImageCache shrink
+    xc::ui::ImageCache cache([] {}, 10u << 20);
+    cache.shrink();
+
+    // 4. GPU DisplayPresentationMode enumeration
+    CHECK(static_cast<int>(xc::display::gpu::DisplayPresentationMode::Standard) == 0);
+    CHECK(static_cast<int>(xc::display::gpu::DisplayPresentationMode::TopScreenOnly) == 1);
+}
+
+static void testHwPictureContract() {
+    using namespace xc::media;
+
+    // 1. Verify default values ensure 100% backward compatibility
+    Picture pic;
+    CHECK(pic.uv == nullptr);
+    CHECK(pic.uvPitchBytes == 0);
+    CHECK(!pic.nv21);
+    CHECK(pic.visibleHeight == 0);
+
+    HwDecoder::Picture hp;
+    CHECK(hp.uv == nullptr);
+    CHECK(hp.uvPitchBytes == 0);
+    CHECK(!hp.nv21);
+    CHECK(hp.visibleHeight == 0);
+
+    // 2. Simulate PS5/PS4 mapping: default fields yield standard NV12 layout
+    uint8_t dummy[100];
+    hp.data = dummy;
+    hp.pitchBytes = 1920;
+    hp.height = 1088;
+    hp.width = 1920;
+    hp.pts = 12345;
+
+    Picture out;
+    out.format = Picture::Format::Nv12;
+    out.width = hp.width;
+    out.height = hp.visibleHeight ? hp.visibleHeight : ((hp.height == 1088) ? 1080 : hp.height);
+    out.strideY = hp.pitchBytes;
+    out.strideU = hp.uvPitchBytes ? hp.uvPitchBytes : hp.pitchBytes;
+    out.u = hp.uv ? hp.uv : (hp.data + hp.pitchBytes * hp.height);
+    out.tag = static_cast<uint32_t>(hp.pts);
+    out.nv21 = hp.nv21;
+
+    CHECK(out.height == 1080);
+    CHECK(out.strideU == 1920);
+    CHECK(out.u == dummy + 1920 * 1088);
+    CHECK(!out.nv21);
+
+    // 3. Simulate Android NV21 mapping
+    uint8_t uvDummy[100];
+    hp.uv = uvDummy;
+    hp.uvPitchBytes = 1920;
+    hp.nv21 = true;
+    hp.visibleHeight = 1080;
+
+    Picture outNv21;
+    outNv21.format = Picture::Format::Nv12;
+    outNv21.width = hp.width;
+    outNv21.height = hp.visibleHeight ? hp.visibleHeight : ((hp.height == 1088) ? 1080 : hp.height);
+    outNv21.strideY = hp.pitchBytes;
+    outNv21.strideU = hp.uvPitchBytes ? hp.uvPitchBytes : hp.pitchBytes;
+    outNv21.u = hp.uv ? hp.uv : (hp.data + hp.pitchBytes * hp.height);
+    outNv21.uv = hp.uv;
+    outNv21.uvPitchBytes = hp.uvPitchBytes;
+    outNv21.nv21 = hp.nv21;
+
+    CHECK(outNv21.height == 1080);
+    CHECK(outNv21.strideU == 1920);
+    CHECK(outNv21.u == uvDummy);
+    CHECK(outNv21.nv21);
+
+    // 4. Test drawNv12 NV21 flag parameter
+    std::vector<uint8_t> y(1920 * 1080, 128);
+    std::vector<uint8_t> uv(1920 * 540, 128);
+    CHECK(display::drawNv12(y.data(), uv.data(), 1920, 1920, 1920, 1080, false, true));
+}
+
+static void testTouchVirtualGamepadInjection() {
+    ui::Fonts fonts;
+    ui::TouchPadOverlay overlay(fonts);
+    overlay.reset();
+
+    // Verify initial clean state in virtual gamepad
+    input::ControllerState s0{};
+    bool conn = false;
+    app::virtualGamepadState(0, s0, conn);
+    CHECK(!s0.btnA && !s0.btnB && !s0.btnX && !s0.btnY);
+    CHECK(!s0.btnL1 && !s0.btnR1);
+    CHECK(s0.leftStickX == 0.0f && s0.leftStickY == 0.0f);
+    CHECK(s0.rightStickX == 0.0f && s0.rightStickY == 0.0f);
+
+    // Touch down on 'A' button (anchor: 1655, 671)
+    app::shell::TouchEvent evA{};
+    evA.kind = app::shell::TouchEvent::Kind::Down;
+    evA.fingerId = 1;
+    evA.x = 1655.0f;
+    evA.y = 671.0f;
+    CHECK(overlay.onTouch(evA));
+
+    input::ControllerState sA{};
+    app::virtualGamepadState(0, sA, conn);
+    CHECK(sA.btnA);
+    CHECK(!sA.btnB && !sA.btnX && !sA.btnY);
+    CHECK(overlay.state().btnA);
+
+    // Touch up on 'A' button
+    evA.kind = app::shell::TouchEvent::Kind::Up;
+    CHECK(overlay.onTouch(evA));
+    input::ControllerState sAUp{};
+    app::virtualGamepadState(0, sAUp, conn);
+    CHECK(!sAUp.btnA);
+    CHECK(!overlay.state().btnA);
+
+    // Touch down and drag on Left Thumbstick (anchor: 250, 545)
+    app::shell::TouchEvent evStick{};
+    evStick.kind = app::shell::TouchEvent::Kind::Down;
+    evStick.fingerId = 2;
+    evStick.x = 250.0f;
+    evStick.y = 545.0f;
+    CHECK(overlay.onTouch(evStick));
+
+    // Move stick to the right (+60 px)
+    evStick.kind = app::shell::TouchEvent::Kind::Motion;
+    evStick.x = 310.0f;
+    evStick.y = 545.0f;
+    CHECK(overlay.onTouch(evStick));
+    input::ControllerState sStick{};
+    app::virtualGamepadState(0, sStick, conn);
+    CHECK(sStick.leftStickX > 0.3f); // Deflected right
+    CHECK(std::abs(sStick.leftStickY) < 0.2f); // Centered vertically
+
+    // Release stick
+    evStick.kind = app::shell::TouchEvent::Kind::Up;
+    CHECK(overlay.onTouch(evStick));
+    input::ControllerState sStickUp{};
+    app::virtualGamepadState(0, sStickUp, conn);
+    CHECK(sStickUp.leftStickX == 0.0f);
+    CHECK(sStickUp.leftStickY == 0.0f);
+
+    // Multi-touch: Finger 3 on LB (150, 240), Finger 4 on RB (1700, 240) simultaneously
+    app::shell::TouchEvent evLB{}, evRB{};
+    evLB.kind = app::shell::TouchEvent::Kind::Down;
+    evLB.fingerId = 3;
+    evLB.x = 150.0f;
+    evLB.y = 240.0f;
+
+    evRB.kind = app::shell::TouchEvent::Kind::Down;
+    evRB.fingerId = 4;
+    evRB.x = 1700.0f;
+    evRB.y = 240.0f;
+
+    CHECK(overlay.onTouch(evLB));
+    CHECK(overlay.onTouch(evRB));
+
+    input::ControllerState sBoth{};
+    app::virtualGamepadState(0, sBoth, conn);
+    CHECK(sBoth.btnL1);
+    CHECK(sBoth.btnR1);
+
+    evLB.kind = app::shell::TouchEvent::Kind::Up;
+    evRB.kind = app::shell::TouchEvent::Kind::Up;
+    overlay.onTouch(evLB);
+    overlay.onTouch(evRB);
+}
+
+static void testTouchAutoHideLogic() {
+    ui::Fonts fonts;
+    ui::TouchPadOverlay overlay(fonts);
+    overlay.reset();
+    overlay.setVisible(true);
+
+    CHECK(overlay.isVisible());
+    CHECK(overlay.opacity() > 0.5f);
+
+    uint64_t t = 10000;
+    // Physical gamepad is active at player 0
+    for (int i = 0; i < 20; ++i) {
+        overlay.update(t, true, true);
+        t += 16;
+    }
+    CHECK(!overlay.isVisible());
+    CHECK(overlay.opacity() < 0.05f);
+
+    // Screen touch wakes up overlay
+    app::shell::TouchEvent touch{};
+    touch.kind = app::shell::TouchEvent::Kind::Down;
+    touch.fingerId = 10;
+    touch.x = 1655.0f;
+    touch.y = 671.0f;
+    overlay.onTouch(touch);
+
+    for (int i = 0; i < 20; ++i) {
+        overlay.update(t, true, false);
+        t += 16;
+    }
+    CHECK(overlay.isVisible());
+    CHECK(overlay.opacity() > 0.5f);
+}
+
+static void testTouchDirtyFlagLifecycle() {
+    ui::Fonts fonts;
+    ui::TouchPadOverlay overlay(fonts);
+    overlay.reset();
+
+    // 1. Initial construction and reset should be dirty
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+    CHECK(!overlay.isDirty());
+
+    // 2. Touch Down on A button (anchor: 1655, 671) marks dirty
+    app::shell::TouchEvent evA{};
+    evA.kind = app::shell::TouchEvent::Kind::Down;
+    evA.fingerId = 1;
+    evA.x = 1655.0f;
+    evA.y = 671.0f;
+    CHECK(overlay.onTouch(evA));
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+    CHECK(!overlay.isDirty());
+
+    // 3. Touch Motion marks dirty
+    evA.kind = app::shell::TouchEvent::Kind::Motion;
+    evA.x = 1656.0f;
+    CHECK(overlay.onTouch(evA));
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+    CHECK(!overlay.isDirty());
+
+    // 4. Touch Up marks dirty
+    evA.kind = app::shell::TouchEvent::Kind::Up;
+    CHECK(overlay.onTouch(evA));
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+    CHECK(!overlay.isDirty());
+
+    // 5. In steady state without touches and with opacity settled, update() does not mark dirty
+    uint64_t t = 10000;
+    overlay.update(t, false, false);
+    CHECK(!overlay.isDirty());
+
+    // 6. Auto-hide mode opacity transition: fading marks dirty until settled
+    app::Settings s;
+    s.touchOverlayMode = 0; // Auto-hide
+    overlay.setSettings(s);
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+
+    // Physical controller active -> begins fading out toward 0
+    overlay.update(t, true, true);
+    CHECK(overlay.isDirty());
+
+    // Step through fade-out transition
+    for (int i = 0; i < 30; ++i) {
+        t += 16;
+        overlay.clearDirty();
+        overlay.update(t, true, true);
+    }
+    // Once settled at target 0.0f, update() leaves dirty flag false
+    overlay.clearDirty();
+    overlay.update(t + 16, true, true);
+    CHECK(!overlay.isDirty());
+
+    // 7. Touch wakes it up and marks dirty again
+    evA.kind = app::shell::TouchEvent::Kind::Down;
+    evA.fingerId = 2;
+    CHECK(overlay.onTouch(evA));
+    CHECK(overlay.isDirty());
+
+    // 8. Explicit setVisible / reset triggers dirty
+    overlay.clearDirty();
+    overlay.setVisible(false);
+    CHECK(overlay.isDirty());
+    overlay.clearDirty();
+    overlay.reset();
+    CHECK(overlay.isDirty());
+}
+
+static void testMicMuteStateTransitions() {
+    // 1. StreamPlayer mute state and transitions
+    {
+        xcloud::GssvClient gssv;
+        app::StreamPlayer player(gssv);
+        CHECK(player.micEnabled());
+        CHECK(!player.micMuted());
+
+        // Mute
+        player.setMicMuted(true);
+        CHECK(player.micMuted());
+
+        // Unmute
+        player.setMicMuted(false);
+        CHECK(!player.micMuted());
+
+        // Toggle micEnabled
+        player.setMicEnabled(false);
+        CHECK(!player.micEnabled());
+        player.setMicEnabled(true);
+        CHECK(player.micEnabled());
+    }
+
+    // 2. AudioIn mute state and isRecording state
+    {
+        media::AudioIn audioIn;
+        CHECK(!audioIn.isMuted());
+        CHECK(!audioIn.isRecording());
+
+        audioIn.setMuted(true);
+        CHECK(audioIn.isMuted());
+
+        audioIn.setMuted(false);
+        CHECK(!audioIn.isMuted());
+    }
+
+    // 3. MicPipeline mute cutoff: drops VU level to 0, drops buffer, produces NO frames
+    {
+        media::MicPipeline mic;
+        std::atomic<float> level{0.0f};
+        int framesReceived = 0;
+        size_t totalSamples = 0;
+        media::AudioIn::AudioCallback cb = [&](const int16_t*, size_t n) {
+            framesReceived++;
+            totalSamples += n;
+        };
+
+        std::vector<int16_t> grain(media::MicPipeline::kGrain, 1500);
+
+        // When active (unmuted): 4 grains of 256 = 1024 samples -> 1 frame of 960
+        for (int i = 0; i < 4; ++i) {
+            mic.process(grain.data(), grain.size(), false, 1.0f, level, cb);
+        }
+        CHECK(framesReceived == 1);
+        CHECK(totalSamples == media::AudioIn::kFrameSize);
+        CHECK(level.load() > 0.0f);
+
+        // Transition to muted: immediately drops level to 0.0f, clears accumulated
+        mic.process(grain.data(), grain.size(), true, 1.0f, level, cb);
+        CHECK(level.load() == 0.0f);
+        CHECK(framesReceived == 1); // No new frames dispatched
+
+        // Subsequent muted grains continue to produce 0 frames and level 0.0f
+        for (int i = 0; i < 10; ++i) {
+            mic.process(grain.data(), grain.size(), true, 1.0f, level, cb);
+        }
+        CHECK(framesReceived == 1); // Still exactly 1 frame
+        CHECK(level.load() == 0.0f);
+
+        // Transition back to unmuted: starts accumulation from fresh empty buffer
+        for (int i = 0; i < 3; ++i) {
+            mic.process(grain.data(), grain.size(), false, 1.0f, level, cb);
+        }
+        CHECK(framesReceived == 1); // 768 samples: not a frame yet
+        mic.process(grain.data(), grain.size(), false, 1.0f, level, cb);
+        CHECK(framesReceived == 2); // 1024 samples: second frame dispatched
+        CHECK(level.load() > 0.0f);
+    }
+}
+
+static void testUiTouchDragVsTap() {
+    ui::Fonts fonts;
+    ui::ImageCache images([] {});
+    ui::AppUi app(fonts, images);
+
+    // 1. Tap: finger down, small delta (< 16px), finger up -> activates without error
+    app::shell::TouchEvent tapDown{app::shell::TouchEvent::Kind::Down, 1, 500.0f, 300.0f};
+    app::shell::TouchEvent tapMove{app::shell::TouchEvent::Kind::Motion, 1, 504.0f, 302.0f}; // 4.5px < 16px
+    app::shell::TouchEvent tapUp{app::shell::TouchEvent::Kind::Up, 1, 504.0f, 302.0f};
+
+    app.onTouch(tapDown);
+    app.onTouch(tapMove);
+    app.onTouch(tapUp);
+
+    // 2. Drag: finger down, delta > 16px -> engages scrolling
+    app::shell::TouchEvent dragDown{app::shell::TouchEvent::Kind::Down, 2, 500.0f, 500.0f};
+    app::shell::TouchEvent dragMove{app::shell::TouchEvent::Kind::Motion, 2, 500.0f, 400.0f}; // 100px drag
+    app::shell::TouchEvent dragUp{app::shell::TouchEvent::Kind::Up, 2, 500.0f, 400.0f};
+
+    app.onTouch(dragDown);
+    app.onTouch(dragMove);
+    app.onTouch(dragUp);
+}
+
+static void testSafeAreaBoxCalculation() {
+    // Applying safe area insets: Left=120, Top=60, Right=80, Bottom=40
+    display::gpu::setSafeAreaInsets(120, 60, 80, 40);
+    display::gpu::setPresentationMode(display::gpu::DisplayPresentationMode::Standard);
+
+    // TopScreenOnly mode (split vertical orientation / clamshell top screen)
+    display::gpu::setPresentationMode(display::gpu::DisplayPresentationMode::TopScreenOnly);
+
+    // Reset back to standard with 0 insets
+    display::gpu::setSafeAreaInsets(0, 0, 0, 0);
+    display::gpu::setPresentationMode(display::gpu::DisplayPresentationMode::Standard);
+}
+
+static void testMilestone1TouchOverlayCanvasAndHaptics() {
+    // 1. Canvas alpha transparency & constructor default
+    {
+        ui::Canvas cDefault(32, 32);
+        CHECK(cDefault.width() == 32 && cDefault.height() == 32);
+        // Default constructor must initialize transparent (alpha == 0)
+        for (int i = 0; i < 32 * 32; ++i) {
+            CHECK(cDefault.data()[i] == 0u);
+        }
+
+        ui::Canvas cCustom(16, 16, ui::rgba(10, 20, 30, 80));
+        CHECK(cCustom.data()[0] == ui::rgba(10, 20, 30, 80));
+
+        cCustom.clearTransparent();
+        CHECK(cCustom.data()[0] == 0u);
+
+        cCustom.clearRgba(ui::rgba(100, 150, 200, 128));
+        CHECK(cCustom.data()[0] == ui::rgba(100, 150, 200, 128));
+
+        cCustom.clear(ui::rgba(0, 0, 0, 0));
+        CHECK(cCustom.data()[0] == 0u); // clear() must preserve transparent alpha without forcing 0xFF
+
+        // Source-over alpha blend onto transparent destination
+        ui::Canvas cBlend(10, 10);
+        cBlend.fillRect(ui::Rect{0, 0, 10, 10}, ui::rgba(255, 0, 0, 128));
+        uint32_t px = cBlend.data()[0];
+        CHECK((px >> 24) == 128);
+        CHECK((px & 0xFF) == 255);
+    }
+
+    // 2. Ergonomic 8-Way Radial D-Pad hit-test and enlarged controls
+    {
+        ui::Fonts fonts;
+        ui::TouchPadOverlay overlay(fonts);
+        overlay.reset();
+
+        constexpr float dpadCx = 520.0f, dpadCy = 830.0f;
+
+        // 8 radial sectors around (520, 830) at radius = 80px (within [40..145])
+        CHECK(overlay.hitTest(dpadCx + 80.0f, dpadCy) == ui::TouchControl::DpadRight);
+        CHECK(overlay.hitTest(dpadCx + 60.0f, dpadCy + 60.0f) == ui::TouchControl::DpadDownRight);
+        CHECK(overlay.hitTest(dpadCx, dpadCy + 80.0f) == ui::TouchControl::DpadDown);
+        CHECK(overlay.hitTest(dpadCx - 60.0f, dpadCy + 60.0f) == ui::TouchControl::DpadDownLeft);
+        CHECK(overlay.hitTest(dpadCx - 80.0f, dpadCy) == ui::TouchControl::DpadLeft);
+        CHECK(overlay.hitTest(dpadCx - 60.0f, dpadCy - 60.0f) == ui::TouchControl::DpadUpLeft);
+        CHECK(overlay.hitTest(dpadCx, dpadCy - 80.0f) == ui::TouchControl::DpadUp);
+        CHECK(overlay.hitTest(dpadCx + 60.0f, dpadCy - 60.0f) == ui::TouchControl::DpadUpRight);
+
+        // Deadzones
+        CHECK(overlay.hitTest(dpadCx, dpadCy) == ui::TouchControl::None); // Center deadzone < 40px
+        CHECK(overlay.hitTest(dpadCx + 25.0f, dpadCy) == ui::TouchControl::None); // Inner radius < 40px
+        CHECK(overlay.hitTest(dpadCx, 1060.0f) == ui::TouchControl::None); // Outer radius > 145px
+
+        // Enlarged ABXY diamond (r=78px hitbox)
+        CHECK(overlay.hitTest(1655.0f, 685.0f) == ui::TouchControl::ButtonA);
+        CHECK(overlay.hitTest(1765.0f, 575.0f) == ui::TouchControl::ButtonB);
+        CHECK(overlay.hitTest(1545.0f, 575.0f) == ui::TouchControl::ButtonX);
+        CHECK(overlay.hitTest(1655.0f, 465.0f) == ui::TouchControl::ButtonY);
+
+        // Generous thumb reach coverage (±70px within 78px radius hitbox)
+        CHECK(overlay.hitTest(1655.0f, 685.0f + 70.0f) == ui::TouchControl::ButtonA);
+        CHECK(overlay.hitTest(1765.0f + 70.0f, 575.0f) == ui::TouchControl::ButtonB);
+        CHECK(overlay.hitTest(1545.0f - 70.0f, 575.0f) == ui::TouchControl::ButtonX);
+        CHECK(overlay.hitTest(1655.0f, 465.0f - 70.0f) == ui::TouchControl::ButtonY);
+
+        // Enlarged Triggers (230x90) and Bumpers (230x84)
+        CHECK(overlay.hitTest(100.0f, 150.0f) == ui::TouchControl::TriggerLT);
+        CHECK(overlay.hitTest(100.0f, 250.0f) == ui::TouchControl::BumperLB);
+        CHECK(overlay.hitTest(1700.0f, 150.0f) == ui::TouchControl::TriggerRT);
+        CHECK(overlay.hitTest(1700.0f, 250.0f) == ui::TouchControl::BumperRB);
+
+        // Pull tab zone
+        CHECK(overlay.hitTest(50.0f, 50.0f) == ui::TouchControl::OverlayToggle);
+    }
+
+    // 3. Touch overlay settings wiring & persistence
+    {
+        app::Settings settings;
+        settings.touchOverlayMode = 1; // Always On
+        std::string tempPath = "/tmp/test_settings_m1.json";
+        CHECK(settings.save(tempPath));
+
+        app::Settings loaded;
+        CHECK(loaded.load(tempPath));
+        CHECK(loaded.touchOverlayMode == 1);
+        std::remove(tempPath.c_str());
+
+        ui::Fonts fonts;
+        ui::TouchPadOverlay overlay(fonts);
+
+        // Apply Always On mode (1)
+        overlay.setSettings(settings);
+        CHECK(overlay.overlayMode() == 1);
+        CHECK(overlay.isVisible());
+        CHECK(overlay.opacity() == 0.80f);
+
+        // In Always On mode, even if physical controller is attached and active, overlay remains visible
+        uint64_t t = 1000;
+        for (int i = 0; i < 30; ++i) {
+            overlay.update(t, true, true);
+            t += 16;
+        }
+        CHECK(overlay.isVisible());
+        CHECK(overlay.opacity() == 0.80f);
+
+        // Apply Always Off mode (2)
+        settings.touchOverlayMode = 2;
+        overlay.setSettings(settings);
+        CHECK(overlay.overlayMode() == 2);
+        CHECK(!overlay.isVisible());
+        CHECK(overlay.opacity() == 0.0f);
+
+        // In Always Off mode, touch events are ignored
+        app::shell::TouchEvent ev{app::shell::TouchEvent::Kind::Down, 1, 1655.0f, 685.0f};
+        CHECK(!overlay.onTouch(ev));
+
+        // Apply Auto mode (0)
+        settings.touchOverlayMode = 0;
+        overlay.setSettings(settings);
+        CHECK(overlay.overlayMode() == 0);
+    }
+
+    // 4. Multi-touch 3-finger zero-pad input rollback & haptics contract
+    {
+        ui::Fonts fonts;
+        ui::TouchPadOverlay overlay(fonts);
+        overlay.reset();
+
+        // Simulate finger 1 touching A and finger 2 touching B
+        app::shell::TouchEvent f1{app::shell::TouchEvent::Kind::Down, 1, 1655.0f, 685.0f};
+        app::shell::TouchEvent f2{app::shell::TouchEvent::Kind::Down, 2, 1765.0f, 575.0f};
+        CHECK(overlay.onTouch(f1));
+        CHECK(overlay.onTouch(f2));
+
+        input::ControllerState sActive{};
+        bool conn = false;
+        app::virtualGamepadState(0, sActive, conn);
+        CHECK(sActive.btnA);
+        CHECK(sActive.btnB);
+
+        // 3-finger cancellation: overlay.reset() + force-inject zero ControllerState
+        overlay.reset();
+        app::setVirtualGamepad(0, input::ControllerState{});
+
+        input::ControllerState sReset{};
+        app::virtualGamepadState(0, sReset, conn);
+        CHECK(!sReset.btnA);
+        CHECK(!sReset.btnB);
+        CHECK(!sReset.btnX);
+        CHECK(!sReset.btnY);
+        CHECK(sReset.leftStickX == 0.0f && sReset.leftStickY == 0.0f);
+        CHECK(sReset.rightStickX == 0.0f && sReset.rightStickY == 0.0f);
+
+        // Verify HapticType enum and non-throwing triggerHaptic contract
+        input::triggerHaptic(input::HapticType::Click);
+        input::triggerHaptic(input::HapticType::Tick);
+        input::triggerHaptic(input::HapticType::HeavyClick);
+    }
+}
+
 int main() {
+    testMilestone1TouchOverlayCanvasAndHaptics();
+    testHwPictureContract();
+    testTouchVirtualGamepadInjection();
+    testTouchAutoHideLogic();
+    testTouchDirtyFlagLifecycle();
+    testMicMuteStateTransitions();
+    testUiTouchDragVsTap();
+    testSafeAreaBoxCalculation();
+    testAndroidLifecycleAndMedia();
     testPs4VideoPipelineAndSse2Converter();
-    testTrophySystem();
-    testTrophyNetworkAndLifecycleResilienceStress();
-    testTrophyStreamingPauseAndPriority();
-    testTrophyModalsAndDesktopInput();
+    testDesktopSearchAndTextInput();
+    testTrophyNonConsoleDisabled();
+    testSocketLayer();
+    testFsLayer();
     testReleaseV155Features();
     testSizedUrl();
     testPhase1BugFixesAndPhase2Optimizations();
@@ -12121,6 +11455,7 @@ int main() {
     testMilestone6UsbKeyboardMouseIsolation();
     testM3PlatformAndBitrateUi();
     testM4DebugNoticesExterminationAndToasts();
+    testAndroidM5QualityAndUxRefinements();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;

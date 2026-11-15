@@ -610,6 +610,7 @@ bool VideoDecoder::init(int threads, bool preferHw) {
             // Vulkan Video first: the desktop build's FFmpeg has it (libvulkan
             // opened at run time); the others only where a build adds them.
             {AV_HWDEVICE_TYPE_VULKAN, AV_PIX_FMT_VULKAN},
+            {AV_HWDEVICE_TYPE_D3D11VA, AV_PIX_FMT_D3D11},
             {AV_HWDEVICE_TYPE_VAAPI, AV_PIX_FMT_VAAPI},
             {AV_HWDEVICE_TYPE_CUDA,  AV_PIX_FMT_CUDA},
             {AV_HWDEVICE_TYPE_VDPAU, AV_PIX_FMT_VDPAU},
@@ -697,19 +698,41 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
             consecutiveHwErrors_ = 0;
             consecutivePending_ = 0;
             needsKeyframe_ = false;
-            out.format = Picture::Format::Nv12;
-            out.width = hp.width;
-            out.height = (hp.height == 1088) ? 1080 : hp.height;
-            out.strideY = hp.pitchBytes;
-            out.strideU = hp.pitchBytes;
-            out.strideV = 0;
-            out.y = hp.data;
-            out.u = hp.data + hp.pitchBytes * hp.height;
-            out.v = nullptr;
-            out.tag = static_cast<uint32_t>(hp.pts);
+            if (hp.isYuv420p) {
+                out.format = Picture::Format::Yuv420p;
+                out.width = hp.width;
+                out.height = hp.visibleHeight ? hp.visibleHeight : ((hp.height == 1088) ? 1080 : hp.height);
+                out.strideY = hp.pitchBytes;
+                out.strideU = hp.strideU;
+                out.strideV = hp.strideV;
+                out.y = hp.data;
+                out.u = hp.u;
+                out.v = hp.v;
+                out.tag = static_cast<uint32_t>(hp.pts);
+                out.uv = nullptr;
+                out.uvPitchBytes = 0;
+                out.nv21 = false;
+                out.visibleHeight = hp.visibleHeight;
+            } else {
+                out.format = Picture::Format::Nv12;
+                out.width = hp.width;
+                out.height = hp.visibleHeight ? hp.visibleHeight : ((hp.height == 1088) ? 1080 : hp.height);
+                out.strideY = hp.pitchBytes;
+                out.strideU = hp.uvPitchBytes ? hp.uvPitchBytes : hp.pitchBytes;
+                out.strideV = 0;
+                out.y = hp.data;
+                out.u = hp.uv ? hp.uv : (hp.data + hp.pitchBytes * hp.height);
+                out.v = nullptr;
+                out.tag = static_cast<uint32_t>(hp.pts);
+                out.uv = hp.uv ? hp.uv : out.u;
+                out.uvPitchBytes = hp.uvPitchBytes ? hp.uvPitchBytes : out.strideU;
+                out.nv21 = hp.nv21;
+                out.visibleHeight = hp.visibleHeight;
+            }
             if (!profileLogged_) {
                 profileLogged_ = true;
-                XC_LOGI("hwdec stream active: %ux%u (pitch %u, nv12)", out.width, out.height, out.strideY);
+                XC_LOGI("hwdec stream active: %ux%u (pitch %u, %s)", out.width, out.height, out.strideY,
+                        hp.isYuv420p ? "yuv420p" : (out.nv21 ? "nv21" : "nv12"));
             }
             return true;
         }

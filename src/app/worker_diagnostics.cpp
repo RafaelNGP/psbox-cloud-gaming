@@ -13,15 +13,12 @@
 #include "xcloud/regions.h"
 #include "build_id.h"
 
+#include "net/socket.h"
+
 #include <algorithm>
 #include <cerrno>
 #include <cmath>
-#include <fcntl.h>
 #include <map>
-#include <netdb.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <vector>
 
 namespace xc::app {
@@ -217,8 +214,8 @@ std::string probeStunUdp() {
     if (::getaddrinfo("stun.l.google.com", "19302", &hints, &res) != 0 || !res) {
         return "DNS / UDP Unavailable";
     }
-    int fd = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) {
+    net::Socket fd = net::socketCreate(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (!fd.valid()) {
         ::freeaddrinfo(res);
         return "UDP Socket Error";
     }
@@ -230,23 +227,20 @@ std::string probeStunUdp() {
         0x24, 0x55, 0x7A, 0xBC, 0xDE, 0xF0,
     };
     uint64_t t0 = platform::nowMs();
-    ssize_t sent = ::sendto(fd, req, sizeof(req), 0, res->ai_addr, res->ai_addrlen);
+    ssize_t sent = net::sendToSocket(fd, req, sizeof(req), 0, res->ai_addr, res->ai_addrlen);
     ::freeaddrinfo(res);
     if (sent != static_cast<ssize_t>(sizeof(req))) {
-        ::close(fd);
+        net::closeSocket(fd);
         return "UDP Blocked";
     }
-    pollfd pfd{};
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    int pr = ::poll(&pfd, 1, 900);
+    int pr = net::pollSockets(&fd, 1, nullptr, 0, 900);
     if (pr <= 0) {
-        ::close(fd);
+        net::closeSocket(fd);
         return "UDP Filtered / Timeout";
     }
     uint8_t resp[128];
-    ssize_t got = ::recv(fd, resp, sizeof(resp), 0);
-    ::close(fd);
+    ssize_t got = net::recvSocket(fd, resp, sizeof(resp), 0);
+    net::closeSocket(fd);
     int rtt = static_cast<int>(platform::nowMs() - t0);
     if (got >= 20 && resp[0] == 0x01 && resp[1] == 0x01) {
         return "UDP Reachable (" + std::to_string(rtt) + " ms)";
@@ -262,33 +256,28 @@ int probeTcpConnect(const char* host, const char* port, int timeoutMs) {
     if (::getaddrinfo(host, port, &hints, &res) != 0 || !res) {
         return -1;
     }
-    int fd = ::socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-    if (fd < 0) {
+    net::Socket fd = net::socketCreate(res->ai_family, res->ai_socktype, res->ai_protocol);
+    if (!fd.valid()) {
         ::freeaddrinfo(res);
         return -1;
     }
-    int flags = ::fcntl(fd, F_GETFL, 0);
-    if (flags >= 0) ::fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+    net::setNonBlocking(fd, true);
 
     uint64_t t0 = platform::nowMs();
-    int rc = ::connect(fd, res->ai_addr, res->ai_addrlen);
+    bool connected = net::connectSocket(fd, res->ai_addr, res->ai_addrlen);
     int rtt = -1;
-    if (rc == 0) {
+    if (connected) {
         rtt = static_cast<int>(platform::nowMs() - t0);
-    } else if (errno == EINPROGRESS) {
-        pollfd pfd{};
-        pfd.fd = fd;
-        pfd.events = POLLOUT;
-        int pr = ::poll(&pfd, 1, timeoutMs);
+    } else if (net::inProgress(net::lastSocketError())) {
+        int pr = net::pollSockets(nullptr, 0, &fd, 1, timeoutMs);
         if (pr > 0) {
             int err = 0;
-            socklen_t len = sizeof(err);
-            if (::getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &len) == 0 && err == 0) {
+            if (net::getSocketError(fd, err) && err == 0) {
                 rtt = static_cast<int>(platform::nowMs() - t0);
             }
         }
     }
-    ::close(fd);
+    net::closeSocket(fd);
     ::freeaddrinfo(res);
     return rtt;
 }

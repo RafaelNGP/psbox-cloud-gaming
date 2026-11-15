@@ -31,6 +31,10 @@ void audioStop() {
     audioQueue().clear();
 }
 
+void audioPause() {}
+void audioResume() {}
+bool audioIsPaused() { return false; }
+
 static std::atomic<int> g_padSpeakerVolume{100};
 
 void setPadSpeakerVolume(int percent) {

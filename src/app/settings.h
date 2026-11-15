@@ -98,6 +98,15 @@ struct Settings {
     bool streamStats = false;
     uint32_t statsMask = 0x1F;  // StatsDefaultMask (Fps, Bitrate, Latency, Loss, Graph)
     // Sharpening of the game picture: 0 off, 1..3 low, medium (FSR RCAS), high.
+#if defined(__ANDROID__)
+    int sharpness = 0;
+    // Smoothing of compression blocks (GPU display): 0 off, 1 low, 2 high,
+    // 3 auto (stronger as the bitrate falls).
+    int deband = 0;
+    // Upscaling to the 4K display (GPU): 0 FSR 1, 1 Anime4K, 2 FSR and 3
+    // Anime4K after Anime4K Restore (the clean-up of compression artefacts).
+    int upscaler = 0;
+#else
     int sharpness = 2;
     // Smoothing of compression blocks (GPU display): 0 off, 1 low, 2 high,
     // 3 auto (stronger as the bitrate falls).
@@ -105,6 +114,7 @@ struct Settings {
     // Upscaling to the 4K display (GPU): 0 FSR 1, 1 Anime4K, 2 FSR and 3
     // Anime4K after Anime4K Restore (the clean-up of compression artefacts).
     int upscaler = 2;
+#endif
     int videoDecoder = 0;  // 0 Hardware, 1 Software
     // Controller: stick dead zone (percent), vibration in the triggers,
     // Circle as the confirm button (Xbox A).
@@ -179,6 +189,8 @@ struct Settings {
     // without and with strum; empty: the defaults.
     std::string guitarLanes, guitarStrumLanes;
     bool soloInputRedirect = false;
+    int touchOverlayMode = 0;  // 0: Auto (Auto-hide on physical controller), 1: Always On, 2: Always Off
+    bool touchInvertSticks = false;
     std::map<std::string, uint64_t> titlePlaytime; // accumulated playtime in seconds (productId or titleId -> seconds)
 
     uint64_t playtimeForGame(const std::string& productId, const std::string& titleId) const {

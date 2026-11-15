@@ -27,8 +27,22 @@
 #include <sys/cpuset.h>
 #include <string>
 #include <sys/socket.h>
+#include <csignal>
+#include <ucontext.h>
 
 extern "C" {
+extern const char __text_start[];
+extern const char __text_end[];
+struct SceModuleInfoForUnwind {
+    size_t st_size;
+    char name[256];
+    uintptr_t eh_frame_hdr_addr;
+    uintptr_t eh_frame_addr;
+    size_t eh_frame_size;
+    uintptr_t seg0_addr;
+    size_t seg0_size;
+};
+int sceKernelGetModuleInfoForUnwind(uintptr_t addr, int flags, SceModuleInfoForUnwind* info);
 struct SceKernelSwVersion {
     uint64_t size;
     char versionString[0x1C];
@@ -608,6 +622,43 @@ void setThreadRealtimePriority() {
         XC_LOGW("pthread_setschedparam(SCHED_RR, prio=%d): %d", param.sched_priority, rc);
     } else {
         XC_LOGI("thread elevated to SCHED_RR (prio=%d)", param.sched_priority);
+    }
+}
+
+void setLowLatencyNetwork(bool) {}
+
+void getCodeBounds(uintptr_t& base, uintptr_t& end) {
+    base = reinterpret_cast<uintptr_t>(__text_start);
+    end = reinterpret_cast<uintptr_t>(__text_end);
+}
+
+bool findModuleByAddr(uintptr_t addr, char* nameBuf, size_t nameCap, uintptr_t& baseAddr) {
+    if (!nameBuf || nameCap == 0) return false;
+    SceModuleInfoForUnwind mod{};
+    mod.st_size = sizeof(mod);
+    if (sceKernelGetModuleInfoForUnwind(addr, 1, &mod) == 0 && mod.name[0] && addr >= mod.seg0_addr) {
+        const char* name = mod.name;
+        for (const char* p = name; *p; ++p) if (*p == '/') name = p + 1;
+        if (std::strcmp(name, "eboot.bin") == 0 || std::strcmp(name, "eboot.elf") == 0) name = "eboot";
+        std::strncpy(nameBuf, name, nameCap - 1);
+        nameBuf[nameCap - 1] = 0;
+        baseAddr = mod.seg0_addr;
+        return true;
+    }
+    return false;
+}
+
+void extractSignalContext(void* uctx, void* siginfo, uintptr_t& pc, uintptr_t& rbp, uintptr_t& rsp, uintptr_t& faultAddr) {
+    auto* info = static_cast<siginfo_t*>(siginfo);
+    faultAddr = info ? reinterpret_cast<uintptr_t>(info->si_addr) : 0;
+    if (uctx) {
+        const auto* uc = static_cast<const ucontext_t*>(uctx);
+        pc = static_cast<uintptr_t>(uc->uc_mcontext.mc_rip);
+        rbp = static_cast<uintptr_t>(uc->uc_mcontext.mc_rbp);
+        rsp = static_cast<uintptr_t>(uc->uc_mcontext.mc_rsp);
+        if (faultAddr == 0) {
+            faultAddr = static_cast<uintptr_t>(uc->uc_mcontext.mc_addr);
+        }
     }
 }
 

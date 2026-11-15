@@ -28,7 +28,7 @@ bool videoSlots(size_t, uint8_t* out[2]) {
 }
 void waitVideoSlot(const uint8_t*) {}
 
-bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV, int width, int height, bool) {
+bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV, int width, int height, bool, bool) {
     if (!y || !uv || width <= 0 || height <= 0 || strideY < width || strideUV < width) return false;
     return true;
 }
@@ -55,3 +55,13 @@ bool lastShown(uint64_t&, uint64_t&) { return false; }
 bool readBackRgb(std::vector<uint8_t>&, int&, int&) { return false; }
 
 }  // namespace xc::display
+
+#include "display/gpu.h"
+
+namespace xc::display::gpu {
+
+void setPresentationMode(DisplayPresentationMode) {}
+void setSafeAreaInsets(int, int, int, int) {}
+bool recreateSurface() { return true; }
+
+}  // namespace xc::display::gpu

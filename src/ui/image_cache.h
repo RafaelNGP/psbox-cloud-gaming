@@ -38,6 +38,7 @@ public:
                         size_t diskBudgetBytes = 256u << 20);
     ~ImageCache();
     void stop();
+    void shrink();
 
     // The image scaled to w x h, or nullptr while it loads (or if it failed).
     std::shared_ptr<const Image> get(const std::string& url, int w, int h);

@@ -29,6 +29,7 @@
 #include "display/shaders/rcas.spv.h"
 #include "display/shaders/yuv2rgb.spv.h"
 #include "display/shaders/nv122rgb.spv.h"
+#include "display/shaders/nv212rgb.spv.h"
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wmissing-field-initializers"
@@ -123,6 +124,7 @@ struct State {
     VkImageView views[8]{};
     uint32_t imageCount = 0;
     bool needSwapchain = false;
+    bool needSurface = false;
     VkCommandPool pool = VK_NULL_HANDLE;
     VkCommandBuffer cmd = VK_NULL_HANDLE;
     VkSemaphore acquired = VK_NULL_HANDLE, rendered = VK_NULL_HANDLE;
@@ -132,7 +134,7 @@ struct State {
     uint64_t presented = 0;  // the last present id
 
     VkSampler nearest = VK_NULL_HANDLE, linear = VK_NULL_HANDLE;
-    Pipeline yuv, nv12, easu, rcas;
+    Pipeline yuv, nv12, nv21, easu, rcas;
     // Anime4K x2 (S): four convolutions at the picture's size, then the
     // depth-to-space into the 2x image (or straight into upscaled when the
     // display box is already 2x); in place of EASU when chosen.
@@ -145,8 +147,9 @@ struct State {
     VkDescriptorSet restoreSets[4]{};
     bool restoreReady = false;
     VkDescriptorPool descriptors = VK_NULL_HANDLE;
-    VkDescriptorSet yuvSet = VK_NULL_HANDLE, nv12Set = VK_NULL_HANDLE, easuVideoSet = VK_NULL_HANDLE, easuUiSet = VK_NULL_HANDLE;
+    VkDescriptorSet yuvSet = VK_NULL_HANDLE, nv12Set = VK_NULL_HANDLE, nv21Set = VK_NULL_HANDLE, easuVideoSet = VK_NULL_HANDLE, easuUiSet = VK_NULL_HANDLE;
     VkDescriptorSet rcasSets[8]{};
+    VkDescriptorSet rcasVideoDirectSets[8]{};
 
     Image luma, chromaU, chromaV, chromaUV, rgb;  // the video picture, at its size
     Image features[2];                  // Anime4K's feature maps, ping-ponged
@@ -206,11 +209,53 @@ bool fail(const char* step, VkResult r) {
     return false;
 }
 
+struct Viewport {
+    int32_t x = 0, y = 0;
+    uint32_t w = 3840, h = 2160;
+};
+Viewport g_viewport{};
+DisplayPresentationMode g_presMode = DisplayPresentationMode::Standard;
+
+struct GpuSafeArea {
+    uint32_t left = 0, top = 0, right = 0, bottom = 0;
+} g_safeArea{};
+
 void updateBox() {
-    g.boxW = g.extent.width;
-    g.boxH = g.extent.height;
-    if (g.boxW * 9 > g.boxH * 16) g.boxW = std::max(1u, (g.boxH * 16 + 4) / 9);
-    else if (g.boxH * 16 > g.boxW * 9) g.boxH = std::max(1u, (g.boxW * 9 + 8) / 16);
+    uint32_t prevW = g.boxW;
+    uint32_t prevH = g.boxH;
+    uint32_t safeX = g_safeArea.left;
+    uint32_t safeY = g_safeArea.top;
+    uint32_t safeW = (g.extent.width > (g_safeArea.left + g_safeArea.right))
+                     ? (g.extent.width - g_safeArea.left - g_safeArea.right) : g.extent.width;
+    uint32_t safeH = (g.extent.height > (g_safeArea.top + g_safeArea.bottom))
+                     ? (g.extent.height - g_safeArea.top - g_safeArea.bottom) : g.extent.height;
+
+    if (g_presMode == DisplayPresentationMode::TopScreenOnly) {
+        // Upper screen / Top half: presentation split in half (e.g. clamshell foldables or dual-screen presentation)
+        uint32_t halfH = safeH / 2;
+        g.boxW = safeW;
+        g.boxH = halfH;
+        if (g.boxW * 9 > g.boxH * 16) g.boxW = std::max(1u, (g.boxH * 16 + 4) / 9);
+        else if (g.boxH * 16 > g.boxW * 9) g.boxH = std::max(1u, (g.boxW * 9 + 8) / 16);
+
+        g_viewport.x = static_cast<int32_t>(safeX + (safeW - g.boxW) / 2);
+        g_viewport.y = static_cast<int32_t>(safeY + (halfH - g.boxH) / 2);
+        g_viewport.w = g.boxW;
+        g_viewport.h = g.boxH;
+    } else {
+        g.boxW = safeW;
+        g.boxH = safeH;
+        if (g.boxW * 9 > g.boxH * 16) g.boxW = std::max(1u, (g.boxH * 16 + 4) / 9);
+        else if (g.boxH * 16 > g.boxW * 9) g.boxH = std::max(1u, (g.boxW * 9 + 8) / 16);
+
+        g_viewport.x = static_cast<int32_t>(safeX + (safeW - g.boxW) / 2);
+        g_viewport.y = static_cast<int32_t>(safeY + (safeH - g.boxH) / 2);
+        g_viewport.w = g.boxW;
+        g_viewport.h = g.boxH;
+    }
+    if (g.ready && g.upscaled.image && (g.boxW != prevW || g.boxH != prevH || g.boxW != g.upscaled.w || g.boxH != g.upscaled.h)) {
+        g.needSwapchain = true;
+    }
 }
 
 // --- device -------------------------------------------------------------------
@@ -732,6 +777,13 @@ void bindSwapchainSets() {
         writeSampled(g.rcasSets[i], 1, g.overlay.view, g.linear);
         writeStorage(g.rcasSets[i], 2, g.views[i]);
     }
+    for (uint32_t i = 0; i < g.imageCount; ++i) {
+        if (g.rcasVideoDirectSets[i] && g.rgb.view) {
+            writeStorage(g.rcasVideoDirectSets[i], 0, g.rgb.view);
+            writeSampled(g.rcasVideoDirectSets[i], 1, g.overlay.view, g.linear);
+            writeStorage(g.rcasVideoDirectSets[i], 2, g.views[i]);
+        }
+    }
 }
 
 bool createPipelines() {
@@ -750,8 +802,9 @@ bool createPipelines() {
     const VkDescriptorSetLayoutBinding rcas[] = {binding(0, storage), binding(1, sampled), binding(2, storage)};
     if (!createPipeline(g.yuv, kShader_yuv2rgb, sizeof kShader_yuv2rgb, yuv, 4, 28) ||
         !createPipeline(g.nv12, kShader_nv122rgb, sizeof kShader_nv122rgb, nv12, 3, 28) ||
+        !createPipeline(g.nv21, kShader_nv212rgb, sizeof kShader_nv212rgb, nv12, 3, 28) ||
         !createPipeline(g.easu, kShader_easu, sizeof kShader_easu, easu, 2, 68) ||
-        !createPipeline(g.rcas, kShader_rcas, sizeof kShader_rcas, rcas, 3, 32)) {
+        !createPipeline(g.rcas, kShader_rcas, sizeof kShader_rcas, rcas, 3, 48)) {
         XC_LOGE("gpu: the FSR pipelines");
         return false;
     }
@@ -772,17 +825,19 @@ bool createPipelines() {
             g.restoreReady = createPipeline(g.restoreConv[i], rcode[i], rbytes[i], conv, 2, 0);
         if (g.a4kReady && !g.restoreReady) XC_LOGD("gpu: no Anime4K Restore pipelines");
     }
-    const VkDescriptorPoolSize sizes[] = {{sampled, 40}, {storage, 40}};
+    const VkDescriptorPoolSize sizes[] = {{sampled, 48}, {storage, 64}};
     VkDescriptorPoolCreateInfo pool{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
-    pool.maxSets = 32;
+    pool.maxSets = 48;
     pool.poolSizeCount = 2;
     pool.pPoolSizes = sizes;
     if (vkCreateDescriptorPool(g.device, &pool, nullptr, &g.descriptors) != VK_SUCCESS) return false;
     g.yuvSet = allocateSet(g.yuv);
     g.nv12Set = allocateSet(g.nv12);
+    g.nv21Set = allocateSet(g.nv21);
     g.easuVideoSet = allocateSet(g.easu);
     g.easuUiSet = allocateSet(g.easu);
     for (uint32_t i = 0; i < 8; ++i) g.rcasSets[i] = allocateSet(g.rcas);
+    for (uint32_t i = 0; i < 8; ++i) g.rcasVideoDirectSets[i] = allocateSet(g.rcas);
     if (g.a4kReady) {
         for (int i = 0; i < 4; ++i) g.a4kConvSets[i] = allocateSet(g.a4kConv[i]);
         g.a4kD2sSet = allocateSet(g.a4kD2s);
@@ -811,10 +866,17 @@ bool createPipelines() {
 
 bool recreateSwapchain() {
     if (!g.wsi.createSurface) return false;
+    if (!g.surface) {
+        g.needSurface = true;
+        return false;
+    }
     uint32_t w = 0, h = 0;
     if (g.wsi.getExtent) {
         g.wsi.getExtent(g.wsi.user, w, h);
-        if (w == 0 || h == 0) return false;
+        if (w == 0 || h == 0) {
+            g.needSwapchain = true;
+            return false;
+        }
     }
     vkDeviceWaitIdle(g.device);
     g.fencePending = false;
@@ -822,7 +884,6 @@ bool recreateSwapchain() {
     g.lastPresented = UINT32_MAX;
     g.presented = 0;
     g_shownId = 0;
-    g.needSwapchain = false;
     for (uint32_t i = 0; i < g.imageCount; ++i) {
         if (g.views[i]) vkDestroyImageView(g.device, g.views[i], nullptr);
         g.views[i] = VK_NULL_HANDLE;
@@ -834,10 +895,86 @@ bool recreateSwapchain() {
     }
     destroyImage(g.upscaled);
     destroyBuffer(g.readback);
-    if (!buildSwapchain(false)) return false;
+    if (!buildSwapchain(false)) {
+        g.needSwapchain = true;
+        return false;
+    }
     if (!createImage(g.upscaled, kPictureFormat, g.boxW, g.boxH,
-                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) return false;
+                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        g.needSwapchain = true;
+        return false;
+    }
     bindSwapchainSets();
+    g.needSwapchain = false;
+    return true;
+}
+
+bool doRecreateSurface() {
+    if (!g.wsi.createSurface) return false;
+    uint32_t w = 0, h = 0;
+    if (g.wsi.getExtent) {
+        g.wsi.getExtent(g.wsi.user, w, h);
+        if (w == 0 || h == 0) {
+            g.needSurface = true;
+            return false;
+        }
+    }
+    vkDeviceWaitIdle(g.device);
+    g.fencePending = false;
+    g.frameOpen = false;
+    g.lastPresented = UINT32_MAX;
+    g.presented = 0;
+    g_shownId = 0;
+    for (uint32_t i = 0; i < g.imageCount; ++i) {
+        if (g.views[i]) vkDestroyImageView(g.device, g.views[i], nullptr);
+        g.views[i] = VK_NULL_HANDLE;
+    }
+    g.imageCount = 0;
+    if (g.swapchain) {
+        vkDestroySwapchainKHR(g.device, g.swapchain, nullptr);
+        g.swapchain = VK_NULL_HANDLE;
+    }
+    destroyImage(g.upscaled);
+    destroyBuffer(g.readback);
+    if (g.surface) {
+        vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
+        g.surface = VK_NULL_HANDLE;
+    }
+    if (!g.wsi.createSurface(g.wsi.user, g.instance, &g.surface) || !g.surface) {
+        XC_LOGE("gpu: recreateSurface: window surface creation failed");
+        g.needSurface = true;
+        return false;
+    }
+    VkBool32 supported = VK_FALSE;
+    vkGetPhysicalDeviceSurfaceSupportKHR(g.physical, g.family, g.surface, &supported);
+    if (!supported) {
+        XC_LOGE("gpu: queue family %u does not support surface presentation", g.family);
+        if (g.surface) {
+            vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
+            g.surface = VK_NULL_HANDLE;
+        }
+        g.needSurface = true;
+        return false;
+    }
+    if (!buildSwapchain(false)) {
+        XC_LOGE("gpu: recreateSurface: buildSwapchain failed");
+        if (g.surface) {
+            vkDestroySurfaceKHR(g.instance, g.surface, nullptr);
+            g.surface = VK_NULL_HANDLE;
+        }
+        g.needSurface = true;
+        return false;
+    }
+    if (!createImage(g.upscaled, kPictureFormat, g.boxW, g.boxH,
+                     VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT)) {
+        XC_LOGE("gpu: recreateSurface: createImage upscaled failed");
+        g.needSurface = true;
+        return false;
+    }
+    bindSwapchainSets();
+    g.needSwapchain = false;
+    g.needSurface = false;
+    XC_LOGI("gpu: surface recreated successfully (%ux%u)", g.extent.width, g.extent.height);
     return true;
 }
 
@@ -871,7 +1008,17 @@ bool videoImages(uint32_t w, uint32_t h) {
     writeSampled(g.nv12Set, 0, g.luma.view, g.linear);
     writeSampled(g.nv12Set, 1, g.chromaUV.view, g.linear);
     writeStorage(g.nv12Set, 2, g.rgb.view);
+    writeSampled(g.nv21Set, 0, g.luma.view, g.linear);
+    writeSampled(g.nv21Set, 1, g.chromaUV.view, g.linear);
+    writeStorage(g.nv21Set, 2, g.rgb.view);
     writeSampled(g.easuVideoSet, 0, g.rgb.view, g.linear);
+    for (uint32_t i = 0; i < g.imageCount; ++i) {
+        if (g.rcasVideoDirectSets[i]) {
+            writeStorage(g.rcasVideoDirectSets[i], 0, g.rgb.view);
+            writeSampled(g.rcasVideoDirectSets[i], 1, g.overlay.view, g.linear);
+            writeStorage(g.rcasVideoDirectSets[i], 2, g.views[i]);
+        }
+    }
     if (g.a4kReady) {
         if (!createImage(g.features[0], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_STORAGE_BIT) ||
             !createImage(g.features[1], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_STORAGE_BIT) ||
@@ -982,7 +1129,15 @@ bool beginFrame(bool wait) {
         if (w != g.extent.width || h != g.extent.height) g.needSwapchain = true;
     }
     if (g_mailbox != g_mailboxBuilt) g.needSwapchain = true;  // setMailbox() changed it
+    if (g.upscaled.image && (g.boxW != g.upscaled.w || g.boxH != g.upscaled.h)) g.needSwapchain = true;
+    if (!g.surface) g.needSurface = true;
+    if (!g.swapchain) g.needSwapchain = true;
+
+    if (g.needSurface && g.wsi.createSurface) {
+        if (!doRecreateSurface()) return false;
+    }
     if (g.needSwapchain && !recreateSwapchain()) return false;
+    if (!g.swapchain || g.imageCount == 0) return false;
     if (g.presentWait && g.presented) {
         if (!g_noPresentWait) {
             // The frame before on the screen first (at most 50 ms, then go on).
@@ -1003,10 +1158,22 @@ bool beginFrame(bool wait) {
     uint64_t t0 = platform::nowUs();
     VkResult r = vkAcquireNextImageKHR(g.device, g.swapchain, wait ? kGpuWaitNs : 0, g.acquired, VK_NULL_HANDLE,
                                        &g.frameIndex);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR && g.wsi.createSurface) {
-        if (!recreateSwapchain()) return false;
+    if ((r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_ERROR_SURFACE_LOST_KHR) && g.wsi.createSurface) {
+        if (r == VK_ERROR_SURFACE_LOST_KHR) {
+            XC_LOGW("gpu: acquire returned VK_ERROR_SURFACE_LOST_KHR; recreating surface");
+            g.needSurface = true;
+            if (!doRecreateSurface()) return false;
+        } else {
+            g.needSwapchain = true;
+            if (!recreateSwapchain()) return false;
+        }
+        if (!g.swapchain || g.imageCount == 0) return false;
         r = vkAcquireNextImageKHR(g.device, g.swapchain, wait ? kGpuWaitNs : 0, g.acquired, VK_NULL_HANDLE,
                                   &g.frameIndex);
+    }
+    if (r == VK_ERROR_SURFACE_LOST_KHR && g.wsi.createSurface) {
+        g.needSurface = true;
+        return false;
     }
     if (r == VK_TIMEOUT && wait && g_gpuTimeouts++ % 60 == 0)
         XC_LOGW("gpu: no free image after 250 ms (%u times)", g_gpuTimeouts);
@@ -1077,7 +1244,8 @@ void recordUpscale(VkDescriptorSet easuSet, uint32_t w, uint32_t h, int sharpnes
             w *= 2, h *= 2;
         }
     }
-    if (!direct) {
+    const bool directVideo1to1 = (video && w == g.boxW && h == g.boxH);
+    if (!direct && !directVideo1to1) {
         if (w == g.boxW && h == g.boxH) {
             // 1:1 match: copy RGB/UI directly to upscaled, bypassing EASU computation.
             VkImage srcImage = (easuSet == g.easuUiSet) ? g.ui.image : g.rgb.image;
@@ -1126,11 +1294,16 @@ void recordUpscale(VkDescriptorSet easuSet, uint32_t w, uint32_t h, int sharpnes
         float opacity;
         float dither;  // the video only: the menus are 8-bit already
         uint32_t quant8;
+        int32_t vpX, vpY, vpW, vpH;
     } rcas{{asBits(linear), 0, 0, 0}, sharpness > 0 ? 1u : 0u, overlay ? 1.0f : 0.0f,
-           video && !legacy8 ? 1.0f : 0.0f, legacy8 ? 1u : 0u};
+           video && !legacy8 ? 1.0f : 0.0f, legacy8 ? 1u : 0u,
+           g_viewport.x, g_viewport.y, static_cast<int32_t>(g_viewport.w), static_cast<int32_t>(g_viewport.h)};
     barrier(g.images[g.frameIndex], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     vkCmdBindPipeline(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.rcas.pipeline);
-    vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.rcas.layout, 0, 1, &g.rcasSets[g.frameIndex], 0,
+    const VkDescriptorSet* rcasSetsToBind = (directVideo1to1 && g.rcasVideoDirectSets[g.frameIndex])
+                                                ? &g.rcasVideoDirectSets[g.frameIndex]
+                                                : &g.rcasSets[g.frameIndex];
+    vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.rcas.layout, 0, 1, rcasSetsToBind, 0,
                             nullptr);
     vkCmdPushConstants(g.cmd, g.rcas.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof rcas, &rcas);
     vkCmdDispatch(g.cmd, (g.extent.width + 7) / 8, (g.extent.height + 7) / 8, 1);
@@ -1170,7 +1343,7 @@ void shutdown() {
             destroyImage(*img);
         for (Buffer* buf : {&g.staging, &g.overlayStaging, &g.readback}) destroyBuffer(*buf);
         if (g.descriptors && vkDestroyDescriptorPool) vkDestroyDescriptorPool(g.device, g.descriptors, nullptr);
-        for (Pipeline* p : {&g.yuv, &g.nv12, &g.easu, &g.rcas, &g.a4kD2s}) destroyPipeline(*p);
+        for (Pipeline* p : {&g.yuv, &g.nv12, &g.nv21, &g.easu, &g.rcas, &g.a4kD2s}) destroyPipeline(*p);
         for (int i = 0; i < 4; ++i) {
             destroyPipeline(g.a4kConv[i]);
             destroyPipeline(g.restoreConv[i]);
@@ -1263,7 +1436,7 @@ bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int stride
 }
 
 bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
-              int width, int height, bool wait) {
+              int width, int height, bool wait, bool isNv21) {
     if (!y || !uv || width <= 0 || height <= 0 || strideY < width || strideUV < width) return false;
     size_t ySize = static_cast<size_t>(strideY) * height;
     size_t uvSize = static_cast<size_t>(strideUV) * ((height + 1) / 2);
@@ -1288,8 +1461,10 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
     recordOverlay(overlay);
     barrier(g.rgb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL);
     memoryBarrier();  // the planes copied
-    vkCmdBindPipeline(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.nv12.pipeline);
-    vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, g.nv12.layout, 0, 1, &g.nv12Set, 0, nullptr);
+    const Pipeline& pipe = isNv21 ? g.nv21 : g.nv12;
+    const VkDescriptorSet& dset = isNv21 ? g.nv21Set : g.nv12Set;
+    vkCmdBindPipeline(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.pipeline);
+    vkCmdBindDescriptorSets(g.cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe.layout, 0, 1, &dset, 0, nullptr);
     int deband = g_deband;
     struct {
         uint32_t iterations;
@@ -1297,7 +1472,7 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
         uint32_t frame, quant8, chromaGuide;
     } yuvPc{deband >= 2 ? 2u : deband == 1 ? 1u : 0u, deband >= 2 ? 0.016f : 0.008f, 16.0f,
             0.0f, ++g_frame, g_legacy8 ? 1u : 0u, g_chromaGuide ? 1u : 0u};
-    vkCmdPushConstants(g.cmd, g.nv12.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
+    vkCmdPushConstants(g.cmd, pipe.layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof yuvPc, &yuvPc);
     vkCmdDispatch(g.cmd, (g.rgb.w + 7) / 8, (g.rgb.h + 7) / 8, 1);
     memoryBarrier();
     if (g_restore) recordRestore(g.rgb.w, g.rgb.h);
@@ -1305,17 +1480,18 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
     return true;
 }
 
-void drawRgba(const uint32_t* pixels) {
-    if (!beginFrame(true)) return;
+bool drawRgba(const uint32_t* pixels) {
+    if (!beginFrame(true)) return false;
     std::memcpy(g.staging.map, pixels, kUiW * kUiH * 4);
     copyToImage(g.staging, 0, kUiW, g.ui);
     memoryBarrier();
     // The menus' text and edges: a light RCAS after EASU.
     recordUpscale(g.easuUiSet, kUiW, kUiH, 96, false);
+    return true;
 }
 
 void present() {
-    if (!g.frameOpen) return;
+    if (!g.frameOpen || !g.swapchain || g.frameIndex >= g.imageCount) return;
     g.frameOpen = false;
     vkEndCommandBuffer(g.cmd);
     VkPipelineStageFlags wait = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
@@ -1347,8 +1523,15 @@ void present() {
     present.pSwapchains = &g.swapchain;
     present.pImageIndices = &g.frameIndex;
     r = vkQueuePresentKHR(g.queue, &present);
-    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) g.needSwapchain = true;
-    else if (r != VK_SUCCESS) fail("vkQueuePresentKHR", r);
+    if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) {
+        g.needSwapchain = true;
+    } else if (r == VK_ERROR_SURFACE_LOST_KHR && g.wsi.createSurface) {
+        XC_LOGW("gpu: present returned VK_ERROR_SURFACE_LOST_KHR; marking needSurface");
+        g.needSurface = true;
+        g.needSwapchain = true;
+    } else if (r != VK_SUCCESS) {
+        fail("vkQueuePresentKHR", r);
+    }
     g.lastPresented = g.frameIndex;
     g.presented = id;
     if (!g.presentWait) {
@@ -1364,9 +1547,18 @@ void setOverlay(const uint32_t* pixels, int x, int y, int w, int h, uint8_t opac
     // says "no overlay" again every second, and each time 8 MB were cleared here and 8 MB
     // more copied to the GPU by the video thread on its next picture.
     if (!show && !g_overlayShown && !g_overlayRefreshAlways) return;
-    std::fill(g_overlayPixels.begin(), g_overlayPixels.end(), 0u);
     g_overlayShown = show;
-    if (g_overlayShown) {
+    if (!g_overlayShown) {
+        std::fill(g_overlayPixels.begin(), g_overlayPixels.end(), 0u);
+        g_overlayDirty = true;
+        return;
+    }
+    if (x == 0 && y == 0 && w == static_cast<int>(kUiW) && h == static_cast<int>(kUiH) && opacity == 255) {
+        // Fast path: fullscreen 1:1 RGBA overlay at full opacity (e.g. touch controls).
+        // Direct memcpy bypasses 8.3 MB redundant zeroing and 2M arithmetic loop iterations.
+        std::memcpy(g_overlayPixels.data(), pixels, kUiW * kUiH * sizeof(uint32_t));
+    } else {
+        std::fill(g_overlayPixels.begin(), g_overlayPixels.end(), 0u);
         // Alpha carries the opacity (times the pixel's own): RCAS mixes by it.
         for (int row = 0; row < h; ++row) {
             int sy = y + row;
@@ -1500,6 +1692,23 @@ void probe(int frames) {
         XC_LOGI("gpu: probe presented %d frames; the last %d in %.3f s (%.3f s at the refresh)", shown, shown - 10,
                 seconds, expected);
     }
+}
+
+void setPresentationMode(DisplayPresentationMode mode) {
+    g_presMode = mode;
+    updateBox();
+}
+
+void setSafeAreaInsets(int left, int top, int right, int bottom) {
+    g_safeArea.left = static_cast<uint32_t>(std::max(0, left));
+    g_safeArea.top = static_cast<uint32_t>(std::max(0, top));
+    g_safeArea.right = static_cast<uint32_t>(std::max(0, right));
+    g_safeArea.bottom = static_cast<uint32_t>(std::max(0, bottom));
+    updateBox();
+}
+
+bool recreateSurface() {
+    return doRecreateSurface();
 }
 
 }  // namespace xc::display::gpu

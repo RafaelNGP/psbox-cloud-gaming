@@ -33,6 +33,7 @@
 #include "input/controller.h"
 #include "input/controller_backend.h"
 #include "input/input_ext.h"
+#include "input/keyboard_nav.h"
 #include "input/sdl_backend.h"
 #include "input/sdl_mapping.h"
 #include "util/log.h"
@@ -50,7 +51,77 @@
 #include <unistd.h>
 #endif
 
+#if defined(__ANDROID__)
+#include <jni.h>
+#include <dlfcn.h>
+#endif
+
 namespace xc::input {
+
+namespace {
+
+#if defined(__ANDROID__)
+struct JniHapticCache {
+    jclass mainActivityCls = nullptr;
+    jmethodID vibrateDeviceMid = nullptr;
+    jmethodID performHapticMid = nullptr;
+    bool inited = false;
+};
+static JniHapticCache s_jniHapticCache;
+static std::mutex s_jniHapticMutex;
+
+static void initJniHapticCache(JNIEnv* env) {
+    if (s_jniHapticCache.inited || !env) return;
+    std::lock_guard<std::mutex> lock(s_jniHapticMutex);
+    if (s_jniHapticCache.inited) return;
+
+    jclass localCls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    if (!localCls) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        return;
+    }
+    s_jniHapticCache.mainActivityCls = static_cast<jclass>(env->NewGlobalRef(localCls));
+    env->DeleteLocalRef(localCls);
+    if (s_jniHapticCache.mainActivityCls) {
+        s_jniHapticCache.vibrateDeviceMid = env->GetStaticMethodID(s_jniHapticCache.mainActivityCls, "vibrateDevice", "(III)V");
+        s_jniHapticCache.performHapticMid = env->GetStaticMethodID(s_jniHapticCache.mainActivityCls, "performHaptic", "(I)V");
+        s_jniHapticCache.inited = true;
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
+
+static void androidVibrateDevice(uint8_t large, uint8_t small, uint32_t durationMs) {
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (!pfnGetJNIEnv) return;
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    if (!env) return;
+
+    initJniHapticCache(env);
+    if (s_jniHapticCache.mainActivityCls && s_jniHapticCache.vibrateDeviceMid) {
+        env->CallStaticVoidMethod(s_jniHapticCache.mainActivityCls, s_jniHapticCache.vibrateDeviceMid,
+                                  static_cast<jint>(large), static_cast<jint>(small), static_cast<jint>(durationMs));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
+#endif
+} // namespace
+
+#if defined(__ANDROID__)
+void androidTriggerHaptic(int type) {
+    typedef void* (*PFN_GetJNIEnv)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    if (!pfnGetJNIEnv) return;
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    if (!env) return;
+
+    initJniHapticCache(env);
+    if (s_jniHapticCache.mainActivityCls && s_jniHapticCache.performHapticMid) {
+        env->CallStaticVoidMethod(s_jniHapticCache.mainActivityCls, s_jniHapticCache.performHapticMid, static_cast<jint>(type));
+    }
+    if (env->ExceptionCheck()) env->ExceptionClear();
+}
+#endif
 
 namespace {
 
@@ -76,6 +147,38 @@ struct Slot {
 Slot g_slots[kMaxPads];
 std::mutex g_mutex;
 bool g_initedGamepads = false;  // SDL's gamepad subsystem started here (not by the shell)
+SDL_Sensor* g_deviceGyro = nullptr;
+SDL_Sensor* g_deviceAccel = nullptr;
+bool g_initedSensors = false;
+
+void transformDeviceSensorAxes(const float in[3], float out[3]) {
+    SDL_DisplayID disp = SDL_GetPrimaryDisplay();
+    SDL_DisplayOrientation nat = disp ? SDL_GetNaturalDisplayOrientation(disp) : SDL_ORIENTATION_PORTRAIT;
+    SDL_DisplayOrientation cur = disp ? SDL_GetCurrentDisplayOrientation(disp) : SDL_ORIENTATION_LANDSCAPE;
+    if (nat == SDL_ORIENTATION_PORTRAIT) {
+        if (cur == SDL_ORIENTATION_LANDSCAPE) { // ROTATION_90 (CCW)
+            out[0] = -in[1];
+            out[1] =  in[0];
+            out[2] =  in[2];
+            return;
+        } else if (cur == SDL_ORIENTATION_LANDSCAPE_FLIPPED) { // ROTATION_270 (CW)
+            out[0] =  in[1];
+            out[1] = -in[0];
+            out[2] =  in[2];
+            return;
+        }
+    } else if (nat == SDL_ORIENTATION_LANDSCAPE) {
+        if (cur == SDL_ORIENTATION_LANDSCAPE_FLIPPED) { // ROTATION_180
+            out[0] = -in[0];
+            out[1] = -in[1];
+            out[2] =  in[2];
+            return;
+        }
+    }
+    out[0] = in[0];
+    out[1] = in[1];
+    out[2] = in[2];
+}
 // Main thread. Until when SDL's gamepads are looked at again for a pad's
 // HIDAPI instance (SDL ms; 0 none), and the HID devices SDL was restarted
 // for (once each).
@@ -188,6 +291,13 @@ void openPad(SDL_JoystickID id, int preferred = -1) {
     s.caps.triggerRumble = s.caps.adaptiveTriggers || s.triggerMotors;
     s.caps.gyro = SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO) && SDL_SetGamepadSensorEnabled(gp, SDL_SENSOR_GYRO, true);
     s.accel = SDL_GamepadHasSensor(gp, SDL_SENSOR_ACCEL) && SDL_SetGamepadSensorEnabled(gp, SDL_SENSOR_ACCEL, true);
+    if (slot == 0) {
+        if (!s.caps.gyro && g_deviceGyro != nullptr) s.caps.gyro = true;
+        if (!s.accel && g_deviceAccel != nullptr) s.accel = true;
+#if defined(__ANDROID__)
+        s.caps.rumble = true;
+#endif
+    }
     s.caps.touchpad = SDL_GetNumGamepadTouchpads(gp) > 0;
     const char* name = SDL_GetGamepadName(gp);
     s.name = name ? name : "";
@@ -319,11 +429,25 @@ bool readPad(int slot, RawPad& out) {
 
     // rad/s, x pitch, y yaw, z roll (scePad's convention); the "gyro:" log
     // lines show the signs on a real pad.
-    if (s.caps.gyro) SDL_GetGamepadSensorData(gp, SDL_SENSOR_GYRO, out.gyro, 3);
-    if (s.accel) {
+    if (SDL_GamepadHasSensor(gp, SDL_SENSOR_GYRO)) {
+        SDL_GetGamepadSensorData(gp, SDL_SENSOR_GYRO, out.gyro, 3);
+    } else if (slot == 0 && g_deviceGyro != nullptr) {
+        float rawG[3] = {0, 0, 0};
+        if (SDL_GetSensorData(g_deviceGyro, rawG, 3)) {
+            transformDeviceSensorAxes(rawG, out.gyro);
+        }
+    }
+    if (SDL_GamepadHasSensor(gp, SDL_SENSOR_ACCEL)) {
         float ms2[3] = {0, 0, 0};
         if (SDL_GetGamepadSensorData(gp, SDL_SENSOR_ACCEL, ms2, 3)) {
             sdlAccelToG(ms2, out.accel);
+            out.hasAccel = true;
+        }
+    } else if (slot == 0 && g_deviceAccel != nullptr) {
+        float rawA[3] = {0, 0, 0}, rotA[3] = {0, 0, 0};
+        if (SDL_GetSensorData(g_deviceAccel, rawA, 3)) {
+            transformDeviceSensorAxes(rawA, rotA);
+            sdlAccelToG(rotA, out.accel);
             out.hasAccel = true;
         }
     }
@@ -342,6 +466,19 @@ bool readPad(int slot, RawPad& out) {
 }
 
 void setMotors(int slot, uint8_t large, uint8_t small, uint32_t durationMs) {
+#if defined(__ANDROID__)
+    if (slot == 0) {
+        const Slot& s = g_slots[slot];
+        bool hasSdlRumble = s.pad != nullptr && SDL_GetBooleanProperty(SDL_GetGamepadProperties(s.pad), SDL_PROP_GAMEPAD_CAP_RUMBLE_BOOLEAN, false);
+        if (hasSdlRumble) {
+            SDL_RumbleGamepad(s.pad, static_cast<uint16_t>(large * 257), static_cast<uint16_t>(small * 257),
+                              sdlDuration(durationMs));
+        } else {
+            androidVibrateDevice(large, small, durationMs == 0 ? 2500 : durationMs);
+        }
+        return;
+    }
+#endif
     const Slot& s = g_slots[slot];
     if (!s.caps.rumble) return;
     bool ok = SDL_RumbleGamepad(s.pad, static_cast<uint16_t>(large * 257), static_cast<uint16_t>(small * 257),
@@ -398,6 +535,28 @@ void resetLight(int slot) {
     SDL_SetGamepadLED(s.pad, c[0], c[1], c[2]);
 }
 
+bool readDeviceMotion(RawPad& out) {
+    if (!g_deviceGyro && !g_deviceAccel) return false;
+    bool hasData = false;
+    if (g_deviceGyro) {
+        float rawG[3] = {0, 0, 0};
+        if (SDL_GetSensorData(g_deviceGyro, rawG, 3)) {
+            transformDeviceSensorAxes(rawG, out.gyro);
+            hasData = true;
+        }
+    }
+    if (g_deviceAccel) {
+        float rawA[3] = {0, 0, 0}, rotA[3] = {0, 0, 0};
+        if (SDL_GetSensorData(g_deviceAccel, rawA, 3)) {
+            transformDeviceSensorAxes(rawA, rotA);
+            sdlAccelToG(rotA, out.accel);
+            out.hasAccel = true;
+            hasData = true;
+        }
+    }
+    return hasData;
+}
+
 }  // namespace backend
 
 void padSdlInit() {
@@ -407,6 +566,29 @@ void padSdlInit() {
             return;
         }
         g_initedGamepads = true;
+    }
+    if (!SDL_WasInit(SDL_INIT_SENSOR)) {
+        if (SDL_InitSubSystem(SDL_INIT_SENSOR)) {
+            g_initedSensors = true;
+        }
+    }
+    if (SDL_WasInit(SDL_INIT_SENSOR)) {
+        int scount = 0;
+        SDL_SensorID* sids = SDL_GetSensors(&scount);
+        for (int i = 0; sids && i < scount; ++i) {
+            SDL_SensorType st = SDL_GetSensorTypeForID(sids[i]);
+            if (st == SDL_SENSOR_GYRO && !g_deviceGyro) {
+                g_deviceGyro = SDL_OpenSensor(sids[i]);
+            } else if (st == SDL_SENSOR_ACCEL && !g_deviceAccel) {
+                g_deviceAccel = SDL_OpenSensor(sids[i]);
+            }
+        }
+        SDL_free(sids);
+        if (g_deviceGyro || g_deviceAccel) {
+            XC_LOGI("device sensors opened: gyro=%s, accel=%s",
+                    g_deviceGyro ? SDL_GetSensorName(g_deviceGyro) : "none",
+                    g_deviceAccel ? SDL_GetSensorName(g_deviceAccel) : "none");
+        }
     }
     int count = 0;
     SDL_JoystickID* ids = SDL_GetGamepads(&count);
@@ -426,11 +608,29 @@ void padSdlEvent(const SDL_Event& event) {
                 // and left alone while this one held the slot) takes it.
                 openUnopened(i);
             }
+    } else if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN ||
+               event.type == SDL_EVENT_GAMEPAD_BUTTON_UP ||
+               (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION && std::abs(static_cast<int>(event.gaxis.value)) > 5000) ||
+               event.type == SDL_EVENT_JOYSTICK_BUTTON_DOWN ||
+               event.type == SDL_EVENT_JOYSTICK_BUTTON_UP ||
+               (event.type == SDL_EVENT_JOYSTICK_HAT_MOTION && event.jhat.value != 0) ||
+               (event.type == SDL_EVENT_JOYSTICK_AXIS_MOTION && std::abs(static_cast<int>(event.jaxis.value)) > 5000)) {
+        notePadActivity(0);
     }
 }
 
 void padSdlShutdown() {
     shutdown();
+    if (g_deviceGyro) {
+        SDL_CloseSensor(g_deviceGyro);
+        g_deviceGyro = nullptr;
+    }
+    if (g_deviceAccel) {
+        SDL_CloseSensor(g_deviceAccel);
+        g_deviceAccel = nullptr;
+    }
+    if (g_initedSensors) SDL_QuitSubSystem(SDL_INIT_SENSOR);
+    g_initedSensors = false;
     if (g_initedGamepads) SDL_QuitSubSystem(SDL_INIT_GAMEPAD);
     g_initedGamepads = false;
 }
@@ -442,10 +642,31 @@ void shutdown() {
 }
 
 bool poll(ControllerState& out) {
+#if defined(__ANDROID__)
+    out = {};
+    bool any = false;
+    for (int i = 0; i < kMaxPads; ++i) {
+        if (!g_slots[i].pad) continue;
+        ControllerState s{};
+        if (pollPad(i, s)) {
+            if (!any) {
+                out = s;
+                any = true;
+            } else {
+                mergePads(out, s);
+            }
+        }
+    }
+    if (any) return true;
+    pollPad(0, out);
+    out = {};
+    return false;
+#else
     for (int i = 0; i < kMaxPads; ++i)
         if (g_slots[i].pad) return pollPad(i, out);
     out = {};
     return false;
+#endif
 }
 
 void refreshPads() {
@@ -479,7 +700,14 @@ void setEmbeddedMicActive(bool, int) {}  // no such weakening outside the consol
 
 PadCaps padCaps(int index) {
     std::lock_guard<std::mutex> lock(g_mutex);
-    return index >= 0 && index < kMaxPads && g_slots[index].pad ? g_slots[index].caps : PadCaps{};
+    PadCaps caps = (index >= 0 && index < kMaxPads && g_slots[index].pad) ? g_slots[index].caps : PadCaps{};
+    if (index == 0) {
+        if (g_deviceGyro != nullptr) caps.gyro = true;
+#if defined(__ANDROID__)
+        caps.rumble = true;
+#endif
+    }
+    return caps;
 }
 
 PadCaps anyPadCaps() {
@@ -495,6 +723,12 @@ PadCaps anyPadCaps() {
         any.gyro |= s.caps.gyro;
         any.touchpad |= s.caps.touchpad;
     }
+    if (g_deviceGyro != nullptr) {
+        any.gyro = true;
+    }
+#if defined(__ANDROID__)
+    any.rumble = true;
+#endif
     return any;
 }
 

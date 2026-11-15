@@ -581,6 +581,8 @@ enum class Str {
     StoreCountry,
     StoreCountryAuto,
     SettingDescStoreCountry,
+    SignInCodeCopied,
+    SignInClickToCopy,
     Count
 };
 
