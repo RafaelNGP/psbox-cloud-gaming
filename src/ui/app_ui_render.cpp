@@ -1594,6 +1594,33 @@ void AppUi::drawReport(Canvas& c) {
             y += 32;
         }
     }
+
+    // Touch / visual buttons
+    Rect closeBtn{panel.x + panel.w - 64, panel.y + 16, 48, 48};
+    c.fillRect(closeBtn, rgba(255, 255, 255, 30), 12);
+    int cw = fonts_.bold.measure("✕", 24);
+    fonts_.bold.draw(c, "✕", closeBtn.x + (closeBtn.w - cw) / 2, fonts_.bold.centeredY(closeBtn.y, closeBtn.h, 24), 24, kWhite);
+
+    Rect backBtn{panel.x + 56, panel.y + panel.h - 80, 220, 54};
+    c.fillRect(backBtn, rgba(60, 60, 60, 220), 14);
+    c.strokeRect(backBtn, rgba(255, 255, 255, 50), 1.5f, 14);
+    int bw = fonts_.semibold.measure(tr(Str::Back), 22);
+    fonts_.semibold.draw(c, tr(Str::Back), backBtn.x + (backBtn.w - bw) / 2,
+                         fonts_.semibold.centeredY(backBtn.y, backBtn.h, 22), 22, kWhite);
+
+    if (caps_.openUrl
+#if defined(__ANDROID__)
+        || true
+#endif
+    ) {
+        Rect urlBtn{backBtn.x + backBtn.w + 20, backBtn.y, 340, 54};
+        c.fillRect(urlBtn, rgba(16, 124, 65, 220), 14);
+        c.strokeRect(urlBtn, rgba(30, 180, 90, 200), 1.5f, 14);
+        int uw = fonts_.semibold.measure(tr(Str::OpenInBrowser), 22);
+        fonts_.semibold.draw(c, tr(Str::OpenInBrowser), urlBtn.x + (urlBtn.w - uw) / 2,
+                             fonts_.semibold.centeredY(urlBtn.y, urlBtn.h, 22), 22, kWhite);
+    }
+
     c.fillRect({0, kH - 80, kW, 80}, kBg);
     if (caps_.openUrl)  // a desktop: Cross opens the form in the browser
         drawHints(c, {{kIconCross, tr(Str::OpenInBrowser)}, {kIconCircle, tr(Str::Back)}});

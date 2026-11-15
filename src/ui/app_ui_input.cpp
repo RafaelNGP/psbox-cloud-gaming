@@ -518,7 +518,38 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
 #endif
     }
 
-    if (reportOpen_ || countryPickerOpen_ || (screen_ == Screen::Home && (updatePrompt_ || quitPrompt_))) {
+    if (reportOpen_) {
+        constexpr int kPanelW = 1500, kPanelH = 720;
+        Rect panel{(kW - kPanelW) / 2, (kH - kPanelH) / 2 - 30, kPanelW, kPanelH};
+        Rect closeBtn{panel.x + panel.w - 64, panel.y + 16, 48, 48};
+        Rect backBtn{panel.x + 56, panel.y + panel.h - 80, 220, 54};
+        Rect urlBtn{backBtn.x + backBtn.w + 20, backBtn.y, 340, 54};
+
+        if ((x >= closeBtn.x - 12 && x <= closeBtn.x + closeBtn.w + 12 && y >= closeBtn.y - 12 && y <= closeBtn.y + closeBtn.h + 12) ||
+            (x >= backBtn.x && x <= backBtn.x + backBtn.w && y >= backBtn.y && y <= backBtn.y + backBtn.h)) {
+            reportOpen_ = false;
+            dirty_ = true;
+            return ev;
+        }
+        if ((caps_.openUrl
+#if defined(__ANDROID__)
+            || true
+#endif
+            ) && !reportUrl_.empty() && x >= urlBtn.x && x <= urlBtn.x + urlBtn.w && y >= urlBtn.y && y <= urlBtn.y + urlBtn.h) {
+            ev.action = Action::OpenUrl;
+            ev.url = reportUrl_;
+            return ev;
+        }
+        // Clicking outside the panel also dismisses the crash modal
+        if (x < panel.x || x > panel.x + panel.w || y < panel.y || y > panel.y + panel.h) {
+            reportOpen_ = false;
+            dirty_ = true;
+            return ev;
+        }
+        return ev;
+    }
+
+    if (countryPickerOpen_ || (screen_ == Screen::Home && (updatePrompt_ || quitPrompt_))) {
         return ev;
     }
 
