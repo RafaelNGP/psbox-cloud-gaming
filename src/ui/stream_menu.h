@@ -372,6 +372,24 @@ private:
     // The guitar's tab: its rows in order (navigation and drawing), and the drawing.
     static constexpr int kGuitarOrder[] = {XboxButton, PlayerItem, StrumItem, TiltItem, GuitarLane0, GuitarLane1,
                                            GuitarLane2, GuitarLane3, GuitarLane4, GuitarOverdrive, GuitarReset, Leave};
+    // The Android unified menu: its rows in the exact user-requested order.
+    static constexpr int kAndroidOrder[] = {
+        XboxButton,
+        Stats,
+        TouchOverlayItem,
+        TouchLayoutStudioItem,
+        GyroItem,
+        DeadzoneItem,
+        TouchInvertSticksItem,
+        MicMuteItem,
+        Resolution,
+        FpsLimiterItem,
+        BitrateLimiterItem,
+        Sharpness,
+        Deband,
+        ReloadStreamItem,
+        Leave
+    };
     void drawGuitarTab(Canvas& c) const;
     void drawGuitarPicker(Canvas& c, int rowY) const;
     int audioHaptics_ = 0;

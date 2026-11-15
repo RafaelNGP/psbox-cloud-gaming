@@ -40,7 +40,10 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
     if (item >= GuitarLane0 && item <= GuitarReset) return false;
 #if defined(__ANDROID__)
     (void)tab;
-    return item != Profile;
+    for (int it : kAndroidOrder) {
+        if (it == item) return true;
+    }
+    return false;
 #else
     if (tab == MenuTab::General) {
         return item == XboxButton || item == TouchOverlayItem || item == TouchInvertSticksItem ||
@@ -91,12 +94,21 @@ bool StreamMenu::itemShown(int item) const {
 }
 
 void StreamMenu::selectFirstItem() {
+#if defined(__ANDROID__)
+    for (int i : kAndroidOrder) {
+        if (itemShown(i)) {
+            selected_ = i;
+            return;
+        }
+    }
+#else
     for (int i = 0; i < ItemCount; ++i) {
         if (itemShown(i)) {
             selected_ = i;
             return;
         }
     }
+#endif
 }
 
 void StreamMenu::setCapabilities(const UiCaps& caps) {
@@ -324,8 +336,20 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         selected_ = kGuitarOrder[pos];
         in.up = in.down = false;
     }
+#if defined(__ANDROID__)
+    if (in.up || in.down) {
+        constexpr int n = static_cast<int>(std::size(kAndroidOrder));
+        int pos = 0;
+        for (int k = 0; k < n; ++k)
+            if (kAndroidOrder[k] == selected_) pos = k;
+        do pos = (pos + (in.up ? n - 1 : 1)) % n; while (!itemShown(kAndroidOrder[pos]));
+        selected_ = kAndroidOrder[pos];
+        in.up = in.down = false;
+    }
+#else
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
     if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
+#endif
 
     if (selected_ == PlayerItem && (in.left || in.right || in.accept)) {
         usbOwnerPlayer_ = (usbOwnerPlayer_ + (in.left ? 3 : 1)) % 4;
@@ -632,7 +656,7 @@ const char* StreamMenu::itemDescription(int item) const {
         case XboxButton: return tr(Str::MenuDescXboxButton);
         case TouchOverlayItem: return "Ativa ou desativa a exibição dos controles virtuais na tela.";
         case TouchInvertSticksItem: return "Inverte o eixo vertical dos analógicos virtuais na tela.";
-        case TouchLayoutStudioItem: return "Abre o Touch Layout Studio para reposicionar os botões na tela.";
+        case TouchLayoutStudioItem: return "Abre o editor para reposicionar e personalizar os controles na tela.";
         case MicMuteItem: return "Ativa ou desativa o microfone durante a transmissão.";
         case Stats: return tr(Str::MenuDescStats);
         case Upscaler: return tr(Str::MenuDescUpscaler);
@@ -880,11 +904,19 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     int shownList[ItemCount];
     int totalShown = 0;
     int selIdx = 0;
+#if defined(__ANDROID__)
+    for (int i : kAndroidOrder) {
+        if (!itemShown(i)) continue;
+        if (i == selected_) selIdx = totalShown;
+        shownList[totalShown++] = i;
+    }
+#else
     for (int i = 0; i < ItemCount; ++i) {
         if (!itemShown(i)) continue;
         if (i == selected_) selIdx = totalShown;
         shownList[totalShown++] = i;
     }
+#endif
     int startIdx = 0;
     if (totalShown > kMaxVisible) {
         startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
@@ -912,7 +944,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
                             : i == TouchOverlayItem    ? "Controles na tela"
                             : i == TouchInvertSticksItem ? "Inverter analógicos"
-                            : i == TouchLayoutStudioItem ? "Personalizar layout"
+                            : i == TouchLayoutStudioItem ? "Personalizar controle"
                             : i == MicMuteItem         ? tr(Str::MenuMicrophone)
                             : i == PlayerItem          ? tr(Str::MenuPlayer)
                             : i == StrumItem           ? tr(Str::MenuStrum)
@@ -1409,11 +1441,19 @@ bool StreamMenu::onTouch(float screenX, float screenY, NavInput& outNav) {
     int shownList[ItemCount];
     int totalShown = 0;
     int selIdx = 0;
+#if defined(__ANDROID__)
+    for (int i : kAndroidOrder) {
+        if (!itemShown(i)) continue;
+        if (i == selected_) selIdx = totalShown;
+        shownList[totalShown++] = i;
+    }
+#else
     for (int i = 0; i < ItemCount; ++i) {
         if (!itemShown(i)) continue;
         if (i == selected_) selIdx = totalShown;
         shownList[totalShown++] = i;
     }
+#endif
     int startIdx = 0;
     if (totalShown > kMaxVisible) {
         startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
