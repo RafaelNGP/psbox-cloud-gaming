@@ -315,8 +315,13 @@ UiEvent AppUi::onMouseMove(float x, float y) {
         if (dropdownOpen_ || tester_ != Tester::None || pickerOpen_ || countryPickerOpen_ || reportOpen_) {
             return ev;
         }
+#if defined(__ANDROID__)
+        constexpr int kRowW = 1140, kRowH = 46, kGap = 4, kGroupGap = 12;
+        int curY = 210 - static_cast<int>(std::lround(settingsScrollY_));
+#else
         constexpr int kRowW = 1140, kRowH = 30, kGap = 1, kGroupGap = 4;
-        int curY = 184;
+        int curY = 188 - static_cast<int>(std::lround(settingsScrollY_));
+#endif
         for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {
             if (groupStart) curY += kGroupGap;
             if (x >= kMargin && x < kMargin + kRowW && y >= curY && y < curY + kRowH) {
@@ -555,9 +560,10 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
 
     // Check avatar / settings button click to open settings
     if (screen_ == Screen::Home && !searching_) {
-        Rect settingsBtn{kW - kMargin - 52, 46, 52, 52};
-        if ((x >= settingsBtn.x && x <= settingsBtn.x + settingsBtn.w && y >= settingsBtn.y && y <= settingsBtn.y + settingsBtn.h) ||
-            (x >= settingsBtn.x - 16 - 64 && x <= settingsBtn.x && y >= 40 && y <= 110)) {
+        constexpr int kAvatarRight = kW - 120;
+        Rect settingsBtn{kAvatarRight + (120 - 52) / 2, 46, 52, 52};
+        if ((x >= settingsBtn.x - 12 && x <= settingsBtn.x + settingsBtn.w + 12 && y >= settingsBtn.y - 12 && y <= settingsBtn.y + settingsBtn.h + 12) ||
+            (x >= kAvatarRight - 64 && x <= kAvatarRight && y >= 40 && y <= 110)) {
             screen_ = Screen::Settings;
             settingsRow_ = 0;
             settingsFromError_ = false;
@@ -566,6 +572,20 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
             filterList_ = -1;
             settingsScrollY_ = 0.0f;
             dirty_ = true;
+            return ev;
+        }
+    }
+
+    // Touch exit from Settings back to Home
+    if (screen_ == Screen::Settings) {
+        Rect backBtn{kMargin, 94, 52, 52};
+        if ((x >= backBtn.x - 16 && x <= backBtn.x + backBtn.w + 16 && y >= backBtn.y - 16 && y <= backBtn.y + backBtn.h + 16) ||
+            (x >= backBtn.x && x <= backBtn.x + 240 && y >= 80 && y <= 160)) {
+            resetSettingsHoldStart_ = 0;
+            screen_ = settingsFromError_ ? Screen::Error : Screen::Home;
+            dirty_ = true;
+            ev.action = settings_.loginCountry != settingsCountry_ ? Action::LoginCountry : Action::SettingsChanged;
+            ev.settings = settings_;
             return ev;
         }
     }

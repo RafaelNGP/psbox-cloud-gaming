@@ -138,8 +138,19 @@ void AppUi::drawTopBar(Canvas& c) {
         fonts_.semibold.draw(c, tr(Str::CloudGaming), brandX, 58, kBrandPx, kWhite);
     }
 
-    // Dedicated Settings touch button
-    Rect settingsBtn{kW - kMargin - 52, 46, 52, 52};
+    // Avatar and centered Settings touch button
+    constexpr int kAvatarRight = kW - 120;
+    int x = kAvatarRight - kAvatar;
+    int avatarY = 72 - kAvatar / 2;
+    if (auto pic = images_.get(gamerpicUrl_, kAvatar, kAvatar)) {
+        c.drawImage(*pic, x, avatarY, 255, -1);
+    } else {
+        c.fillCircle(x + kAvatar / 2.0f, 72, kAvatar / 2.0f, kPanel);
+    }
+
+    // Dedicated Settings touch button, perfectly centered between avatar and screen right edge
+    constexpr int kBtnSz = 52;
+    Rect settingsBtn{kAvatarRight + (120 - kBtnSz) / 2, 46, kBtnSz, kBtnSz};
     c.fillRect(settingsBtn, rgba(255, 255, 255, 18), 26);
     c.strokeRect(settingsBtn, rgba(255, 255, 255, 45), 1, 26);
     float scx = settingsBtn.x + 26.0f, scy = settingsBtn.y + 26.0f;
@@ -150,14 +161,6 @@ void AppUi::drawTopBar(Canvas& c) {
     }
     c.strokeCircle(scx, scy, 9.5f, 3.5f, kWhite);
     c.fillCircle(scx, scy, 4.0f, rgba(20, 20, 20));
-
-    int x = settingsBtn.x - 16 - kAvatar;
-    int avatarY = 72 - kAvatar / 2;
-    if (auto pic = images_.get(gamerpicUrl_, kAvatar, kAvatar)) {
-        c.drawImage(*pic, x, avatarY, 255, -1);
-    } else {
-        c.fillCircle(x + kAvatar / 2.0f, 72, kAvatar / 2.0f, kPanel);
-    }
     if (!gamertag_.empty()) {
         // The name; under it the gamerscore (its badge and the number, the
         // thousands grouped as the language writes them) and the Game Pass

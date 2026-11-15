@@ -1497,7 +1497,10 @@ bool Core::frame() {
     bool appMenuPressed = appMenuKey && !appMenuKeyBefore;
     appMenuKeyBefore = appMenuKey;
 
-    bool backKey = std::binary_search(kbm.held.begin(), kbm.held.end(), input::kVkAndroidBack);
+    bool backKey = std::binary_search(kbm.held.begin(), kbm.held.end(), input::kVkAndroidBack) ||
+                   std::any_of(kbm.keys.begin(), kbm.keys.end(), [](const input::KeyEvent& k) {
+                       return k.vk == input::kVkAndroidBack && k.pressed;
+                   });
     bool backPressed = backKey && !backKeyBefore;
     backKeyBefore = backKey;
 
@@ -1510,7 +1513,7 @@ bool Core::frame() {
             }
         }
     } else {
-        if (backKey) {
+        if (backPressed || backKey) {
             pad.btnB = true;
         }
     }
@@ -1677,7 +1680,7 @@ bool Core::frame() {
     nav.right = right.update(pad.dpadRight || pad.leftStickX > 0.6f, now);
     nav.accept = pad.btnA && !prev.btnA;
     nav.acceptHeld = pad.btnA;
-    nav.back = pad.btnB && !prev.btnB;
+    nav.back = (pad.btnB && !prev.btnB) || (!inGame && backPressed);
     nav.options = pad.btnOptions && !prev.btnOptions;
     nav.l1 = pad.btnL1 && !prev.btnL1;
     nav.r1 = pad.btnR1 && !prev.btnR1;
