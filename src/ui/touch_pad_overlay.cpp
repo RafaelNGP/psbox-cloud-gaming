@@ -804,6 +804,11 @@ void TouchPadOverlay::drawDpad_(Canvas& c, float cx, float cy, float alpha) {
 }
 
 void TouchPadOverlay::drawPullTab(Canvas& c, float alpha) const {
+#if !defined(__ANDROID__)
+    (void)c;
+    (void)alpha;
+    return;
+#else
     uint8_t bgAlpha = static_cast<uint8_t>(std::clamp(alpha * 160.0f, 0.0f, 255.0f));
     uint8_t borderAlpha = static_cast<uint8_t>(std::clamp(alpha * 200.0f, 0.0f, 255.0f));
     uint8_t iconAlpha = static_cast<uint8_t>(std::clamp(alpha * 240.0f, 0.0f, 255.0f));
@@ -819,9 +824,14 @@ void TouchPadOverlay::drawPullTab(Canvas& c, float alpha) const {
 
     c.line(44, 44, 51, 52, 2.5f, iconCol);
     c.line(51, 52, 44, 60, 2.5f, iconCol);
+#endif
 }
 
 void TouchPadOverlay::render(Canvas& c) {
+#if !defined(__ANDROID__)
+    (void)c;
+    return;
+#else
     if (currentOpacity_ <= 0.01f && !layoutStudio_) return;
     float a = layoutStudio_ ? 1.0f : currentOpacity_;
 
@@ -877,6 +887,7 @@ void TouchPadOverlay::render(Canvas& c) {
     if (layoutStudio_) {
         drawLayoutStudioHud_(c);
     }
+#endif
 }
 
 void TouchPadOverlay::drawLayoutStudioHud_(Canvas& c) {

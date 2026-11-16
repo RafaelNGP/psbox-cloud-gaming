@@ -89,8 +89,12 @@ void updateTextInput(app::StreamPlayer* player) {
 StreamScreen::StreamScreen(const ui::Fonts& fonts)
     : fonts_(fonts), menu_(fonts), touchOverlay_(fonts), touchCanvas_(display::kWidth, display::kHeight) {
     touchCanvas_.clearTransparent();
+#if defined(__ANDROID__)
     std::lock_guard<std::mutex> lock(g_settingsMutex);
     touchOverlay_.setSettings(g_settings);
+#else
+    touchOverlay_.setVisible(false);
+#endif
 }
 
 void StreamScreen::setPads(const ui::PadSlots& slots) {
@@ -1404,18 +1408,25 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         }
     }
 #endif
+#if defined(__ANDROID__)
     bool physicalPadActive = (lastPhysicalMs > 0 && nowMs >= lastPhysicalMs && (nowMs - lastPhysicalMs < 3000));
     touchOverlay_.update(nowMs, physicalPadConnected, physicalPadActive, lastPhysicalMs);
     bool touchOverlayVisible = touchOverlay_.isVisible();
+    bool touchOverlayDirty = touchOverlay_.isDirty();
+    bool touchVisibilityChanged = (touchOverlayVisible != lastTouchOverlayVisible_);
+    bool touchRedraw = !menu_.isOpen() &&
+                      (touchVisibilityChanged || (touchOverlayVisible && touchOverlayDirty && (nowMs - lastTouchOverlayRedrawMs_ >= 16)));
+#else
+    (void)physicalPadConnected;
+    (void)lastPhysicalMs;
+    bool touchOverlayVisible = false;
+    bool touchRedraw = false;
+#endif
     bool dialogOpen = menu_.isGyroDialogOpen() || menu_.isStickDialogOpen() || menu_.isTriggerDialogOpen();
     // Under a calibration only its progress line changes (overlaySeq_ = 0 then): no steady redraw.
     bool menuRedraw = menu_.isOpen() && !gyroCalRunning_ &&
                       (nowMs - lastMenuRedrawMs_ >= (menu_.gyroLiveTest() ? 100 : dialogOpen ? 16 : 40));
     bool statsRedraw = showStats_ && !menu_.isOpen() && (nowMs - lastStatsRedrawMs_ >= 200);
-    bool touchOverlayDirty = touchOverlay_.isDirty();
-    bool touchVisibilityChanged = (touchOverlayVisible != lastTouchOverlayVisible_);
-    bool touchRedraw = !menu_.isOpen() &&
-                      (touchVisibilityChanged || (touchOverlayVisible && touchOverlayDirty && (nowMs - lastTouchOverlayRedrawMs_ >= 16)));
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
     uint64_t toasts = platform::toastsEnabled() ? platform::toasts().version(nowMs) : 0;
@@ -1499,6 +1510,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                     }
                 }
             }
+#if defined(__ANDROID__)
         } else if (touchOverlayVisible) {
             touchCanvas_.clearTransparent();
             touchOverlay_.render(touchCanvas_);
@@ -1517,6 +1529,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 touchCanvas_.drawImage(img, ui::StreamMenu::kWarnRight - wc.width(), ui::StreamMenu::kWarnY, 200);
             }
             display::setOverlay(touchCanvas_.data(), 0, 0, touchCanvas_.width(), touchCanvas_.height(), 255);
+#endif
         } else if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);
             display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
@@ -1636,6 +1649,10 @@ void StreamScreen::idle() {
 }
 
 bool StreamScreen::onTouch(const app::shell::TouchEvent& ev) {
+#if !defined(__ANDROID__)
+    (void)ev;
+    return false;
+#else
     if (touchOverlay_.isLayoutStudioActive()) {
         bool handled = touchOverlay_.onTouch(ev);
         overlaySeq_ = 0;
@@ -1707,6 +1724,7 @@ bool StreamScreen::onTouch(const app::shell::TouchEvent& ev) {
         return true;
     }
     return handled;
+#endif
 }
 
 }  // namespace xc::app
