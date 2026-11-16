@@ -3,7 +3,7 @@
 </p>
 
 <h1 align="center">PSBox Cloud Gaming</h1>
-<p align="center"><em>Xbox Cloud Gaming, running natively on PlayStation 5, PlayStation 4, and Linux.</em></p>
+<p align="center"><em>Xbox Cloud Gaming, running natively on PlayStation 5, PlayStation 4, Windows, Linux, and Android.</em></p>
 
 <p align="center">
   <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest"><img alt="release" src="https://img.shields.io/github/v/release/RafaelNGP/psbox-cloud-gaming?color=brightgreen"></a>
@@ -13,10 +13,16 @@
   <a href="https://github.com/RafaelNGP/psbox-cloud-gaming/issues/new?template=bug_report.yml"><img alt="issues: report a problem" src="https://img.shields.io/badge/issues-report%20a%20problem-ff0000"></a>
 </p>
 
-A native Xbox Cloud Gaming client running natively across **PlayStation 5**,
-**PlayStation 4** (GoldHEN), and **Linux** (including Steam Deck Desktop & Game Mode):
-browse the cloud catalog and stream games at 1080p60, with your DualSense or DualShock 4
-as an Xbox controller.
+A native Xbox Cloud Gaming client running natively across:
+**PlayStation 5**
+**PlayStation 4**
+**Windows** (including Windows handhelds PCs)
+**Linux** (including Steam Deck Desktop & Game Mode)
+**Android** (including Android handhelds)
+
+Browse the cloud catalog and stream games at 1080p60 (or more), with your DualSense, 
+DualShock 4, Xbox controller, 8bitdo controller, guitar controller or even use a 
+smartphone as a controller. Your device, your rules.
 
 - **Sign in on your phone** with a code shown on the TV; no password on the console.
 - **Game Pass and Your games** tabs, search, and free-to-play games.
@@ -38,57 +44,65 @@ play each month: 15 h with Ultimate, 10 h with Premium and 5 h with Essential.
 
 ### PS5
 
-Needs a homebrew-enabled PS5 that runs directory-style apps from
-`/data/homebrew`, for example through ShadowMountPlus. Reported working on
-firmware 13.00 and 13.60; please open an issue with your firmware and loader if
-it doesn't work for you.
-
 Install it in one of three ways:
 
 - **RecompStore:** <https://recompstore.com/game/PPSA99810>
 - **Prospero Store:** <https://prosperostore.net/app/PPSA99810/>
 - **By hand:**
-  1. Download `PPSA99810.zip` from the
+  1. Download `PSBoxCloudGaming[PS5]-vx.x.x.zip` or `PPSA99810.zip` from the
      [latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest).
   2. Extract it and copy the `PPSA99810` folder, as a whole, to
      `/data/homebrew/` on the PS5 (for example over FTP).
   3. Wait for the loader to add the **PSBox Cloud Gaming** icon to the Home
      screen.
 
-Then launch the app and sign in: open <https://www.microsoft.com/link> on your
-phone or computer (or scan the QR code) and enter the code shown on the TV.
-
 **Updates** install from inside the app (it asks after sign-in; also Settings >
-Updates). Only a package signed with the project's key is accepted, and your
-sign-in is kept. By hand: close the app and copy the new folder over the old one.
+Updates). Or by hand: close the app and copy the new folder over the old one.
 
 **Your data** (sign-in, settings, caches, log) lives in `/data/psbox`, outside
 the app's folder, so updating or reinstalling keeps it. The sign-in is
-`/data/psbox/account.json`: never share that file. To remove everything, delete
-`/data/psbox` too. Controls and troubleshooting are in the `README.txt` inside
-the app's folder.
+`/data/psbox/account.json`: **never share that file**. To remove everything, delete
+`/data/psbox` too.
 
 ### PS4
 
 Needs a PS4 with GoldHEN.
 
-1. Download the PS4 `.pkg` from the
+1. Download the PS4 `PSBoxCloudGaming[PS4]-vx.x.x.pkg` from the
    [latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest).
 2. Copy it to the root of a USB drive formatted as exFAT or FAT32, and plug the
    drive into the PS4.
 3. Install it from *Settings > GoldHEN > Package Installer*.
 
-The PS4 build does not update itself yet: install the newer `.pkg` the same way.
+**Updates** manually download the newest releases here (for now)
 
 ### Linux and Steam Deck
 
-Download the `.AppImage` from the
+Download the `PSBoxCloudGaming[Linux]-vx.x.x.AppImage` from the
 [latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest),
 make it executable (`chmod +x`) and run it. It works in the Steam Deck's Desktop
-and Game modes. Your data lives in `~/.local/share/psbox`. It does not update
-itself: Settings > Updates opens the release page.
+and Game modes. Your data lives in `~/.local/share/psbox`.
 
-## Building
+**Updates** manually download the newest releases here (for now)
+
+### Windows
+
+Download the `PSBoxCloudGaming[Windows]-vx.x.x.zip` from the
+[latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest),
+extract it and run the .exe file. It should work in both Desktop and Windows handheld PCs.
+
+**Updates** manually download the newest releases here (for now)
+
+### Android
+
+Download the `PSBoxCloudGaming[Android]-vx.x.x.apk` from the
+[latest release](https://github.com/RafaelNGP/psbox-cloud-gaming/releases/latest),
+and install the .pkg on the android. It should work for phones and android handhelds.
+
+**Updates** manually download the newest releases here (for now)
+
+
+## Building (for devs and agents)
 
 Clone with the submodules (Mbed TLS, libdatachannel, FFmpeg):
 
@@ -130,19 +144,6 @@ cmake -S . -B build-ps4 -G Ninja -DCMAKE_TOOLCHAIN_FILE=cmake/ps4.toolchain.cmak
 ninja -C build-ps4
 tools/ps4/package.sh build-ps4              # -> build-ps4/pkg/*.pkg
 ```
-
-More for development:
-
-- `build-host/xcloud-cli login`, `stream <TITLE> 30` and `ui-preview <dir>`:
-  sign in, stream a title, render every screen to PNG.
-- `bash tools/check-platform-boundaries.sh`: console calls stay in their
-  platform backends (see `docs/multiplatform.md`).
-- **120 Hz on the PS5** needs RADV built with
-  `tools/ps5/patches/mesa-videoout-vrr-120hz.patch` (with PS5_Vulkan's
-  `tools/build-radv.sh`); without it the output stays at 59.94 Hz.
-- `tools/release.sh <X.Y.Z>` builds, signs and checks a PS5 release; it
-  publishes nothing. The signing key stays with the maintainer: the app trusts
-  only its public half (`src/app/updater.cpp`).
 
 ## License
 
