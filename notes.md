@@ -1,7 +1,10 @@
 <!-- LANG:EN -->
-# PSBox Cloud Gaming v1.7.5
+# PSBox Cloud Gaming v1.7.6 (Hotfix)
 
-The major multi-platform expansion of PSBox: official debut of the native **Android** port (featuring adaptive touch controls and seamless handheld support for devices like the Anbernic RG 557) and the official standalone 64-bit **Windows** port, along with mobile ergonomic UI refinements and deep architectural stability.
+This hotfix release strictly isolates the virtual touch controller overlay to Android, ensuring desktop (Linux, Windows) and console (PlayStation 5, PlayStation 4) platforms remain clean and completely free of on-screen touch elements. It also delivers the major multi-platform expansion from v1.7.5: official debut of the native **Android** port and the standalone 64-bit **Windows** port, along with mobile ergonomic UI refinements and deep architectural stability.
+
+### 🛡️ Hotfix Highlights
+- **Exclusive Touch Overlay on Android**: Resolved an issue where virtual touch overlay buttons and the top pull-tab could be displayed on desktop and console builds when playing without a gamepad. The touch overlay is now exclusively compiled and rendered on Android.
 
 ## 🪟 Official Windows Port (Standalone 64-bit Portable Edition)
 - **Native x86_64 Executable (`psbox.exe`)**: Full 64-bit native build powered by high-performance Vulkan graphics rendering and SDL3.
@@ -42,9 +45,9 @@ The major multi-platform expansion of PSBox: official debut of the native **Andr
 - **Mobile Settings Parity**: Omitted console-only toggles on Android (legacy hardware decoding, X/O swap, DualSense adaptive triggers, and audio haptics).
 
 ## 🧩 Architecture, Security & Stability
-- **Decoupled Trophy Subsystem**: PlayStation-specific kernel and database dependencies decoupled into a modular backend; desktop and mobile platforms utilize a lightweight zero-overhead stub (`trophy_off.cpp`).
-- **Comprehensive Empirical Test Battery**: Over 10 automated test suites with thousands of assertions validating chaotic multitouch, hot-unplugging of controllers, and platform boundaries.
-- **Full Localization**: Complete 6-language support (EN, PT-BR, ES, DE, FR, IT) across all mobile settings and touch overlays.
+- **Decoupled Trophy Subsystem**: PlayStation-specific kernel and database calls cleanly isolated; desktop and mobile platforms link against a stub implementation (`trophy_off.cpp`) with zero dead code.
+- **Automated Multi-Touch Test Suites**: Over 10 automated test suites covering chaotic multi-finger inputs, touch cancellation, and simultaneous physical pad switches.
+- **Full Localization**: Comprehensive multi-language support (PT-BR, EN, ES, DE, FR, IT) across all new mobile and audio controls.
 
 ---
 
@@ -52,47 +55,49 @@ The major multi-platform expansion of PSBox: official debut of the native **Andr
 
 | File Name | Description |
 |---|---|
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip` | Official standalone ZIP package for PlayStation 5 (manual or homebrew manager installation). |
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip.sig` | ECDSA digital signature for verifying the PS5 standalone package. |
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip.sha256` | SHA256 checksum for the PS5 standalone package. |
-| `PPSA99810.zip` | Canonical PS5 package required by the in-app auto-updater. |
-| `PPSA99810.zip.sig` | Cryptographic signature for the canonical PS5 package (verified by in-app updater). |
-| `PPSA99810.zip.sha256` | SHA256 checksum for the canonical PS5 package. |
-| `PSBoxCloudGaming[PS4]-v1.7.5.pkg` | Installable FPKG package for PlayStation 4 (GoldHEN Package Installer). |
-| `PSBoxCloudGaming[PS4]-v1.7.5.pkg.sha256` | SHA256 checksum for the PS4 package. |
-| `PSBoxCloudGaming[Linux]-v1.7.5.AppImage` | Universal standalone executable for Linux distributions and Steam Deck (Desktop & Game Mode). |
-| `PSBoxCloudGaming[Linux]-v1.7.5.AppImage.sha256` | SHA256 checksum for the Linux AppImage. |
-| `PSBoxCloudGaming[Windows]-v1.7.5.zip` | Official standalone 64-bit portable package for Windows (no installation required). |
-| `PSBoxCloudGaming[Windows]-v1.7.5.zip.sha256` | SHA256 checksum for the Windows portable package. |
-| `PSBoxCloudGaming[Android]-v1.7.5.apk` | Official signed release APK package for Android phones, tablets, Android TV, and handhelds. |
-| `PSBoxCloudGaming[Android]-v1.7.5.apk.sha256` | SHA256 checksum for the Android APK package. |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip` | Official standalone ZIP package for PlayStation 5 (manual install or homebrew manager). |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip.sig` | ECDSA digital signature to verify the PS5 package authenticity. |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip.sha256` | SHA256 checksum of the standalone PS5 package. |
+| `PPSA99810.zip` | Canonical PS5 package required by the in-app automatic updater. |
+| `PPSA99810.zip.sig` | Canonical PS5 signature required by the in-app automatic updater. |
+| `PPSA99810.zip.sha256` | SHA256 checksum of the canonical PS5 package. |
+| `PSBoxCloudGaming[PS4]-v1.7.6.pkg` | Installable FPKG package for PlayStation 4 (GoldHEN Package Installer). |
+| `PSBoxCloudGaming[PS4]-v1.7.6.pkg.sha256` | SHA256 checksum of the PS4 package. |
+| `PSBoxCloudGaming[Linux]-v1.7.6.AppImage` | Universal executable for Linux distributions and Steam Deck (Desktop and Game Mode). |
+| `PSBoxCloudGaming[Linux]-v1.7.6.AppImage.sha256` | SHA256 checksum of the Linux AppImage package. |
+| `PSBoxCloudGaming[Windows]-v1.7.6.zip` | Official portable 64-bit ZIP package for Windows (no installation needed). |
+| `PSBoxCloudGaming[Windows]-v1.7.6.zip.sha256` | SHA256 checksum of the Windows portable package. |
+| `PSBoxCloudGaming[Android]-v1.7.6.apk` | Official signed APK package for Android phones, tablets, Android TV, and handhelds. |
+| `PSBoxCloudGaming[Android]-v1.7.6.apk.sha256` | SHA256 checksum of the Android APK package. |
 
 ### 🚀 How to Install
 
-- **PlayStation 5**: Update in the app (Settings → Updates), through ProsperoStore, or download `PSBoxCloudGaming[PS5]-v1.7.5.zip` and copy the `PPSA99810` folder to `/data/homebrew/`.
-- **PlayStation 4**: Install `PSBoxCloudGaming[PS4]-v1.7.5.pkg` via GoldHEN Package Installer.
-- **Linux / Steam Deck**: Download `PSBoxCloudGaming[Linux]-v1.7.5.AppImage`, make it executable (`chmod +x`), and launch in Desktop Mode or add as a non-Steam game.
-- **Windows**: Download `PSBoxCloudGaming[Windows]-v1.7.5.zip`, extract to any directory, and run `psbox.exe`. No installation required.
-- **Android**: Download `PSBoxCloudGaming[Android]-v1.7.5.apk` and install directly on your phone, tablet, Android TV, or handheld console (e.g. Anbernic RG 557) via file manager or `adb install`.
-
----
+- **PlayStation 5**: update directly from the app (Settings → Updates), via ProsperoStore, or download `PSBoxCloudGaming[PS5]-v1.7.6.zip` and copy the `PPSA99810` folder to `/data/homebrew/`.
+- **PlayStation 4**: install `PSBoxCloudGaming[PS4]-v1.7.6.pkg` using GoldHEN Package Installer.
+- **Linux / Steam Deck**: download `PSBoxCloudGaming[Linux]-v1.7.6.AppImage`, make it executable (`chmod +x`), and launch in Desktop Mode or add as a Non-Steam Game.
+- **Windows**: download `PSBoxCloudGaming[Windows]-v1.7.6.zip`, extract anywhere, and launch `psbox.exe`. No installation required.
+- **Android**: download `PSBoxCloudGaming[Android]-v1.7.6.apk` and install directly on your device (phone, tablet, TV, or handheld such as Anbernic RG 557) via file manager or `adb install`.
 
 <!-- LANG:PT -->
-# PSBox Cloud Gaming v1.7.5
+<!-- LANG:PT-BR -->
+# PSBox Cloud Gaming v1.7.6 (Hotfix)
 
-A grande expansão multiplataforma do PSBox: estreia oficial do porte nativo para **Android** (com controles por toque e suporte a portáteis como o Anbernic RG 557) e do porte oficial para **Windows** (versão portátil 64-bit), além de profundas otimizações ergonômicas de interface e estabilidade geral.
+Esta atualização de hotfix isola estritamente o overlay de controles virtuais de toque para o Android, garantindo que as plataformas de desktop (Linux, Windows) e consoles (PlayStation 5, PlayStation 4) permaneçam limpas e completamente livres de botões de toque na tela. Traz também toda a expansão multiplataforma oficial: estreia nativa no **Android** (com controles touch adaptativos e suporte nativo a portáteis como o Anbernic RG 557) e o porte portátil oficial de 64-bit para **Windows**, além de ergonomia aprimorada e alta estabilidade de sistema.
 
-## 🪟 Porte Oficial para Windows (Versão Portátil 64-bit)
-- **Executável Nativo (`psbox.exe`)**: Compilação x86_64 nativa de alto desempenho com renderização gráfica Vulkan de baixa latência e SDL3.
-- **Pacote Portátil sem Instalação**: Distribuição em arquivo `.zip` autocontido que roda direto ao descompactar, sem exigir privilégios de administrador nem instaladores pesados.
-- **Suporte Amplo a Controles, Teclado e Mouse**: Reconhecimento automático de controles de Xbox, PlayStation DualSense/DualShock e controles genéricos via SDL3, além de navegação completa por teclado e mouse.
-- **Proteção contra Falhas Nativa (SEH)**: Módulo *Crash Guard* com Structured Exception Handling integrado para captura e diagnóstico de falhas no Windows.
-- **Subsistema Portátil de Rede e Arquivos**: Comunicação de alta performance baseada em Winsock2 e abstração de sistema de arquivos com suporte nativo a caminhos UTF-8 (usuários com acentos e caracteres especiais).
+### 🛡️ Destaques do Hotfix
+- **Overlay Touch Exclusivo no Android**: Corrigido um problema onde os botões virtuais de toque e a aba pull-tab podiam surgir nas builds de desktop e console ao jogar sem controle físico. O overlay agora é compilado e renderizado exclusivamente no Android.
 
-## 🤖 Porte Oficial para Android
-- **Renderização Vulkan Nativa**: Desenvolvido diretamente com NDK e SDL3, proporcionando gráficos com latência mínima e máxima eficiência energética.
-- **Decodificação de Vídeo por Hardware**: Backend integrado com NDK `AMediaCodec` (H.264 acelerado por hardware), reduzindo drasticamente o consumo de bateria e aquecimento do aparelho durante jogatinas longas.
-- **Compatibilidade Moderna de 16KB**: Binários compilados com alinhamento de página de 16KB, garantindo suporte pleno aos kernels modernos do Android 14, 15 e posteriores.
+## 🪟 Porte Oficial para Windows (Edição Portátil 64-bit Standalone)
+- **Executável Nativo x86_64 (`psbox.exe`)**: Compilação nativa de alta performance baseada em renderização gráfica Vulkan e SDL3.
+- **Pacote Portátil Zero-Instalação**: Roda direto após descompactar o arquivo ZIP sem exigir privilégios de administrador, sem mexer no registro e sem instaladores pesados.
+- **Suporte Amplo a Controles, Teclado e Mouse**: Mapeamento instantâneo para controles de Xbox, PlayStation DualSense/DualShock e joysticks genéricos via SDL3, com suporte completo a mouse e teclado.
+- **Proteção Nativa Contra Falhas (SEH)**: Integração com *Structured Exception Handling* nativo do Windows para diagnósticos e relatórios automáticos em caso de travamento.
+- **Sockets e Sistema de Arquivos Modernos**: Camada de rede de alta velocidade via Winsock2 e abstração de caminhos em UTF-8 com suporte completo a pastas com acentos e caracteres especiais.
+
+## 🤖 Porte Oficial Nativo para Android
+- **Motor Gráfico Vulkan**: Arquitetura direta via NDK e SDL3 entregando latência de exibição ultra-baixa e máxima eficiência energética.
+- **Decodificação de Vídeo Acelerada por Hardware**: Backend nativo via NDK `AMediaCodec` para decodificação H.264 em hardware, reduzindo drasticamente o aquecimento e o consumo de bateria em sessões prolongadas.
+- **Alinhamento de Kernel de 16KB**: Totalmente compatível com as novas exigências de páginas de memória de 16KB do Android 14, Android 15 e superiores.
 - **Ciclo de Vida e Áudio**: Gerenciamento de ciclo de vida nativo (suspensão/retomada limpa da transmissão ao alternar de app) e áudio de baixa latência com captura de microfone.
 
 ## 🎮 Controles Acoplados (Anbernic RG 557) & Touch para Qualquer Aparelho
@@ -131,25 +136,25 @@ A grande expansão multiplataforma do PSBox: estreia oficial do porte nativo par
 
 | Nome do Arquivo | Descrição |
 |---|---|
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip` | Pacote ZIP oficial para PlayStation 5 (instalação manual ou por gerenciador homebrew). |
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip.sig` | Assinatura digital ECDSA para verificar o pacote de PS5. |
-| `PSBoxCloudGaming[PS5]-v1.7.5.zip.sha256` | Checksum SHA256 do pacote de PS5. |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip` | Pacote ZIP oficial para PlayStation 5 (instalação manual ou por gerenciador homebrew). |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip.sig` | Assinatura digital ECDSA para verificar o pacote de PS5. |
+| `PSBoxCloudGaming[PS5]-v1.7.6.zip.sha256` | Checksum SHA256 do pacote de PS5. |
 | `PPSA99810.zip` | Pacote canônico de PS5 usado pelo atualizador automático do app. |
 | `PPSA99810.zip.sig` | Assinatura do pacote canônico de PS5 (verificada pelo atualizador do app). |
 | `PPSA99810.zip.sha256` | Checksum SHA256 do pacote canônico de PS5. |
-| `PSBoxCloudGaming[PS4]-v1.7.5.pkg` | Pacote FPKG instalável para PlayStation 4 (GoldHEN Package Installer). |
-| `PSBoxCloudGaming[PS4]-v1.7.5.pkg.sha256` | Checksum SHA256 do pacote de PS4. |
-| `PSBoxCloudGaming[Linux]-v1.7.5.AppImage` | Executável universal para distribuições Linux e Steam Deck (Modo Desktop e Modo Jogo). |
-| `PSBoxCloudGaming[Linux]-v1.7.5.AppImage.sha256` | Checksum SHA256 do AppImage de Linux. |
-| `PSBoxCloudGaming[Windows]-v1.7.5.zip` | Pacote ZIP oficial portátil de 64-bit para Windows (sem necessidade de instalação). |
-| `PSBoxCloudGaming[Windows]-v1.7.5.zip.sha256` | Checksum SHA256 do pacote portátil de Windows. |
-| `PSBoxCloudGaming[Android]-v1.7.5.apk` | Pacote APK oficial assinado para celulares, tablets, Android TV e consoles portáteis. |
-| `PSBoxCloudGaming[Android]-v1.7.5.apk.sha256` | Checksum SHA256 do pacote APK Android. |
+| `PSBoxCloudGaming[PS4]-v1.7.6.pkg` | Pacote FPKG instalável para PlayStation 4 (GoldHEN Package Installer). |
+| `PSBoxCloudGaming[PS4]-v1.7.6.pkg.sha256` | Checksum SHA256 do pacote de PS4. |
+| `PSBoxCloudGaming[Linux]-v1.7.6.AppImage` | Executável universal para distribuições Linux e Steam Deck (Modo Desktop e Modo Jogo). |
+| `PSBoxCloudGaming[Linux]-v1.7.6.AppImage.sha256` | Checksum SHA256 do AppImage de Linux. |
+| `PSBoxCloudGaming[Windows]-v1.7.6.zip` | Pacote ZIP oficial portátil de 64-bit para Windows (sem necessidade de instalação). |
+| `PSBoxCloudGaming[Windows]-v1.7.6.zip.sha256` | Checksum SHA256 do pacote portátil de Windows. |
+| `PSBoxCloudGaming[Android]-v1.7.6.apk` | Pacote APK oficial assinado para celulares, tablets, Android TV e consoles portáteis. |
+| `PSBoxCloudGaming[Android]-v1.7.6.apk.sha256` | Checksum SHA256 do pacote APK Android. |
 
 ### 🚀 Como Instalar
 
-- **PlayStation 5**: atualize pelo app (Configurações → Atualizações), pelo ProsperoStore, ou baixe `PSBoxCloudGaming[PS5]-v1.7.5.zip` e copie a pasta `PPSA99810` para `/data/homebrew/`.
-- **PlayStation 4**: instale `PSBoxCloudGaming[PS4]-v1.7.5.pkg` pelo GoldHEN Package Installer.
-- **Linux / Steam Deck**: baixe `PSBoxCloudGaming[Linux]-v1.7.5.AppImage`, torne executável (`chmod +x`) e abra no Modo Desktop ou adicione como jogo não-Steam.
-- **Windows**: baixe `PSBoxCloudGaming[Windows]-v1.7.5.zip`, extraia para qualquer pasta e execute `psbox.exe`. Não requer instalação.
-- **Android**: baixe `PSBoxCloudGaming[Android]-v1.7.5.apk` e instale diretamente no seu aparelho (celular, tablet, TV ou portátil como Anbernic RG 557) pelo gerenciador de arquivos ou via `adb install`.
+- **PlayStation 5**: atualize pelo app (Configurações → Atualizações), pelo ProsperoStore, ou baixe `PSBoxCloudGaming[PS5]-v1.7.6.zip` e copie a pasta `PPSA99810` para `/data/homebrew/`.
+- **PlayStation 4**: instale `PSBoxCloudGaming[PS4]-v1.7.6.pkg` pelo GoldHEN Package Installer.
+- **Linux / Steam Deck**: baixe `PSBoxCloudGaming[Linux]-v1.7.6.AppImage`, torne executável (`chmod +x`) e abra no Modo Desktop ou adicione como jogo não-Steam.
+- **Windows**: baixe `PSBoxCloudGaming[Windows]-v1.7.6.zip`, extraia para qualquer pasta e execute `psbox.exe`. Não requer instalação.
+- **Android**: baixe `PSBoxCloudGaming[Android]-v1.7.6.apk` e instale diretamente no seu aparelho (celular, tablet, TV ou portátil como Anbernic RG 557) pelo gerenciador de arquivos ou via `adb install`.

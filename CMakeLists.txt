@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Copyright (C) 2026 RafaelNGP
 cmake_minimum_required(VERSION 3.20)
-project(xcloud_ps5 VERSION 1.7.5 LANGUAGES C CXX)
+project(xcloud_ps5 VERSION 1.7.6 LANGUAGES C CXX)
 if(WIN32)
     enable_language(RC)
 endif()
