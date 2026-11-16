@@ -14,10 +14,10 @@
 </p>
 
 A native Xbox Cloud Gaming client running natively across:
-**PlayStation 5**
-**PlayStation 4**
-**Windows** (including Windows handhelds PCs)
-**Linux** (including Steam Deck Desktop & Game Mode)
+**PlayStation 5**,
+**PlayStation 4**,
+**Windows** (including Windows handhelds PCs),
+**Linux** (including Steam Deck Desktop & Game Mode), and 
 **Android** (including Android handhelds)
 
 Browse the cloud catalog and stream games at 1080p60 (or more), with your DualSense, 
