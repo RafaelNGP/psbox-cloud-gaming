@@ -2,7 +2,7 @@
 <!-- SPDX-License-Identifier: GPL-3.0-or-later -->
 <!-- Copyright (C) 2026 RafaelNGP -->
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0" xmlns:asmv3="urn:schemas-microsoft-com:asm.v3">
-  <assemblyIdentity type="win32" name="com.rafaelngp.psbox" version="1.7.2.0" processorArchitecture="*"/>
+  <assemblyIdentity type="win32" name="com.rafaelngp.psbox" version="1.7.5.0" processorArchitecture="*"/>
   <description>PSBox Cloud Gaming</description>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>

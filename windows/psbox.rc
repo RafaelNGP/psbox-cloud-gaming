@@ -13,8 +13,8 @@ IDI_ICON1 ICON "psbox.ico"
 1 RT_MANIFEST "psbox.manifest"
 
 VS_VERSION_INFO VERSIONINFO
-FILEVERSION     1,7,2,0
-PRODUCTVERSION  1,7,2,0
+FILEVERSION     1,7,5,0
+PRODUCTVERSION  1,7,5,0
 FILEFLAGSMASK   VS_FFI_FILEFLAGSMASK
 FILEFLAGS       0
 FILEOS          VOS_NT_WINDOWS32
@@ -27,12 +27,12 @@ BEGIN
         BEGIN
             VALUE "CompanyName",      "RafaelNGP\0"
             VALUE "FileDescription",  "PSBox Cloud Gaming Client\0"
-            VALUE "FileVersion",      "1.7.2.0\0"
+            VALUE "FileVersion",      "1.7.5.0\0"
             VALUE "InternalName",     "psbox\0"
             VALUE "LegalCopyright",   "Copyright (C) 2026 RafaelNGP. GPL-3.0-or-later.\0"
             VALUE "OriginalFilename", "psbox.exe\0"
             VALUE "ProductName",      "PSBox Cloud Gaming\0"
-            VALUE "ProductVersion",   "1.7.2.0\0"
+            VALUE "ProductVersion",   "1.7.5.0\0"
         END
     END
     BLOCK "VarFileInfo"
