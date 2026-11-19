@@ -14,8 +14,10 @@ __pycache__/
 reddit/
 *HANDOFF*.md
 *handoff*.md
+QUALITY_CANDIDATES.md
+generative_ui.html
+/docs/
 /ps4-toolchain/
-docs/archive/
 assets/media_showcase/
 trophies/
 local.properties
