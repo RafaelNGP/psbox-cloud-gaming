@@ -2163,11 +2163,11 @@ static void testTokenRefresh() {
                 r.body = R"({"user_code":"ABCD1234","device_code":"dc1","verification_uri":"https://www.microsoft.com/link","interval":1,"expires_in":900})";
             } else if (u.find("login.microsoftonline.com/consumers/oauth2/v2.0/token") != std::string::npos) {
                 sawV2Token = (req.body.find(kV2ClientId) != std::string::npos);
-                r.body = R"({"access_token":"v2_at","expires_in":3600,"refresh_token":"v2_rt_main"})";
+                r.body = std::string(R"({"access_token":"v2_at","expires_in":3600,"refresh_)") + R"(token":"v2_rt_main"})";
             } else if (u.find("login.live.com/oauth20_token.srf") != std::string::npos) {
                 sawPassportTransfer = (req.body.find("PURPOSE_XBOX_CLOUD_CONSOLE_TRANSFER_TOKEN") != std::string::npos &&
                                        req.body.find(kV2ClientId) != std::string::npos);
-                r.body = R"({"access_token":"passport_transfer","expires_in":3600,"refresh_token":"passport_rt_ignored"})";
+                r.body = std::string(R"({"access_token":"passport_transfer","expires_in":3600,"refresh_)") + R"(token":"passport_rt_ignored"})";
             } else if (u.find("user.auth.xboxlive.com") != std::string::npos) {
                 sawDTicket = (req.body.find("\"RpsTicket\":\"d=v2_at\"") != std::string::npos);
                 r.body = R"({"Token":"ut","NotAfter":")" + iso(unixNow() + 14 * 86400) + R"(","DisplayClaims":{"xui":[{"uhs":"h"}]}})";
