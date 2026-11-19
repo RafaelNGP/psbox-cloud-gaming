@@ -419,6 +419,7 @@ WebServer::HttpResponse WebServer::handleRequest(const std::string& method, cons
                 s_hooks.getSettings(root);
             } else {
                 root.set("language", "en");
+                root.set("uiScale", 0);
                 root.set("resolution", "1080p");
                 root.set("padMap", input::padMapJson(input::defaultPadMap()));
                 root.set("keyMap", keyMapToJson(input::defaultKeyMap()));

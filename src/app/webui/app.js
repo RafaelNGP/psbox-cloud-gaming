@@ -507,6 +507,7 @@ function saveGeneralSettings() {
     maxBitrateMbps: (rawBitrate === 55) ? -1 : rawBitrate,
     queueReadyAlert: document.getElementById('checkQueueAlert').checked,
     voiceRouting: parseInt(document.getElementById('selectVoiceRouting').value, 10),
+    uiScale: parseInt(document.getElementById('selectUiScale').value, 10),
     storeCountry: document.getElementById('selectStoreCountry').value
   });
 }
@@ -1005,6 +1006,10 @@ function applyLoadedSettings(s) {
   if (s.videoDecoder !== undefined) {
     const el = document.getElementById('selectVideoDecoder');
     if (el) el.value = s.videoDecoder;
+  }
+  if (s.uiScale !== undefined) {
+    const el = document.getElementById('selectUiScale');
+    if (el) el.value = String(s.uiScale);
   }
   if (s.storeCountry !== undefined) {
     const el = document.getElementById('selectStoreCountry');

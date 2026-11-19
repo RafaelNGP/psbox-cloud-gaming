@@ -138,8 +138,9 @@ void AppUi::drawTopBar(Canvas& c) {
         fonts_.semibold.draw(c, tr(Str::CloudGaming), brandX, 58, kBrandPx, kWhite);
     }
 
-    // Avatar and centered Settings touch button
-    constexpr int kAvatarRight = kW - 120;
+    // Avatar (and centered Settings touch button on Android touchscreen devices)
+    const bool hasTouch = platform::hasTouchscreen();
+    const int kAvatarRight = hasTouch ? (kW - 120) : (kW - kMargin);
     int x = kAvatarRight - kAvatar;
     int avatarY = 72 - kAvatar / 2;
     if (auto pic = images_.get(gamerpicUrl_, kAvatar, kAvatar)) {
@@ -148,19 +149,21 @@ void AppUi::drawTopBar(Canvas& c) {
         c.fillCircle(x + kAvatar / 2.0f, 72, kAvatar / 2.0f, kPanel);
     }
 
-    // Dedicated Settings touch button, perfectly centered between avatar and screen right edge
-    constexpr int kBtnSz = 52;
-    Rect settingsBtn{kAvatarRight + (120 - kBtnSz) / 2, 46, kBtnSz, kBtnSz};
-    c.fillRect(settingsBtn, rgba(255, 255, 255, 18), 26);
-    c.strokeRect(settingsBtn, rgba(255, 255, 255, 45), 1, 26);
-    float scx = settingsBtn.x + 26.0f, scy = settingsBtn.y + 26.0f;
-    for (int a = 0; a < 6; ++a) {
-        float angle = a * (3.14159265f / 3.0f);
-        float ca = std::cos(angle), sa = std::sin(angle);
-        c.line(scx + 7.0f * ca, scy + 7.0f * sa, scx + 14.0f * ca, scy + 14.0f * sa, 3.5f, kWhite);
+    // Dedicated Settings touch button, shown only on touchscreen devices (Android touch)
+    if (hasTouch) {
+        constexpr int kBtnSz = 52;
+        Rect settingsBtn{kAvatarRight + (120 - kBtnSz) / 2, 46, kBtnSz, kBtnSz};
+        c.fillRect(settingsBtn, rgba(255, 255, 255, 18), 26);
+        c.strokeRect(settingsBtn, rgba(255, 255, 255, 45), 1, 26);
+        float scx = settingsBtn.x + 26.0f, scy = settingsBtn.y + 26.0f;
+        for (int a = 0; a < 6; ++a) {
+            float angle = a * (3.14159265f / 3.0f);
+            float ca = std::cos(angle), sa = std::sin(angle);
+            c.line(scx + 7.0f * ca, scy + 7.0f * sa, scx + 14.0f * ca, scy + 14.0f * sa, 3.5f, kWhite);
+        }
+        c.strokeCircle(scx, scy, 9.5f, 3.5f, kWhite);
+        c.fillCircle(scx, scy, 4.0f, rgba(20, 20, 20));
     }
-    c.strokeCircle(scx, scy, 9.5f, 3.5f, kWhite);
-    c.fillCircle(scx, scy, 4.0f, rgba(20, 20, 20));
     if (!gamertag_.empty()) {
         // The name; under it the gamerscore (its badge and the number, the
         // thousands grouped as the language writes them) and the Game Pass
@@ -220,7 +223,20 @@ void AppUi::drawTopBar(Canvas& c) {
 void AppUi::drawHints(Canvas& c, const std::vector<std::pair<int, const char*>>& hints) {
     if (!input::hasGamepad() && !g_keyboardHints) return;
     // Right-aligned PlayStation button glyphs with labels.
-    constexpr int kPx = 22, kR = 14, kGap = 36;
+    int kPx = 22, kGap = 36;
+    constexpr int kR = 14;
+    if (fonts_.scale() > 1.0f && hints.size() >= 4) {
+        kGap = hints.size() >= 6 ? 18 : 24;
+        auto totalHintsW = [&](int px) {
+            int total = 0;
+            for (const auto& h : hints) {
+                total += fonts_.semibold.measure(h.second, px) + 46 + kGap;
+            }
+            return total;
+        };
+        const int maxBudget = kW - 2 * kMargin - 260;
+        while (kPx > 16 && totalHintsW(kPx) > maxBudget) --kPx;
+    }
     int x = kW - kMargin;
     const int y = kH - 64;
     for (auto it = hints.rbegin(); it != hints.rend(); ++it) {
@@ -502,8 +518,9 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
     } else {
         c.fillRect({x, y, kCard, kCard}, kPlaceholder, 10);
         auto lines = fonts_.semibold.wrap(t.name, 22, kCard - 32, 3);
+        const int placeholderStep = fonts_.scaleMetric(30);
         for (size_t k = 0; k < lines.size(); ++k)
-            fonts_.semibold.draw(c, lines[k], x + 16, y + 16 + static_cast<int>(k) * 30, 22, kGray);
+            fonts_.semibold.draw(c, lines[k], x + 16, y + 16 + static_cast<int>(k) * placeholderStep, 22, kGray);
     }
     // Top-left: time played on this title, when recorded.
     uint64_t cardPlayedSec = 0;
@@ -518,6 +535,7 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
     if (cardPlayedSec > 0) {
         std::string ptLabel = formatPlaytime(cardPlayedSec);
         int pw = std::min(kCard - 56, fonts_.bold.measure(ptLabel, 11) + 14);
+        if (fonts_.bold.measure(ptLabel, 11) + 10 > pw) ptLabel = fonts_.bold.fit(ptLabel, 11, pw - 10);
         Rect ptBadge{x + 10, y + 10, pw, 22};
         c.fillRect(ptBadge, rgba(0, 0, 0, 215), 4);
         fonts_.bold.draw(c, ptLabel, ptBadge.x + (ptBadge.w - fonts_.bold.measure(ptLabel, 11)) / 2,
@@ -537,7 +555,8 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
     int rightBadgeLeft = rightEdge;
     if (const char* p = platformLabel(t.platform)) {
         int pTextW = fonts_.bold.measure(p, 11);
-        int pBadgeW = std::clamp(pTextW + 12, 54, 66);
+        int maxBadgeW = std::max(66, fonts_.scaleMetric(68));
+        int pBadgeW = std::clamp(pTextW + 12, 54, maxBadgeW);
         Rect badge{rightBadgeLeft - pBadgeW, y + kCard - 34, pBadgeW, 24};
         c.fillRect(badge, rgba(0, 0, 0, 220), 4);
         fonts_.bold.draw(c, p, badge.x + (badge.w - pTextW) / 2,
@@ -590,17 +609,21 @@ void AppUi::drawCard(Canvas& c, const GameTile& t, int x, int y, bool focused, b
         c.fillRect({x, y, kCard, kCard}, rgba(0, 0, 0, 150), 10);
         drawLock(c, isWishlisted ? x + kCard - 54 : x + kCard - 34, isWishlisted ? y + 24 : y + 30);
         if (planBadge) {
-            int w = std::min(maxLeftW, fonts_.bold.measure(planBadge, 11) + 14);
+            std::string pb = planBadge;
+            int w = std::min(maxLeftW, fonts_.bold.measure(pb, 11) + 14);
+            if (fonts_.bold.measure(pb, 11) + 10 > w) pb = fonts_.bold.fit(pb, 11, w - 10);
             Rect badge{x + 10, y + kCard - 34, w, 24};
             c.fillRect(badge, rgba(0, 0, 0, 220), 4);
-            fonts_.bold.draw(c, planBadge, badge.x + (badge.w - fonts_.bold.measure(planBadge, 11)) / 2,
+            fonts_.bold.draw(c, pb, badge.x + (badge.w - fonts_.bold.measure(pb, 11)) / 2,
                              fonts_.bold.centeredY(badge.y, badge.h, 11), 11, kWhite);
         }
     } else if (showPlan) {
-        int w = std::min(maxLeftW, fonts_.bold.measure(planBadge, 11) + 14);
+        std::string pb = planBadge;
+        int w = std::min(maxLeftW, fonts_.bold.measure(pb, 11) + 14);
+        if (fonts_.bold.measure(pb, 11) + 10 > w) pb = fonts_.bold.fit(pb, 11, w - 10);
         Rect badge{x + 10, y + kCard - 34, w, 24};
         c.fillRect(badge, rgba(0, 0, 0, 220), 4);
-        fonts_.bold.draw(c, planBadge, badge.x + (badge.w - fonts_.bold.measure(planBadge, 11)) / 2,
+        fonts_.bold.draw(c, pb, badge.x + (badge.w - fonts_.bold.measure(pb, 11)) / 2,
                          fonts_.bold.centeredY(badge.y, badge.h, 11), 11, kWhite);
     } else if (!t.friends.empty()) {
         int numAvatars = std::min<int>(static_cast<int>(t.friends.size()), 2);
@@ -1090,15 +1113,17 @@ void AppUi::drawHome(Canvas& c, uint64_t nowMs) {
         if (heroAlpha > 0.05f) {
             Color titleColor = withAlpha(kWhite, static_cast<int>(255 * heroAlpha));
             Color grayColor = withAlpha(kGray, static_cast<int>(255 * heroAlpha));
-            auto title = fonts_.bold.wrap(focus->name, 60, 1100, 1);
-            if (!title.empty()) fonts_.bold.draw(c, title[0], kMargin, 190, 60, titleColor);
+            const int heroTitlePx = settings_.uiScale >= 2 ? 50 : (settings_.uiScale == 1 ? 54 : 60);
+            auto title = fonts_.bold.wrap(focus->name, heroTitlePx, 1100, 1);
+            if (!title.empty()) fonts_.bold.draw(c, title[0], kMargin, 190, heroTitlePx, titleColor);
             std::string meta = focus->publisher;
             for (size_t i = 0; i < focus->categories.size() && i < 2; ++i)
                 meta += (meta.empty() ? "" : "  \xE2\x80\xA2  ") + focus->categories[i];
-            fonts_.regular.draw(c, meta, kMargin, 272, 24, grayColor);
+            fonts_.regular.drawTruncated(c, meta, kMargin, 272, 24, 960, grayColor);
             auto desc = fonts_.regular.wrap(focus->description, 22, 860, 2);
+            const int descStep = fonts_.scaleMetric(32);
             for (size_t i = 0; i < desc.size(); ++i)
-                fonts_.regular.draw(c, desc[i], kMargin, 318 + static_cast<int>(i) * 32, 22, grayColor);
+                fonts_.regular.draw(c, desc[i], kMargin, 318 + static_cast<int>(i) * descStep, 22, grayColor);
         }
     }
 
@@ -1206,9 +1231,11 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
     }
     drawTopBar(c);
     int y = 260;
-    for (const auto& line : fonts_.bold.wrap(g->name, 68, 960, 2)) {
-        fonts_.bold.draw(c, line, kMargin, y, 68, kWhite);
-        y += 82;
+    const int detailTitlePx = settings_.uiScale >= 2 ? 54 : (settings_.uiScale == 1 ? 60 : 68);
+    const int detailTitleStep = settings_.uiScale > 0 ? 86 : 82;
+    for (const auto& line : fonts_.bold.wrap(g->name, detailTitlePx, 960, 2)) {
+        fonts_.bold.draw(c, line, kMargin, y, detailTitlePx, kWhite);
+        y += detailTitleStep;
     }
     y += 6;
     const char* planName = planDisplayName(g->plan);
@@ -1217,8 +1244,8 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
     if (planName && g->playable)
         byLine += (byLine.empty() ? "" : "  \xE2\x80\xA2  ") + trf(Str::IncludedWithPlan, planName);
     if (!byLine.empty()) {
-        fonts_.semibold.draw(c, byLine, kMargin, y, 26, kGray);
-        y += 40;
+        fonts_.semibold.drawTruncated(c, byLine, kMargin, y, 26, 960, kGray);
+        y += fonts_.scaleMetric(40);
     }
 
     // Age rating & content descriptors (ClassInd, ESRB, PEGI)
@@ -1242,7 +1269,7 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
 
         int textW = fonts_.bold.measure(g->ratingAge, 20);
         int badgeW = std::max(38, textW + 16);
-        int badgeH = 28;
+        int badgeH = fonts_.scaleMetric(28);
         Rect badge{kMargin, y + 2, badgeW, badgeH};
         c.fillRect(badge, badgeBg, 6);
         if (badgeBg == rgba(30, 30, 30)) {
@@ -1263,15 +1290,15 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
         if (!descLine.empty()) {
             fonts_.semibold.draw(c, descLine, badge.x + badge.w + 14, fonts_.semibold.centeredY(badge.y, badge.h, 22), 22, kDim);
         }
-        y += 38;
+        y += fonts_.scaleMetric(38);
     }
     std::string cats;
     if (const char* p = platformLabel(g->platform)) cats = p;
     for (const auto& cat : g->categories) cats += (cats.empty() ? "" : "  \xE2\x80\xA2  ") + cat;
     if (g->mouseKeyboard) cats += std::string(cats.empty() ? "" : "  \xE2\x80\xA2  ") + tr(Str::MouseKeyboardSupport);
     if (!cats.empty()) {
-        fonts_.regular.draw(c, cats, kMargin, y, 24, kDim);
-        y += 44;
+        fonts_.regular.drawTruncated(c, cats, kMargin, y, 24, 960, kDim);
+        y += fonts_.scaleMetric(44);
     }
     y += 10;
     bool isFreePlayer = isFreeAccountLocked();
@@ -1279,9 +1306,11 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
     bool effectivePlayable = isEffectivePlayableLocked(*g);
     // Shorter for a free or purchasable game, whose page also has the hint and Play/price below.
     int descLines = !effectivePlayable && !g->playable && (isF2P || g->purchasable) ? 4 : 6;
+    if (settings_.uiScale > 0) descLines = std::max(2, descLines - 1);
+    const int descStep = fonts_.scaleMetric(34);
     for (const auto& line : fonts_.regular.wrap(g->description, 24, 880, descLines)) {
         fonts_.regular.draw(c, line, kMargin, y, 24, kGray);
-        y += 34;
+        y += descStep;
     }
     if (!effectivePlayable && !g->playable && (isF2P || g->purchasable)) {
         // Free to play: "Get Free" button to claim license directly; Paid: price & store QR.
@@ -1399,7 +1428,8 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
     bool achFocused = (detailButtonFocus_ == 1 && hasAchievements);
 
     // Play button
-    Rect play{kMargin, std::max(y + 48, 620), 300, 76};
+    int playW = std::max(300, 108 + fonts_.semibold.measure(tr(Str::Play), 32) + 36);
+    Rect play{kMargin, std::max(y + 48, 620), playW, 76};
     playRect_ = play;
     if (playFocused) {
         c.strokeRect({play.x - 7, play.y - 7, play.w + 14, play.h + 14}, kWhite, 4, 45);
@@ -1411,7 +1441,7 @@ void AppUi::drawDetails(Canvas& c, uint64_t nowMs) {
     c.line(tx - 8, ty - 13, tx - 8, ty + 13, 4, kWhite);
     c.line(tx - 8, ty - 13, tx + 13, ty, 4, kWhite);
     c.line(tx - 8, ty + 13, tx + 13, ty, 4, kWhite);
-    fonts_.semibold.draw(c, tr(Str::Play), play.x + 108, play.y + 20, 32, kWhite);
+    fonts_.semibold.draw(c, tr(Str::Play), play.x + 108, fonts_.semibold.centeredY(play.y, play.h, 32), 32, kWhite);
 
     int nextBadgeX = play.x + play.w + 24;
 
@@ -1596,24 +1626,20 @@ void AppUi::drawReport(Canvas& c) {
         }
     }
 
-    // Touch / visual buttons
-    Rect closeBtn{panel.x + panel.w - 64, panel.y + 16, 48, 48};
-    c.fillRect(closeBtn, rgba(255, 255, 255, 30), 12);
-    int cw = fonts_.bold.measure("✕", 24);
-    fonts_.bold.draw(c, "✕", closeBtn.x + (closeBtn.w - cw) / 2, fonts_.bold.centeredY(closeBtn.y, closeBtn.h, 24), 24, kWhite);
+    // Touch-only visual buttons (Android touchscreen)
+    if (platform::hasTouchscreen()) {
+        Rect closeBtn{panel.x + panel.w - 64, panel.y + 16, 48, 48};
+        c.fillRect(closeBtn, rgba(255, 255, 255, 30), 12);
+        int cw = fonts_.bold.measure("✕", 24);
+        fonts_.bold.draw(c, "✕", closeBtn.x + (closeBtn.w - cw) / 2, fonts_.bold.centeredY(closeBtn.y, closeBtn.h, 24), 24, kWhite);
 
-    Rect backBtn{panel.x + 56, panel.y + panel.h - 80, 220, 54};
-    c.fillRect(backBtn, rgba(60, 60, 60, 220), 14);
-    c.strokeRect(backBtn, rgba(255, 255, 255, 50), 1, 14);
-    int bw = fonts_.semibold.measure(tr(Str::Back), 22);
-    fonts_.semibold.draw(c, tr(Str::Back), backBtn.x + (backBtn.w - bw) / 2,
-                         fonts_.semibold.centeredY(backBtn.y, backBtn.h, 22), 22, kWhite);
+        Rect backBtn{panel.x + 56, panel.y + panel.h - 80, 220, 54};
+        c.fillRect(backBtn, rgba(60, 60, 60, 220), 14);
+        c.strokeRect(backBtn, rgba(255, 255, 255, 50), 1, 14);
+        int bw = fonts_.semibold.measure(tr(Str::Back), 22);
+        fonts_.semibold.draw(c, tr(Str::Back), backBtn.x + (backBtn.w - bw) / 2,
+                             fonts_.semibold.centeredY(backBtn.y, backBtn.h, 22), 22, kWhite);
 
-    if (caps_.openUrl
-#if defined(__ANDROID__)
-        || true
-#endif
-    ) {
         Rect urlBtn{backBtn.x + backBtn.w + 20, backBtn.y, 340, 54};
         c.fillRect(urlBtn, rgba(16, 124, 65, 220), 14);
         c.strokeRect(urlBtn, rgba(30, 180, 90, 200), 1, 14);
@@ -1709,7 +1735,7 @@ void AppUi::drawUpdatePrompt(Canvas& c) {
 void AppUi::formatUpdateNotes() {
     updateNotesLines_.clear();
     std::string lang = languageCode(language());
-    updateNotesLang_ = lang;
+    updateNotesLang_ = lang + "#" + std::to_string(settings_.uiScale);
     std::string raw = xc::app::filterReleaseNotes(updateNotes_, lang);
     if (raw.empty()) raw = updateNotes_;
     if (raw.empty()) raw = "No release notes provided.";
@@ -1753,7 +1779,7 @@ void AppUi::formatUpdateNotes() {
         pos = next + 1;
     }
 
-    constexpr int kLineH = 32;
+    const int kLineH = fonts_.scaleMetric(32);
     int visibleLines = textH / kLineH;
     int totalLines = static_cast<int>(updateNotesLines_.size());
     updateNotesMaxScroll_ = std::max(0, totalLines - visibleLines);
@@ -1761,7 +1787,7 @@ void AppUi::formatUpdateNotes() {
 }
 
 void AppUi::drawUpdateNotesModal(Canvas& c) {
-    std::string currentLang = languageCode(language());
+    std::string currentLang = std::string(languageCode(language())) + "#" + std::to_string(settings_.uiScale);
     if (updateNotesLines_.empty() || updateNotesLang_ != currentLang) {
         formatUpdateNotes();
     }
@@ -1777,7 +1803,7 @@ void AppUi::drawUpdateNotesModal(Canvas& c) {
     int textY = panel.y + 115;
     int textH = panel.h - 175;
 
-    constexpr int kLineH = 32;
+    const int kLineH = fonts_.scaleMetric(32);
     int visibleLines = textH / kLineH;
     int totalLines = static_cast<int>(updateNotesLines_.size());
     updateNotesScroll_ = std::clamp(updateNotesScroll_, 0, updateNotesMaxScroll_);
@@ -1887,18 +1913,20 @@ void AppUi::drawAchievementsModal(Canvas& c, uint64_t nowMs) {
 
         int textX = r.x + 72;
         int maxTextW = r.w - 200;
+        const int nameY = settings_.uiScale > 0 ? (r.y + 11) : (r.y + 14);
+        const int descY = settings_.uiScale > 0 ? (r.y + 46) : (r.y + 44);
         if (item.unlocked) {
-            fonts_.semibold.draw(c, item.name, textX, r.y + 14, 24, kWhite);
+            fonts_.semibold.drawTruncated(c, item.name, textX, nameY, 24, maxTextW, kWhite);
             std::string desc = fonts_.regular.fit(item.description, 20, maxTextW);
-            fonts_.regular.draw(c, desc, textX, r.y + 44, 20, kGray);
+            fonts_.regular.draw(c, desc, textX, descY, 20, kGray);
         } else if (item.isSecret) {
-            fonts_.semibold.draw(c, tr(Str::SecretAchievement), textX, r.y + 14, 24, kDim);
-            fonts_.regular.draw(c, tr(Str::AchievementLocked), textX, r.y + 44, 20, rgba(255, 255, 255, 90));
+            fonts_.semibold.drawTruncated(c, tr(Str::SecretAchievement), textX, nameY, 24, maxTextW, kDim);
+            fonts_.regular.drawTruncated(c, tr(Str::AchievementLocked), textX, descY, 20, maxTextW, rgba(255, 255, 255, 90));
         } else {
-            fonts_.semibold.draw(c, item.name, textX, r.y + 14, 24, rgba(230, 230, 230));
+            fonts_.semibold.drawTruncated(c, item.name, textX, nameY, 24, maxTextW, rgba(230, 230, 230));
             std::string desc = item.lockedDescription.empty() ? item.description : item.lockedDescription;
             desc = fonts_.regular.fit(desc, 20, maxTextW);
-            fonts_.regular.draw(c, desc, textX, r.y + 44, 20, kDim);
+            fonts_.regular.draw(c, desc, textX, descY, 20, kDim);
         }
 
         std::string score = std::to_string(item.gamerscore) + " G";

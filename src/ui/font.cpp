@@ -93,10 +93,17 @@ bool Font::usable() const {
     return false;
 }
 
+int Font::scaledPx(int px) const {
+    if (uiScale_ == 1.0f) return px;
+    int s = static_cast<int>(std::lround(static_cast<float>(px) * uiScale_));
+    return s > 1 ? s : 1;
+}
+
 int Font::centeredY(int boxY, int boxH, int px) const {
     if (!usable()) return boxY;
-    float s = scale(px);
-    float capH = impl_->hasCapBox ? impl_->capY1 * s : 0.7f * px;
+    const int effPx = scaledPx(px);
+    float s = scale(effPx);
+    float capH = impl_->hasCapBox ? impl_->capY1 * s : 0.7f * effPx;
     float ascent = impl_->ascent * s;  // line top to baseline
     // Cap top = y + ascent - capH; centre it: (boxH - capH) / 2 below boxY.
     return static_cast<int>(std::lround(boxY + (boxH - capH) / 2.0f - (ascent - capH)));
@@ -105,8 +112,9 @@ int Font::centeredY(int boxY, int boxH, int px) const {
 float Font::scale(int px) const { return stbtt_ScaleForPixelHeight(&impl_->info, static_cast<float>(px)); }
 
 int Font::lineHeight(int px) const {
-    if (!usable()) return px;
-    return static_cast<int>(std::ceil((impl_->ascent - impl_->descent) * scale(px)));
+    const int effPx = scaledPx(px);
+    if (!usable()) return effPx;
+    return static_cast<int>(std::ceil((impl_->ascent - impl_->descent) * scale(effPx)));
 }
 
 uint32_t nextCodepoint(std::string_view s, size_t& i) {
@@ -147,23 +155,32 @@ const Font::Glyph& Font::glyph(uint32_t cp, int px) const {
 }
 
 int Font::measure(std::string_view text, int px) const {
+    const int effPx = scaledPx(px);
     int w = 0;
-    for (size_t i = 0; i < text.size();) w += glyph(nextCodepoint(text, i), px).advance;
+    for (size_t i = 0; i < text.size();) w += glyph(nextCodepoint(text, i), effPx).advance;
     return w;
 }
 
 int Font::draw(Canvas& c, std::string_view text, int x, int y, int px, Color color) const {
     if (!usable()) return x;
-    int baseline = y + static_cast<int>(std::lround(impl_->ascent * scale(px)));
+    const int effPx = scaledPx(px);
+    int baseline = y + static_cast<int>(std::lround(impl_->ascent * scale(effPx)));
     for (size_t i = 0; i < text.size();) {
-        const Glyph& g = glyph(nextCodepoint(text, i), px);
+        const Glyph& g = glyph(nextCodepoint(text, i), effPx);
         if (!g.bitmap.empty()) c.drawMask(g.bitmap.data(), g.w, g.h, g.w, x + g.xoff, baseline + g.yoff, color);
         x += g.advance;
     }
     return x;
 }
 
+int Font::drawTruncated(Canvas& c, std::string_view text, int x, int y, int px, int maxWidth, Color color) const {
+    if (maxWidth <= 0) return x;
+    if (measure(text, px) <= maxWidth) return draw(c, text, x, y, px, color);
+    return draw(c, fit(text, px, maxWidth), x, y, px, color);
+}
+
 std::string Font::fit(std::string_view text, int px, int maxWidth) const {
+    const int effPx = scaledPx(px);
     const char* dots = "...";
     int dotsW = measure(dots, px);
     int budget = maxWidth - dotsW;
@@ -172,7 +189,7 @@ std::string Font::fit(std::string_view text, int px, int maxWidth) const {
     bool cutSet = false;
     for (size_t i = 0; i < text.size();) {
         size_t start = i;
-        int adv = glyph(nextCodepoint(text, i), px).advance;
+        int adv = glyph(nextCodepoint(text, i), effPx).advance;
         if (!cutSet && totalW + adv > budget) {
             cutIdx = start;
             cutSet = true;
@@ -266,6 +283,18 @@ bool Fonts::loadIcons(const std::vector<std::string>& paths) {
         if (icons.load(p)) return hasIcons = true;
     }
     return false;
+}
+
+void Fonts::setScale(float s) const {
+    uiScale_ = (s > 0.1f) ? s : 1.0f;
+    regular.setScale(uiScale_);
+    semibold.setScale(uiScale_);
+    bold.setScale(uiScale_);
+}
+
+int Fonts::scaleMetric(int v) const {
+    if (uiScale_ == 1.0f) return v;
+    return static_cast<int>(std::lround(static_cast<float>(v) * uiScale_));
 }
 
 }  // namespace xc::ui

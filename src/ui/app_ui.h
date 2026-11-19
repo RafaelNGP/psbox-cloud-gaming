@@ -120,6 +120,7 @@ struct NavInput {
 // What the Settings screen edits.
 struct SettingsChoice {
     int language = 0;      // ui::Language
+    int uiScale = 0;       // 0 = Normal (100%), 1 = Large (115%), 2 = Extra Large (130%)
     int resolution = 0;    // 0 = 1080p, 1 = 720p, 2 = 1440p (experimental)
     std::string region;    // gssv region name; empty = automatic
     std::string storeCountry;  // store offers; empty = the cloud session’s market
@@ -211,11 +212,12 @@ std::vector<SettingsRowPos> visibleGameSettingsRows(const UiCaps& caps, bool cus
 
 // The largest stick dead zone Settings offers, in percent of the travel.
 constexpr int kMaxDeadzone = 30;
-constexpr int kSettingRows = 28;  // language, resolution, region, dead zone, triggers, confirm, light bar, updates,
+constexpr int kSettingRows = 29;  // language, resolution, region, dead zone, triggers, confirm, light bar, updates,
                                   // sign-in country, 120 Hz output, bitrate cap, game volume, keyboard keys,
                                   // display mode (a desktop's window), controller buttons, gyro aiming, queue chime,
                                   // check sign-in, network test, support project, video decoder, audio-to-haptics,
-                                  // touchpad shortcuts, restore defaults, sync trophies, remove trophies, fps limit
+                                  // touchpad shortcuts, restore defaults, sync trophies, remove trophies, fps limit,
+                                  // store country, interface & text scale
 
 struct SignInStage {
     std::string name;

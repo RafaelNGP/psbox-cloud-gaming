@@ -11,6 +11,7 @@ namespace xc::ui {
 SettingsChoice choiceFromSettings(const app::Settings& s) {
     SettingsChoice c;
     c.language = static_cast<int>(languageFromCode(s.language));
+    c.uiScale = std::clamp(s.uiScale, 0, 2);
     c.resolution = s.resolution == "720p" ? 1 : (s.resolution == "1440p" || s.resolution == "best") ? 2 : 0;
     c.region = s.region;
     c.loginCountry = s.loginCountry;
@@ -56,6 +57,7 @@ SettingsChoice choiceFromSettings(const app::Settings& s) {
 
 void applyChoice(const SettingsChoice& c, app::Settings& s) {
     s.language = languageCode(static_cast<Language>(c.language));
+    s.uiScale = std::clamp(c.uiScale, 0, 2);
     s.resolution = c.resolution == 1 ? "720p" : c.resolution == 2 ? "best" : "1080p";
     s.region = c.region;
     s.loginCountry = c.loginCountry;

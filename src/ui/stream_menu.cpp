@@ -74,13 +74,26 @@ constexpr StreamMenuPolicy streamMenuPolicy() {
 
 constexpr StreamMenuPolicy kPolicy = streamMenuPolicy();
 
-int computeStartIndex(int totalShown, int selIdx, float scrollPixelOffset) {
-    if (totalShown <= kPolicy.maxVisible) return 0;
-    const int maxStart = totalShown - kPolicy.maxVisible;
+int effectiveRowHeight(const Fonts& fonts) {
+    return fonts.scale() == 1.0f ? kPolicy.rowHeight : fonts.scaleMetric(kPolicy.rowHeight);
+}
+
+int effectiveMaxVisible(const Fonts& fonts) {
+    if (fonts.scale() == 1.0f) return kPolicy.maxVisible;
+    const int rowH = effectiveRowHeight(fonts);
+    const int availH = 704 - 18 - kPolicy.listTop;
+    return std::max(6, availH / rowH);
+}
+
+int computeStartIndex(int totalShown, int selIdx, float scrollPixelOffset, const Fonts& fonts) {
+    const int maxVis = effectiveMaxVisible(fonts);
+    const int rowH = effectiveRowHeight(fonts);
+    if (totalShown <= maxVis) return 0;
+    const int maxStart = totalShown - maxVis;
     if (kPolicy.pixelScroll) {
-        return std::clamp(static_cast<int>(scrollPixelOffset / kPolicy.rowHeight), 0, maxStart);
+        return std::clamp(static_cast<int>(scrollPixelOffset / rowH), 0, maxStart);
     }
-    return std::clamp(selIdx - kPolicy.maxVisible / 2, 0, maxStart);
+    return std::clamp(selIdx - maxVis / 2, 0, maxStart);
 }
 
 }  // namespace
@@ -405,6 +418,8 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
             // Keep the selected item visible inside the scrollable Android menu viewport
             // (supports both step-by-step navigation and top/bottom wrap-around).
             if (kPolicy.pixelScroll) {
+                const int maxVis = effectiveMaxVisible(fonts_);
+                const int rowH = effectiveRowHeight(fonts_);
                 int totalShown = 0;
                 int selIdx = 0;
                 for (int i : kAndroidOrder) {
@@ -412,14 +427,14 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
                     if (i == selected_) selIdx = totalShown;
                     ++totalShown;
                 }
-                if (totalShown <= kPolicy.maxVisible) {
+                if (totalShown <= maxVis) {
                     scrollPixelOffset_ = 0.0f;
                 } else {
-                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
                     if (selIdx < startIdx) {
-                        scrollPixelOffset_ = static_cast<float>(selIdx * kPolicy.rowHeight);
-                    } else if (selIdx >= startIdx + kPolicy.maxVisible) {
-                        scrollPixelOffset_ = static_cast<float>((selIdx - kPolicy.maxVisible + 1) * kPolicy.rowHeight);
+                        scrollPixelOffset_ = static_cast<float>(selIdx * rowH);
+                    } else if (selIdx >= startIdx + maxVis) {
+                        scrollPixelOffset_ = static_cast<float>((selIdx - maxVis + 1) * rowH);
                     }
                 }
             }
@@ -842,11 +857,12 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             }
 
             int ty = fonts_.semibold.centeredY(row.y, row.h, kPx);
-            fonts_.semibold.draw(c, tr(kIndicators[i].label), boxX + 34, ty, kPx, fg);
-
             const char* st = tr(on ? Str::On : Str::Off);
             int sw = fonts_.semibold.measure(st, 18);
-            fonts_.semibold.draw(c, st, row.x + row.w - 16 - sw, ty, 18, sel ? kDark : kGray);
+            int rightEdge = row.x + row.w - 16 - sw;
+            fonts_.semibold.drawTruncated(c, tr(kIndicators[i].label), boxX + 34, ty, kPx,
+                                          std::max(60, rightEdge - (boxX + 34) - 12), fg);
+            fonts_.semibold.draw(c, st, rightEdge, ty, 18, sel ? kDark : kGray);
         }
 
         int hy = kMenuH - 50, x = kPad;
@@ -875,9 +891,10 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         fonts_.bold.draw(c, tr(Str::TouchpadShortcuts), kPad, 38, 28, kWhite);
         auto descLines = fonts_.regular.wrap(tr(Str::SettingDescTouchpadShortcuts), 16, kMenuW - 2 * kPad, 2);
         int dy = 74;
+        const int descStep = fonts_.scaleMetric(20);
         for (const auto& l : descLines) {
             fonts_.regular.draw(c, l, kPad, dy, 16, kDim);
-            dy += 20;
+            dy += descStep;
         }
 
         const input::TouchpadAction vals[6] = {
@@ -892,11 +909,21 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             if (sel) c.fillRect(row, kWhite, 8);
             Color fg = sel ? kDark : kWhite;
             int ty = fonts_.semibold.centeredY(row.y, row.h, kPx);
-            fonts_.semibold.draw(c, touchpadTriggerLabel(i), row.x + 16, ty, kPx, fg);
+            const char* trigLbl = touchpadTriggerLabel(i);
             std::string val = touchpadActionLabel(static_cast<int>(vals[i]));
             if (sel) val = "< " + val + " >";
+            int rightEdge = row.x + row.w - 16;
+            int totalAvail = rightEdge - (row.x + 16) - 14;
+            int lblW = fonts_.semibold.measure(trigLbl, kPx);
             int sw = fonts_.semibold.measure(val, 18);
-            fonts_.semibold.draw(c, val, row.x + row.w - 16 - sw, ty, 18, sel ? kDark : kGray);
+            int lblBudget = (lblW + sw <= totalAvail) ? lblW : std::max(totalAvail / 2, totalAvail - sw);
+            int lblEnd = fonts_.semibold.drawTruncated(c, trigLbl, row.x + 16, ty, kPx, lblBudget, fg);
+            int valBudget = std::max(60, rightEdge - lblEnd - 12);
+            if (sw > valBudget) {
+                val = fonts_.semibold.fit(val, 18, valBudget);
+                sw = fonts_.semibold.measure(val, 18);
+            }
+            fonts_.semibold.draw(c, val, rightEdge - sw, ty, 18, sel ? kDark : kGray);
         }
         Rect resetRow{kPad - 16, kTop + 6 * kRowH + 8, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool resetSel = (touchpadCustomIndex_ == 6);
@@ -994,14 +1021,14 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
 
     // The Items List
-    const int kRowH = kPolicy.rowHeight;
+    const int kRowH = effectiveRowHeight(fonts_);
     const int kTop = kPolicy.listTop;
     const int kPx = kPolicy.fontPx;
-    const int kMaxVisible = kPolicy.maxVisible;
+    const int kMaxVisible = effectiveMaxVisible(fonts_);
     int shownList[ItemCount];
     int selIdx = 0;
     int totalShown = collectShownItems(shownList, selIdx);
-    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
     int visibleCount = std::min(totalShown, kMaxVisible);
 
     for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {  // the guitar's: drawGuitarTab
@@ -1048,7 +1075,6 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                             : i == ReloadStreamItem    ? tr(Str::ReloadStream)
                             : homeConsole_             ? tr(Str::MenuEndStream)
                                                        : tr(Str::MenuLeave);
-        fonts_.semibold.draw(c, label, row.x + 16, ty, kPx, fg);
         std::string value;
 
         if (i == PlayerItem) {
@@ -1194,10 +1220,21 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             c.line(cx + 2.5f, cy, cx - 2.0f, cy + 4.0f, 2.0f, arrowCol);
         }
 
-        if (!value.empty()) {
-            int w = fonts_.semibold.measure(value, kPx);
-            int rx = hasSubmenu ? (pillLeft - 10 - w) : (row.x + row.w - 16 - w);
-            fonts_.semibold.draw(c, value, rx, ty, kPx, sel ? kDark : kGray);
+        const int rightEdge = hasSubmenu ? (pillLeft - 10) : (row.x + row.w - 16);
+        if (value.empty()) {
+            fonts_.semibold.drawTruncated(c, label, row.x + 16, ty, kPx, rightEdge - (row.x + 16), fg);
+        } else {
+            int lblW = fonts_.semibold.measure(label, kPx);
+            int valW = fonts_.semibold.measure(value, kPx);
+            int totalAvail = rightEdge - (row.x + 16) - 14;
+            int lblBudget = (lblW + valW <= totalAvail) ? lblW : std::max(totalAvail * 52 / 100, totalAvail - valW);
+            int lblEnd = fonts_.semibold.drawTruncated(c, label, row.x + 16, ty, kPx, lblBudget, fg);
+            int valBudget = std::max(50, rightEdge - lblEnd - 12);
+            if (valW > valBudget) {
+                value = fonts_.semibold.fit(value, kPx, valBudget);
+                valW = fonts_.semibold.measure(value, kPx);
+            }
+            fonts_.semibold.draw(c, value, rightEdge - valW, ty, kPx, sel ? kDark : kGray);
         }
     }
 
@@ -1285,11 +1322,11 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         const char* desc = itemDescription(selected_);
         if (desc && desc[0] != '\0') {
             constexpr int kDescPx = 15;
-            constexpr int kLineH = 20;
+            const int kLineH = fonts_.scaleMetric(20);
             auto lines = fonts_.regular.wrap(desc, kDescPx, kMenuW - 2 * kPad, 2);
             if (!lines.empty()) {
                 const int nLines = static_cast<int>(lines.size());
-                const int textH = (nLines - 1) * kLineH + kDescPx;
+                const int textH = (nLines - 1) * kLineH + fonts_.regular.scaledPx(kDescPx);
                 const int boxTop = 930;
                 const int boxBottom = hy; // 1018
                 int gy = boxTop + (boxBottom - boxTop - textH) / 2;
@@ -1315,6 +1352,25 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
                                                     : tr(Str::Select);
 
     int x = kPad;
+    int hintPx = 18;
+    int hintGap = 20;
+    int iconAdv = 34;
+    if (fonts_.scale() > 1.0f) {
+        hintGap = 12;
+        iconAdv = 30;
+        const char* tabBadge = "L1 / R1";
+        auto calcFooterW = [&](int px) {
+            int w = iconAdv + fonts_.semibold.measure(confirmLabel, px) + hintGap +
+                    iconAdv + fonts_.semibold.measure("QR Code", px) + hintGap +
+                    iconAdv + fonts_.semibold.measure(tr(Str::Back), px);
+            if (kPolicy.showTabBar && activeTab_ != MenuTab::Guitar) {
+                w += hintGap + fonts_.bold.measure(tabBadge, 13) + 28 + fonts_.semibold.measure(tr(Str::MenuTabsLabel), px);
+            }
+            return w;
+        };
+        const int maxFooterW = kMenuW - kPad - 16;
+        while (hintPx > 13 && calcFooterW(hintPx) > maxFooterW) --hintPx;
+    }
 
     // Action Hints
     if (g_keyboardHints) {
@@ -1326,24 +1382,24 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             return kw;
         };
         int kw = cap("Enter");
-        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
+        x = fonts_.semibold.draw(c, confirmLabel, x + kw + 8, fonts_.semibold.centeredY(hy, 26, hintPx), hintPx, kGray) + hintGap;
         kw = cap("T");
-        x = fonts_.semibold.draw(c, "QR Code", x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
+        x = fonts_.semibold.draw(c, "QR Code", x + kw + 8, fonts_.semibold.centeredY(hy, 26, hintPx), hintPx, kGray) + hintGap;
         kw = cap("Esc");
-        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
+        x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, hintPx), hintPx, kGray) + hintGap;
         if (kPolicy.showTabBar) {
             kw = cap("Q/E");
-            fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray);
+            fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, hintPx), hintPx, kGray);
         }
         return c;
     }
 
     icon(!circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, confirmLabel, x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
+    x = fonts_.semibold.draw(c, confirmLabel, x + iconAdv, fonts_.semibold.centeredY(hy, 24, hintPx), hintPx, kGray) + hintGap;
     ui::drawFaceButton(c, fonts_.bold, g_glyphStyle, PadButton::Triangle, static_cast<float>(x + 13), static_cast<float>(hy + 12), 13.0f);
-    x = fonts_.semibold.draw(c, "QR Code", x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
+    x = fonts_.semibold.draw(c, "QR Code", x + iconAdv, fonts_.semibold.centeredY(hy, 24, hintPx), hintPx, kGray) + hintGap;
     icon(circleConfirms_, x, hy);
-    x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
+    x = fonts_.semibold.draw(c, tr(Str::Back), x + iconAdv, fonts_.semibold.centeredY(hy, 24, hintPx), hintPx, kGray) + hintGap;
 
     // L1 / R1 Tab Switch Hint (separated with clear spacing); a guitar's menu has one tab.
     if (kPolicy.showTabBar && activeTab_ != MenuTab::Guitar) {
@@ -1351,7 +1407,8 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         int bw = fonts_.bold.measure(tabBadge, 13) + 20;
         c.fillRect({x, hy + 1, bw, 22}, rgba(255, 255, 255, 30), 4);
         fonts_.bold.draw(c, tabBadge, x + 10, fonts_.bold.centeredY(hy + 1, 22, 13), 13, kWhite);
-        fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + bw + 10, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray);
+        fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + bw + (fonts_.scale() > 1.0f ? 6 : 10),
+                             fonts_.semibold.centeredY(hy, 24, hintPx), hintPx, kGray);
     }
 
     return c;
@@ -1407,21 +1464,23 @@ Canvas StreamMenu::renderStats(const StreamInfo& info) const {
     w = std::max(w, 200);
 
     bool showGraph = (statsMask_ & StatsGraph) != 0;
-    int kH = showGraph ? 62 : 36;
+    const int kH = showGraph ? fonts_.scaleMetric(62) : fonts_.scaleMetric(36);
     Canvas c(w, kH);
     c.clear(kPanel);
     if (!text.empty()) fonts_.semibold.draw(c, text, 14, 8, kPx, kWhite);
     if (!warn.empty()) fonts_.semibold.draw(c, warn, 14 + tw, 8, kPx, kWarnColor);
 
     if (showGraph) {
-        telemetry_.drawSparkline(c, 14, 32, w - 28, 22);
+        const int graphY = fonts_.scaleMetric(32);
+        telemetry_.drawSparkline(c, 14, graphY, w - 28, std::max(14, kH - graphY - 8));
     }
     return c;
 }
 
 Canvas StreamMenu::renderWarning(bool wifi) const {
     const char* text = tr(wifi ? Str::WifiHoldPill : Str::ConnectionUnstable);
-    constexpr int kPx = 20, kH = 36, kDot = 6;
+    constexpr int kPx = 20, kDot = 6;
+    const int kH = fonts_.scaleMetric(36);
     int w = fonts_.semibold.measure(text, kPx) + 28 + 2 * kDot + 10;
     Canvas c(w, kH);
     c.clear(kPanel);
@@ -1498,7 +1557,9 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
             touchLastY_ = ev.y;
             int totalShown = 0;
             for (int i = 0; i < ItemCount; ++i) if (itemShown(i)) totalShown++;
-            int maxScroll = std::max(0, (totalShown - kPolicy.maxVisible) * kPolicy.rowHeight);
+            const int maxVis = effectiveMaxVisible(fonts_);
+            const int rowH = effectiveRowHeight(fonts_);
+            int maxScroll = std::max(0, (totalShown - maxVis) * rowH);
             scrollPixelOffset_ = std::clamp(scrollPixelOffset_ - dy, 0.0f, static_cast<float>(maxScroll));
             return true;
         }
@@ -1510,15 +1571,16 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         if (touchDragging_) {
             touchDragging_ = false;
             if (kPolicy.pixelScroll) {
+                const int maxVis = effectiveMaxVisible(fonts_);
                 int shownList[ItemCount];
                 int selIdx = 0;
                 int totalShown = collectShownItems(shownList, selIdx);
-                if (totalShown > kPolicy.maxVisible) {
-                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+                if (totalShown > maxVis) {
+                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
                     if (selIdx < startIdx) {
                         selected_ = shownList[startIdx];
-                    } else if (selIdx >= startIdx + kPolicy.maxVisible) {
-                        selected_ = shownList[startIdx + kPolicy.maxVisible - 1];
+                    } else if (selIdx >= startIdx + maxVis) {
+                        selected_ = shownList[startIdx + maxVis - 1];
                     }
                 }
             }
@@ -1571,13 +1633,13 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         }
 
         // Items List tap
-        const int kRowH = kPolicy.rowHeight;
+        const int kRowH = effectiveRowHeight(fonts_);
         const int kTop = kPolicy.listTop;
-        const int kMaxVisible = kPolicy.maxVisible;
+        const int kMaxVisible = effectiveMaxVisible(fonts_);
         int shownList[ItemCount];
         int selIdx = 0;
         int totalShown = collectShownItems(shownList, selIdx);
-        int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+        int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
         int visibleCount = std::min(totalShown, kMaxVisible);
 
         for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {

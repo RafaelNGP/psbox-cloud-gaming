@@ -40,11 +40,17 @@ public:
     int measure(std::string_view text, int px) const;
     // Returns the x after the last glyph.
     int draw(Canvas& c, std::string_view text, int x, int y, int px, Color color) const;
+    // Shortens with "..." if wider than `maxWidth` and draws; returns the x after the last glyph.
+    int drawTruncated(Canvas& c, std::string_view text, int x, int y, int px, int maxWidth, Color color) const;
 
     // Word-wraps to `maxWidth`; at most `maxLines` (the last gets "...").
     std::vector<std::string> wrap(std::string_view text, int px, int maxWidth, int maxLines) const;
     // Shortens with "..." to fit `maxWidth`.
     std::string fit(std::string_view text, int px, int maxWidth) const;
+
+    void setScale(float s) const { uiScale_ = (s > 0.1f) ? s : 1.0f; }
+    float scale() const { return uiScale_; }
+    int scaledPx(int px) const;
 
 private:
     struct Glyph {
@@ -60,6 +66,7 @@ private:
     std::unique_ptr<Impl> impl_;
     std::vector<unsigned char> data_;
     bool loaded_ = false;
+    mutable float uiScale_ = 1.0f;
     mutable std::mutex mutex_;
     mutable std::unordered_map<uint64_t, Glyph> cache_;
 };
@@ -75,7 +82,16 @@ struct Fonts {
     bool usedBuiltin = false;  // a file was missing or damaged: the copy inside the binary stands in
     // The first of `paths` that loads; false when none does.
     bool loadIcons(const std::vector<std::string>& paths);
+
+    void setScale(float s) const;
+    float scale() const { return uiScale_; }
+    int scaleMetric(int v) const;
+
+private:
+    mutable float uiScale_ = 1.0f;
 };
+
+using FontSet = Fonts;
 
 // Code points of the console's icon font.
 constexpr const char* kIconKeyboardMouse = "\xEF\xA3\xBE";  // U+F8FE

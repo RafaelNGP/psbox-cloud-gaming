@@ -30,19 +30,20 @@ void WebControlCard::draw(Canvas& c, const Fonts& fonts, const Options& opts) co
     int cy = card.y + 30;
 
     // Canonical Title (tr(Str::WebControlTitle))
-    const char* title = tr(Str::WebControlTitle);
     int titlePx = (card.w < 440) ? 24 : 26;
+    std::string title = fonts.bold.fit(tr(Str::WebControlTitle), titlePx, card.w - 32);
     int tw = fonts.bold.measure(title, titlePx);
     fonts.bold.draw(c, title, card.x + (card.w - tw) / 2, cy, titlePx, kWhite);
-    cy += titlePx + 12;
+    cy += fonts.bold.scaledPx(titlePx) + 12;
 
     // Canonical Description (tr(Str::WebControlDesc)) with proper lateral padding
     int descPx = (card.w < 440) ? 15 : 16;
     auto lines = fonts.regular.wrap(tr(Str::WebControlDesc), descPx, card.w - 48, 4);
+    const int descStep = fonts.regular.scaledPx(descPx) + 6;
     for (const auto& l : lines) {
         int lw = fonts.regular.measure(l, descPx);
         fonts.regular.draw(c, l, card.x + (card.w - lw) / 2, cy, descPx, kGray);
-        cy += descPx + 6;
+        cy += descStep;
     }
     cy += 14;
 
@@ -77,8 +78,9 @@ void WebControlCard::draw(Canvas& c, const Fonts& fonts, const Options& opts) co
         c.strokeRect(pill, rgba(255, 255, 255, 40), 1, 12);
 
         int urlPx = (card.w < 440) ? 17 : 20;
-        int uw = fonts.semibold.measure(finalUrl, urlPx);
-        fonts.semibold.draw(c, finalUrl, pill.x + (pill.w - uw) / 2,
+        std::string urlDisp = fonts.semibold.fit(finalUrl, urlPx, pill.w - 20);
+        int uw = fonts.semibold.measure(urlDisp, urlPx);
+        fonts.semibold.draw(c, urlDisp, pill.x + (pill.w - uw) / 2,
                             fonts.semibold.centeredY(pill.y, pill.h, urlPx), urlPx, rgba(74, 222, 128));
     }
 }

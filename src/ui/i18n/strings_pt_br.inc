@@ -589,4 +589,9 @@ constexpr Column kPortugueseBR = {
     "Salvar",                                                                         // Save
     "Abrir navegador para fazer login",                                               // SignInOpenBrowser
     "Toque aqui ou pressione A para abrir no navegador",                              // SignInOpenBrowserHint
+    "Tamanho do texto e interface",                                                   // UiScale
+    "Normal (100%)",                                                                  // UiScaleNormal
+    "Grande (115%)",                                                                  // UiScaleLarge
+    "Muito Grande (130%)",                                                            // UiScaleExtraLarge
+    "Aumenta textos, menus e espaçamento das listas para facilitar a leitura em TVs, portáteis e celulares.", // SettingDescUiScale
 };

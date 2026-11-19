@@ -598,6 +598,11 @@ enum class Str {
     Save,
     SignInOpenBrowser,
     SignInOpenBrowserHint,
+    UiScale,
+    UiScaleNormal,
+    UiScaleLarge,
+    UiScaleExtraLarge,
+    SettingDescUiScale,
     Count
 };
 

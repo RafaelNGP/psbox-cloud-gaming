@@ -481,6 +481,7 @@ bool coreStartup() {
             root.set("isPS5", platform::isPS5());
             root.set("settingsVersion", static_cast<int64_t>(g_settingsVersion.load()));
             root.set("language", g_settings.language);
+            root.set("uiScale", std::clamp(g_settings.uiScale, 0, 2));
             root.set("storeCountry", g_settings.storeCountry);
             root.set("resolution", g_settings.resolution);
             root.set("allow1440", allow1440Locked());
@@ -530,6 +531,14 @@ bool coreStartup() {
             Settings snapshot;
             {
                 std::lock_guard<std::mutex> lock(g_settingsMutex);
+                if (root.has("uiScale") || root.has("ui_scale")) {
+                    const json::Value& rawScale = root.has("uiScale") ? root["uiScale"] : root["ui_scale"];
+                    int val = parseUiScale(rawScale, g_settings.uiScale);
+                    if (val != g_settings.uiScale) {
+                        g_settings.uiScale = val;
+                        changed = true;
+                    }
+                }
                 if (root.has("storeCountry") && root["storeCountry"].isString()) {
                     const auto raw = root["storeCountry"].str();
                     const auto country = normalizeStoreCountry(raw);

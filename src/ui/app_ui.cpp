@@ -1389,6 +1389,7 @@ void AppUi::setUpdateStatus(const std::string& status, float fraction) {
 void AppUi::setSettings(const SettingsChoice& choice) {
     std::lock_guard<std::mutex> lock(mutex_);
     settings_ = choice;
+    fonts_.setScale(app::uiScaleFactor(choice.uiScale));
     gyroMode_ = choice.gyroMode;
     gyroLevel_ = choice.gyroLevel;
     dirty_ = true;

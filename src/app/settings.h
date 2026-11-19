@@ -21,6 +21,11 @@ json::Value keyMapToJson(const input::KeyMap& m);
 input::KeyMap keyMapFromJson(const json::Value& v, const input::KeyMap& fallback);
 // Supported optional store-country override; empty means the session market.
 std::string normalizeStoreCountry(const std::string& country);
+// Resilient UI scale parser: accepts 0..2, float factor (1.0 / 1.15 / 1.30), or string ("normal", "large", "xlarge").
+int parseUiScale(const json::Value& v, int fallback = 0);
+constexpr float uiScaleFactor(int scale) {
+    return scale == 2 ? 1.30f : (scale == 1 ? 1.15f : 1.0f);
+}
 
 struct GameProfile {
     // Picture
@@ -82,6 +87,7 @@ inline std::string gameProfileKey(const std::string& productId, const std::strin
 
 struct Settings {
     std::string language = "en";     // ui::languageCode()
+    int uiScale = 0;                 // 0: Normal (1.0), 1: Large (1.15), 2: Extra Large (1.30)
     std::string resolution = "1080p";  // "1080p", "720p" or "1440p" (experimental)
     std::string region;                // gssv region name; empty = automatic
     // "Sign in as another country" (xcloud::loginCountryAddress): "" off.
@@ -227,6 +233,7 @@ struct Settings {
 
     // micGain as the microphone's gain (StreamPlayer::setMicGain): 0.5, 1 or 1.5.
     float micGainFactor() const;
+    float uiScaleFactor() const { return xc::app::uiScaleFactor(uiScale); }
 
     GameProfile defaultProfile() const;
     GameProfile profileForGame(const std::string& productId, const std::string& titleId, bool* hasCustom = nullptr) const;

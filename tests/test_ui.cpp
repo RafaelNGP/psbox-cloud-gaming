@@ -714,21 +714,21 @@ static void testVisibleSettingsRows() {
     };
     const ui::UiCaps ps5;
     auto all = ui::visibleSettingsRows(ps5);
-    CHECK((ids(all) == std::vector<int>{0, 2, 8, 27, 17, 18, 24, 25, 1, 20, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
-    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
+    CHECK((ids(all) == std::vector<int>{0, 28, 2, 8, 27, 17, 18, 24, 25, 1, 20, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23}));
+    CHECK((groups(all) == std::vector<bool>{false, false, false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, false, false, false, false, true, false, true}));
     ui::UiCaps pc;
     pc.lightBar = pc.triggerRumble = pc.adaptiveTriggers = pc.gyro = pc.touchpad = false;
     pc.upscalers = pc.sharpen = pc.deband = pc.highRefresh = pc.console = pc.selfUpdate = pc.trophies = false;
     pc.openUrl = true;
     auto desk = ui::visibleSettingsRows(pc);
-    CHECK((ids(desk) == std::vector<int>{0, 2, 8, 27, 17, 18, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(desk) == std::vector<int>{0, 28, 2, 8, 27, 17, 18, 1, 20, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(desk) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, true, false, false, false, false, false, true, false, true}));
     // The desktop app's window: Display mode after the resolution, in the stream's group.
     ui::UiCaps win = pc;
     win.desktopWindow = true;
     auto w = ui::visibleSettingsRows(win);
-    CHECK((ids(w) == std::vector<int>{0, 2, 8, 27, 17, 18, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
-    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
+    CHECK((ids(w) == std::vector<int>{0, 28, 2, 8, 27, 17, 18, 1, 20, 13, 26, 10, 14, 12, 3, 5, 16, 22, 19, 7, 23}));
+    CHECK((groups(w) == std::vector<bool>{false, false, false, false, false, false, false, true, false, false, false, false, true, false, false, false, false, false, true, false, true}));
     auto deskIds = ids(desk);
     CHECK(std::find(deskIds.begin(), deskIds.end(), 24) == deskIds.end());
     CHECK(std::find(deskIds.begin(), deskIds.end(), 25) == deskIds.end());
@@ -784,16 +784,17 @@ static void testVisibleSettingsRows() {
     CHECK((ids(game) == std::vector<int>{0, 4, 15, 14, 18, 5, 7, 11, 9}));
     CHECK((groups(game) == std::vector<bool>{false, true, false, false, false, true, false, false, false}));
     // How far down the autoplay tests walk to each row (autoplay.cpp's downsTo).
-    CHECK(ui::settingsRowPosition(ps5, 24) == 6);
-    CHECK(ui::settingsRowPosition(ps5, 25) == 7);
-    CHECK(ui::settingsRowPosition(ps5, 27) == 3 && ui::settingsRowPosition(ps5, 1) == 8 && ui::settingsRowPosition(ps5, 3) == 15);
-    CHECK(ui::settingsRowPosition(ps5, 16) == 21);
-    CHECK(ui::settingsRowPosition(ps5, 5) == 19 && ui::settingsRowPosition(ps5, 6) == 20);
-    CHECK(ui::settingsRowPosition(ps5, 12) == 14 && ui::settingsRowPosition(ps5, 14) == 13);
-    CHECK(ui::settingsRowPosition(ps5, 22) == 22);
-    CHECK(ui::settingsRowPosition(ps5, 7) == 24 && ui::settingsRowPosition(ps5, 19) == 23 && ui::settingsRowPosition(ps5, 2) == 1);
-    CHECK(ui::settingsRowPosition(ps5, 21) == 18);
-    CHECK(ui::settingsRowPosition(pc, 5) == 13 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
+    CHECK(ui::settingsRowPosition(ps5, 28) == 1);
+    CHECK(ui::settingsRowPosition(ps5, 24) == 7);
+    CHECK(ui::settingsRowPosition(ps5, 25) == 8);
+    CHECK(ui::settingsRowPosition(ps5, 27) == 4 && ui::settingsRowPosition(ps5, 1) == 9 && ui::settingsRowPosition(ps5, 3) == 16);
+    CHECK(ui::settingsRowPosition(ps5, 16) == 22);
+    CHECK(ui::settingsRowPosition(ps5, 5) == 20 && ui::settingsRowPosition(ps5, 6) == 21);
+    CHECK(ui::settingsRowPosition(ps5, 12) == 15 && ui::settingsRowPosition(ps5, 14) == 14);
+    CHECK(ui::settingsRowPosition(ps5, 22) == 23);
+    CHECK(ui::settingsRowPosition(ps5, 7) == 25 && ui::settingsRowPosition(ps5, 19) == 24 && ui::settingsRowPosition(ps5, 2) == 2);
+    CHECK(ui::settingsRowPosition(ps5, 21) == 19);
+    CHECK(ui::settingsRowPosition(pc, 5) == 14 && ui::settingsRowPosition(pc, 6) == -1 && ui::settingsRowPosition(pc, 4) == -1);
 }
 
 // The controller's glyphs by pad kind (ui/pad_glyphs.h).
@@ -1337,6 +1338,179 @@ static void testMilestone1TouchOverlayCanvasAndHaptics() {
     }
 }
 
+static void testUiScalePersistenceAndMetrics() {
+    // 1. Settings save / load roundtrip for uiScale (0 = Normal, 1 = Large, 2 = ExtraLarge)
+    const std::string dir = "/tmp/xcloud-test-uiscale-" + std::to_string(::getpid());
+    xc::fs::removeTree(dir);
+    xc::fs::makeDirs(dir);
+    const std::string path = dir + "/settings.json";
+
+    for (int level : {0, 1, 2}) {
+        app::Settings saved;
+        saved.uiScale = level;
+        CHECK(saved.save(path));
+
+        app::Settings loaded;
+        loaded.uiScale = (level == 0) ? 2 : 0;  // ensure load overwrites
+        CHECK(loaded.load(path));
+        CHECK(loaded.uiScale == level);
+
+        ui::SettingsChoice choice = ui::choiceFromSettings(loaded);
+        CHECK(choice.uiScale == level);
+        app::Settings applied;
+        ui::applyChoice(choice, applied);
+        CHECK(applied.uiScale == level);
+    }
+
+    // Flexible parsing (int, float factor, string) and clamping
+    CHECK(app::parseUiScale(json::Value(0), 2) == 0);
+    CHECK(app::parseUiScale(json::Value(1), 0) == 1);
+    CHECK(app::parseUiScale(json::Value(2), 0) == 2);
+    CHECK(app::parseUiScale(json::Value(99), 0) == 2);
+    CHECK(app::parseUiScale(json::Value(-5), 1) == 0);
+    CHECK(app::parseUiScale(json::Value(1.15), 0) == 1);
+    CHECK(app::parseUiScale(json::Value(1.30), 0) == 2);
+    CHECK(app::parseUiScale(json::Value("normal"), 2) == 0);
+    CHECK(app::parseUiScale(json::Value("large"), 0) == 1);
+    CHECK(app::parseUiScale(json::Value("extra_large"), 0) == 2);
+    CHECK(app::uiScaleFactor(0) == 1.0f);
+    CHECK(app::uiScaleFactor(1) == 1.15f);
+    CHECK(app::uiScaleFactor(2) == 1.30f);
+
+    // 2. SettingsManager JSON sync and WebUI HTML exposure
+    {
+        auto& mgr = app::SettingsManager::instance();
+        json::Value patch = json::Value::object();
+        patch.set("uiScale", "extra_large");
+        mgr.updateFromJson(patch, true);
+        CHECK(mgr.get().uiScale == 2);
+        patch.set("uiScale", 0);
+        mgr.updateFromJson(patch, true);
+        CHECK(mgr.get().uiScale == 0);
+        const char* html = app::webServerIndexHtml();
+        CHECK(html != nullptr && std::strstr(html, "selectUiScale") != nullptr);
+    }
+
+    // 3. FontSet::measure() and metrics across Normal (1.0f), Large (1.15f), ExtraLarge (1.30f)
+    ui::FontSet baseline;
+    CHECK(baseline.load("/nonexistent/psbox/fonts"));
+    ui::FontSet scaled;
+    CHECK(scaled.load("/nonexistent/psbox/fonts"));
+
+    const std::string_view sample = "Settings Interface Scale 123";
+    const int basePx = 24;
+    const int baseW = baseline.regular.measure(sample, basePx);
+    const int baseH = baseline.regular.lineHeight(basePx);
+    CHECK(baseW > 0 && baseH > 0);
+
+    // Normal (1.0f): exact parity with unscaled baseline
+    scaled.setScale(app::uiScaleFactor(0));
+    CHECK(scaled.scale() == 1.0f);
+    CHECK(scaled.regular.scaledPx(basePx) == basePx);
+    CHECK(scaled.scaleMetric(40) == 40);
+    CHECK(scaled.regular.measure(sample, basePx) == baseW);
+    CHECK(scaled.regular.lineHeight(basePx) == baseH);
+
+    // Large (1.15f): strictly larger than Normal
+    scaled.setScale(app::uiScaleFactor(1));
+    CHECK(scaled.scale() == 1.15f);
+    const int largeW = scaled.regular.measure(sample, basePx);
+    const int largeH = scaled.regular.lineHeight(basePx);
+    CHECK(scaled.regular.scaledPx(basePx) == 28);  // round(24 * 1.15) = 28
+    CHECK(scaled.scaleMetric(40) == 46);           // round(40 * 1.15) = 46
+    CHECK(largeW > baseW);
+    CHECK(largeH > baseH);
+
+    // ExtraLarge (1.30f): strictly larger than Large
+    scaled.setScale(app::uiScaleFactor(2));
+    CHECK(scaled.scale() == 1.30f);
+    const int xlW = scaled.regular.measure(sample, basePx);
+    const int xlH = scaled.regular.lineHeight(basePx);
+    CHECK(scaled.regular.scaledPx(basePx) == 31);  // round(24 * 1.30) = 31
+    CHECK(scaled.scaleMetric(40) == 52);           // round(40 * 1.30) = 52
+    CHECK(xlW > largeW);
+    CHECK(xlH > largeH);
+
+    xc::fs::removeTree(dir);
+}
+
+static void testSettingsWrapAroundAndTouchButtons() {
+    ui::Fonts fonts;
+    CHECK(fonts.load("/nonexistent/psbox/fonts"));
+    ui::ImageCache images([] {}, 1u << 20);
+
+    // Verify wrap-around (top <-> bottom) on both PS5 caps and Desktop caps
+    ui::UiCaps desktopCaps;
+    desktopCaps.lightBar = desktopCaps.triggerRumble = desktopCaps.adaptiveTriggers = desktopCaps.gyro = desktopCaps.touchpad = false;
+    desktopCaps.upscalers = desktopCaps.sharpen = desktopCaps.deband = desktopCaps.highRefresh = desktopCaps.console = desktopCaps.selfUpdate = desktopCaps.trophies = false;
+    desktopCaps.openUrl = desktopCaps.desktopWindow = true;
+
+    for (const ui::UiCaps& caps : {ui::UiCaps{}, desktopCaps}) {
+        ui::AppUi app(fonts, images);
+        app.setCaps(caps);
+        app.setSettings(ui::SettingsChoice{});
+        app.showHome();
+
+        // Open Settings via Options button
+        ui::NavInput openNav;
+        openNav.options = true;
+        openNav.nowMs = 100;
+        app.handle(openNav);
+        CHECK(app.screen() == ui::Screen::Settings);
+
+        const auto rows = ui::visibleSettingsRows(caps);
+        CHECK(!rows.empty());
+        const int firstRow = rows.front().row;
+        const int lastRow = rows.back().row;
+        CHECK(app.settingsFocus() == firstRow);
+
+        // Up on first item wraps to last item
+        ui::NavInput upNav;
+        upNav.up = true;
+        upNav.nowMs = 200;
+        app.handle(upNav);
+        CHECK(app.settingsFocus() == lastRow);
+
+        // Down on last item wraps back to first item
+        ui::NavInput downNav;
+        downNav.down = true;
+        downNav.nowMs = 300;
+        app.handle(downNav);
+        CHECK(app.settingsFocus() == firstRow);
+
+        // Walk down through every item and wrap back to first
+        for (size_t i = 0; i < rows.size(); ++i) {
+            ui::NavInput step;
+            step.down = true;
+            step.nowMs = 400 + static_cast<uint64_t>(i) * 50;
+            app.handle(step);
+        }
+        CHECK(app.settingsFocus() == firstRow);
+    }
+
+    // On non-touchscreen platforms (Linux/PS5/Desktop), touch-only Settings gear and Back buttons are disabled
+    if (!platform::hasTouchscreen()) {
+        ui::AppUi app(fonts, images);
+        app.setCaps(ui::UiCaps{});
+        app.showHome();
+        // Tap where the Android touch Settings gear button lives (top-right corner)
+        app.onTouch(app::shell::TouchEvent{app::shell::TouchEvent::Kind::Down, 1, 1860.0f, 72.0f});
+        app.onTouch(app::shell::TouchEvent{app::shell::TouchEvent::Kind::Up, 1, 1860.0f, 72.0f});
+        CHECK(app.screen() == ui::Screen::Home);
+
+        // Open Settings via Options, then tap where the Android touch Back button lives (kMargin=96, y=94..146)
+        ui::NavInput openNav;
+        openNav.options = true;
+        openNav.nowMs = 200;
+        app.handle(openNav);
+        CHECK(app.screen() == ui::Screen::Settings);
+
+        app.onTouch(app::shell::TouchEvent{app::shell::TouchEvent::Kind::Down, 1, 122.0f, 120.0f});
+        app.onTouch(app::shell::TouchEvent{app::shell::TouchEvent::Kind::Up, 1, 122.0f, 120.0f});
+        CHECK(app.screen() == ui::Screen::Settings);
+    }
+}
+
 void runUiTests() {
     testStrings();
     testAccentColor();
@@ -1355,4 +1529,6 @@ void runUiTests() {
     testUiTouchDragVsTap();
     testSafeAreaBoxCalculation();
     testMilestone1TouchOverlayCanvasAndHaptics();
+    testUiScalePersistenceAndMetrics();
+    testSettingsWrapAroundAndTouchButtons();
 }

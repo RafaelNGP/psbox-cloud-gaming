@@ -24,6 +24,25 @@ std::string normalizeStoreCountry(const std::string& country) {
     return {};
 }
 
+int parseUiScale(const json::Value& v, int fallback) {
+    if (v.isNumber()) {
+        double d = v.asNumber(static_cast<double>(fallback));
+        if (d >= 1.08 && d < 1.22) return 1;
+        if (d >= 1.22 && d < 1.50) return 2;
+        return std::clamp(static_cast<int>(d), 0, 2);
+    }
+    if (v.isString()) {
+        std::string s = v.str();
+        for (char& c : s) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+        if (s == "0" || s == "normal" || s == "default" || s == "1.0" || s == "100%") return 0;
+        if (s == "1" || s == "large" || s == "grande" || s == "1.15" || s == "115%") return 1;
+        if (s == "2" || s == "xlarge" || s == "extralarge" || s == "extra_large" || s == "extra-large" ||
+            s == "1.3" || s == "1.30" || s == "130%")
+            return 2;
+    }
+    return std::clamp(fallback, 0, 2);
+}
+
 std::string Settings::storeMarket(const std::string& sessionMarket) const {
     std::string market = normalizeStoreCountry(storeCountry);
     if (market.empty()) market = sessionMarket.empty() ? "US" : sessionMarket;
@@ -79,6 +98,8 @@ bool Settings::load(const std::string& path) {
     auto j = json::parse(text);
     if (!j) return false;
     language = (*j)["language"].str(language);
+    if (j->has("uiScale")) uiScale = parseUiScale((*j)["uiScale"], uiScale);
+    else if (j->has("ui_scale")) uiScale = parseUiScale((*j)["ui_scale"], uiScale);
     resolution = (*j)["resolution"].str(resolution);
     region = (*j)["region"].str(region);
     loginCountry = (*j)["loginCountry"].str(loginCountry);
@@ -352,6 +373,7 @@ Settings::ListsSwitch Settings::useListsOf(const std::string& xuid) {
 bool Settings::save(const std::string& path) const {
     json::Value v = json::Value::object();
     v.set("language", language);
+    v.set("uiScale", std::clamp(uiScale, 0, 2));
     v.set("resolution", resolution);
     v.set("region", region);
     v.set("loginCountry", loginCountry);

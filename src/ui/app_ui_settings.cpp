@@ -690,6 +690,8 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
     } else if (row == 8 || row == 27) {
         out.push_back(row == 27 ? tr(Str::StoreCountryAuto) : loginCountryOffText());
         for (const char* country : kLoginCountries) out.push_back(loginCountryName(country));
+    } else if (row == 28) {
+        out = {tr(Str::UiScaleNormal), tr(Str::UiScaleLarge), tr(Str::UiScaleExtraLarge)};
     } else {
         // Automatic first, then the regions in the login's order.
         out.push_back(withMs(trf(Str::RegionAuto, defaultRegion_.empty() ? "-" : prettyRegion(defaultRegion_)),
@@ -702,6 +704,7 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
 int AppUi::settingSelected(int row) const {
     // Caller holds mutex_.
     if (row == 0) return settings_.language;
+    if (row == 28) return std::clamp(settings_.uiScale, 0, 2);
     if (row == 1) {
         for (int i = 0; i < 3; ++i)
             if (kResolutionOrder[i] == settings_.resolution) return i;
@@ -845,6 +848,10 @@ void AppUi::applySetting(int row, int index) {
         settings_.previewFeatures = (index == 1);
     } else if (row == 27) {
         settings_.storeCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
+    } else if (row == 28) {
+        settings_.uiScale = std::clamp(index, 0, 2);
+        fonts_.setScale(app::uiScaleFactor(settings_.uiScale));
+        settingsScrollY_ = std::clamp(settingsScrollY_, 0.0f, settingsMaxScroll(caps_, settings_.uiScale));
     } else if (row == 8) {
         settings_.loginCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
     } else {
@@ -1214,15 +1221,18 @@ void AppUi::drawSettings(Canvas& c) {
     drawBackground(c);
     drawTopBar(c);
 
-    // Back button next to Settings title for touch navigation
-    Rect backBtn{kMargin, 94, 52, 52};
-    c.fillRect(backBtn, rgba(255, 255, 255, 22), 16);
-    c.strokeRect(backBtn, rgba(255, 255, 255, 50), 1, 16);
-    float bx = backBtn.x + backBtn.w / 2.0f, by = backBtn.y + backBtn.h / 2.0f;
-    c.line(bx + 4.0f, by - 9.0f, bx - 4.0f, by, 3.0f, kWhite);
-    c.line(bx - 4.0f, by, bx + 4.0f, by + 9.0f, 3.0f, kWhite);
+    // Back button next to Settings title for touch navigation (Android touchscreen only)
+    const bool hasTouch = platform::hasTouchscreen();
+    if (hasTouch) {
+        Rect backBtn{kMargin, 94, 52, 52};
+        c.fillRect(backBtn, rgba(255, 255, 255, 22), 16);
+        c.strokeRect(backBtn, rgba(255, 255, 255, 50), 1, 16);
+        float bx = backBtn.x + backBtn.w / 2.0f, by = backBtn.y + backBtn.h / 2.0f;
+        c.line(bx + 4.0f, by - 9.0f, bx - 4.0f, by, 3.0f, kWhite);
+        c.line(bx - 4.0f, by, bx + 4.0f, by + 9.0f, 3.0f, kWhite);
+    }
 
-    fonts_.bold.draw(c, tr(Str::Settings), kMargin + 72, 116, 46, kWhite);
+    fonts_.bold.draw(c, tr(Str::Settings), hasTouch ? (kMargin + 72) : kMargin, 116, 46, kWhite);
     if (loading_) {
         drawLoadingBar(c, kW - kMargin - 480, 100, 480, lastRender_);
     }
@@ -1235,12 +1245,16 @@ void AppUi::drawSettings(Canvas& c) {
                                         tr(Str::CheckSignIn),   tr(Str::NetworkTest),   tr(Str::SupportProject),
                                         tr(Str::VideoDecoder),  tr(Str::AudioHaptics),  tr(Str::PreviewFeatures),
                                         tr(Str::ResetSettings), tr(Str::SyncTrophies),  tr(Str::RemoveTrophies),
-                                        tr(Str::FpsLimit), tr(Str::StoreCountry)};
-    constexpr int kRowW = kSettingsRowW, kRowH = kSettingsRowH, kGap = kSettingsGap, kGroupGap = kSettingsGroupGap, kRowPx = kSettingsRowPx;
+                                        tr(Str::FpsLimit),      tr(Str::StoreCountry),  tr(Str::UiScale)};
+    constexpr int kRowW = kSettingsRowW, kRowPx = kSettingsRowPx;
+    const int kRowH = settingsRowH(settings_.uiScale);
+    const int kGap = settingsGap(settings_.uiScale);
+    const int kGroupGap = settingsGroupGap(settings_.uiScale);
     constexpr int kListTop = kSettingsListTop, kClipTop = kSettingsClipTop;
+    const int clipBottom = settingsClipBottom(settings_.uiScale);
     Rect rows[kSettingRows];  // by row id
     int y = kListTop - static_cast<int>(std::lround(settingsScrollY_));
-    c.setClip({kMargin - 8, kClipTop, kRowW + 16, kH - kClipTop - 80});
+    c.setClip({kMargin - 8, kClipTop, kRowW + 16, clipBottom - kClipTop});
     for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {  // what caps_ rules out is hidden
         if (groupStart) y += kGroupGap;
         Rect r{kMargin, y, kRowW, kRowH};
@@ -1263,13 +1277,14 @@ void AppUi::drawSettings(Canvas& c) {
                     c.fillRect({r.x, r.y, fillW, r.h}, rgba(255, 255, 255, 70), 12);
                 }
             }
-            int textW = fonts_.bold.measure(labels[i], kRowPx);
+            std::string resetLbl = fonts_.bold.fit(labels[i], kRowPx, r.w - 48);
+            int textW = fonts_.bold.measure(resetLbl, kRowPx);
             int textX = r.x + (r.w - textW) / 2;
-            fonts_.bold.draw(c, labels[i], textX, ty, kRowPx, kWhite);
+            fonts_.bold.draw(c, resetLbl, textX, ty, kRowPx, kWhite);
         } else {
             c.fillRect(r, focused ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 12);
             if (focused && !dropdownOpen_) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 3, 16);
-            fonts_.semibold.draw(c, labels[i], r.x + 32, ty, kRowPx, kWhite);
+            int labelEnd = fonts_.semibold.drawTruncated(c, labels[i], r.x + 32, ty, kRowPx, r.w / 2 + 100, kWhite);
             float cx = static_cast<float>(r.x + r.w - 40), cy = static_cast<float>(r.y + r.h / 2);
             const bool isSubmenuRow = (i == 3 || i == 4 || i == 12 || i == 14 || i == 15);
             if (isSubmenuRow) {
@@ -1299,6 +1314,7 @@ void AppUi::drawSettings(Canvas& c) {
                 c.line(cx, cy + 4, cx + 8, cy - 3, 2.5f, focused ? kWhite : kGray);
             }
             int vx = r.x + r.w - 68;
+            int maxValW = std::max(80, vx - labelEnd - 24);
 
             if (i == 7) {
                 // Updates: the state; Cross updates when there is a newer version.
@@ -1306,12 +1322,14 @@ void AppUi::drawSettings(Canvas& c) {
                                     : !updateAvailable_.empty()
                                         ? trf(caps_.selfUpdate ? Str::UpdateReady : Str::UpdateReadyPc, updateAvailable_)
                                         : trf(Str::UpToDate, "v" + updateCurrent_);
+                if (fonts_.regular.measure(value, kRowPx) > maxValW) value = fonts_.regular.fit(value, kRowPx, maxValW);
                 Color color = !updateAvailable_.empty() && !updateChecking_ ? rgba(120, 220, 120) : focused ? kWhite : kGray;
                 int w = fonts_.regular.measure(value, kRowPx);
                 fonts_.regular.draw(c, value, vx - w, fonts_.regular.centeredY(r.y, r.h, kRowPx), kRowPx, color);
             } else if (i == 17 || i == 18 || i == 19 || i == 25) {
                 // Action items (Check sign-in, Network test, Support, Remove Trophies)
                 std::string label = (i == 17) ? tr(Str::RunCheck) : (i == 18) ? tr(Str::RunTest) : (i == 25) ? tr(Str::RemoveTrophiesConfirm) : tr(Str::SupportKoFi);
+                if (fonts_.regular.measure(label, kRowPx) > maxValW) label = fonts_.regular.fit(label, kRowPx, maxValW);
                 int w = fonts_.regular.measure(label, kRowPx);
                 fonts_.regular.draw(c, label, vx - w, fonts_.regular.centeredY(r.y, r.h, kRowPx), kRowPx,
                                     focused ? kWhite : kGray);
@@ -1323,6 +1341,7 @@ void AppUi::drawSettings(Canvas& c) {
                 if (loadingTotal_ > 0) {
                     value += " " + std::to_string(loadingDone_) + "/" + std::to_string(loadingTotal_);
                 }
+                if (fonts_.regular.measure(value, kRowPx) > maxValW - 28) value = fonts_.regular.fit(value, kRowPx, maxValW - 28);
                 int w = fonts_.regular.measure(value, kRowPx);
                 fonts_.regular.draw(c, value, vx - w, fonts_.regular.centeredY(r.y, r.h, kRowPx), kRowPx, rgba(120, 220, 120));
                 drawSpinner(c, vx - w - 20.0f, cy, 8, lastRender_);
@@ -1331,6 +1350,8 @@ void AppUi::drawSettings(Canvas& c) {
                 auto options = settingOptions(i);
                 int sel = settingSelected(i);
                 std::string value = sel < static_cast<int>(options.size()) ? options[static_cast<size_t>(sel)] : "";
+                int valBudget = (i == 6 && settings_.lightBarMode == 1) ? (maxValW - 36) : maxValW;
+                if (fonts_.regular.measure(value, kRowPx) > valBudget) value = fonts_.regular.fit(value, kRowPx, valBudget);
                 int w = fonts_.regular.measure(value, kRowPx);
                 fonts_.regular.draw(c, value, vx - w, fonts_.regular.centeredY(r.y, r.h, kRowPx), kRowPx, focused ? kWhite : kGray);
                 if (i == 6 && settings_.lightBarMode == 1) {  // the colour chosen
@@ -1371,15 +1392,18 @@ void AppUi::drawSettings(Canvas& c) {
         Str::SettingDescRemoveTrophies,
         Str::SettingDescFpsLimit,
         Str::SettingDescStoreCountry,
+        Str::SettingDescUiScale,
     };
     if (settingsRow_ >= 0 && settingsRow_ < kSettingRows) {
         const char* desc = tr(kSettingDescs[settingsRow_]);
-        auto lines = fonts_.regular.wrap(desc, 22, kRowW - 40, 2);
+        const int descMaxW = settings_.uiScale > 0 ? (kRowW - 20) : (kRowW - 40);
+        auto lines = fonts_.regular.wrap(desc, 22, descMaxW, 2);
         const int hintBaseline = kH - 64;
-        int dy = (lines.size() > 1) ? (hintBaseline - 26) : hintBaseline;
+        const int descStep = fonts_.scaleMetric(26);
+        int dy = (lines.size() > 1) ? (hintBaseline - descStep) : hintBaseline;
         for (const auto& line : lines) {
             fonts_.regular.draw(c, line, kMargin, dy, 22, kDim);
-            dy += 26;
+            dy += descStep;
         }
     }
 
@@ -1391,15 +1415,17 @@ void AppUi::drawSettings(Canvas& c) {
         c.strokeRect(panel, rgba(255, 255, 255, 30), 1, 16);
 
         int py = panel.y + 30;
-        int titleW = fonts_.bold.measure(tr(Str::WebControlTitle), 28);
-        fonts_.bold.draw(c, tr(Str::WebControlTitle), panel.x + (panel.w - titleW) / 2, py, 28, kWhite);
-        py += 40;
+        std::string webTitle = fonts_.bold.fit(tr(Str::WebControlTitle), 28, panel.w - 32);
+        int titleW = fonts_.bold.measure(webTitle, 28);
+        fonts_.bold.draw(c, webTitle, panel.x + (panel.w - titleW) / 2, py, 28, kWhite);
+        py += fonts_.scaleMetric(40);
 
         auto descLines = fonts_.regular.wrap(tr(Str::WebControlDesc), 17, panel.w - 56, 5);
+        const int descLineStep = fonts_.scaleMetric(22);
         for (const auto& l : descLines) {
             int lw = fonts_.regular.measure(l, 17);
             fonts_.regular.draw(c, l, panel.x + (panel.w - lw) / 2, py, 17, kGray);
-            py += 22;
+            py += descLineStep;
         }
 
         uint8_t qrBuf[qrcodegen_BUFFER_LEN_MAX], tmpBuf[qrcodegen_BUFFER_LEN_MAX];
@@ -1422,8 +1448,9 @@ void AppUi::drawSettings(Canvas& c) {
         c.fillRect(pill, rgba(0, 0, 0, 70), 12);
         c.strokeRect(pill, rgba(255, 255, 255, 30), 1, 12);
 
-        int urlW = fonts_.semibold.measure(qrUrl, 20);
-        fonts_.semibold.draw(c, qrUrl, pill.x + (pill.w - urlW) / 2, fonts_.semibold.centeredY(pill.y, pill.h, 20), 20, rgba(140, 230, 160));
+        std::string urlDisp = fonts_.semibold.fit(qrUrl, 20, pill.w - 24);
+        int urlW = fonts_.semibold.measure(urlDisp, 20);
+        fonts_.semibold.draw(c, urlDisp, pill.x + (pill.w - urlW) / 2, fonts_.semibold.centeredY(pill.y, pill.h, 20), 20, rgba(140, 230, 160));
     }
 
     if (s_gyroCalModalOpen) {
@@ -1485,9 +1512,11 @@ void AppUi::drawSettings(Canvas& c) {
             Color text = on ? kBg : (i == sel ? kWhite : kGray);
             if (settingsRow_ == 5)
                 drawFaceButton(c, fonts_.bold, i == 1 ? kIconCircle : kIconCross, item.x + 44.0f, item.y + item.h / 2.0f, 20);
-            else
-                fonts_.semibold.draw(c, options[static_cast<size_t>(i)], item.x + 24,
-                                     fonts_.semibold.centeredY(item.y, item.h, 26), 26, text);
+            else {
+                int maxOptW = item.w - (settingsRow_ == 6 && i == 1 ? 120 : 72);
+                fonts_.semibold.drawTruncated(c, options[static_cast<size_t>(i)], item.x + 24,
+                                              fonts_.semibold.centeredY(item.y, item.h, 26), 26, maxOptW, text);
+            }
             if (settingsRow_ == 6 && i == 1)
                 c.fillCircle(item.x + item.w - 84.0f, item.y + item.h / 2.0f, 12, settings_.lightBarColour);
             if (i == sel) {  // a check mark on the current choice
@@ -1540,7 +1569,7 @@ Rect AppUi::drawModal(Canvas& c, int w, int h, const std::string& title, int yOf
         const int titlePx = (w <= 1000) ? 28 : 40;
         const int titleY = (w <= 1000) ? panel.y + 24 : panel.y + 44;
         const int titleX = (w <= 1000) ? panel.x + 36 : panel.x + 56;
-        fonts_.bold.draw(c, title, titleX, titleY, titlePx, kWhite);
+        fonts_.bold.drawTruncated(c, title, titleX, titleY, titlePx, w - 2 * (titleX - panel.x), kWhite);
     }
     c.fillRect({0, kH - 80, kW, 80}, kBg);  // Settings' hints, under the panel's
     drawHints(c, {{kIconCross, tr(Str::Select)}, {kIconCircle, tr(Str::Back)}});
@@ -1615,8 +1644,10 @@ void AppUi::drawTriggerTester(Canvas& c) {
         bool on = i == testerRow_;
         c.fillRect(r, on ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 16);
         if (on) c.strokeRect({r.x - 5, r.y - 5, r.w + 10, r.h + 10}, kWhite, 3, 20);
-        fonts_.semibold.draw(c, labels[i], r.x + 36, fonts_.semibold.centeredY(r.y, r.h, 30), 30, kWhite);
+        int lblEnd = fonts_.semibold.drawTruncated(c, labels[i], r.x + 36, fonts_.semibold.centeredY(r.y, r.h, 30), 30, r.w / 2 + 60, kWhite);
         std::string v = "\xE2\x80\xB9  " + values[i] + "  \xE2\x80\xBA";  // ‹ value ›
+        int maxValW = std::max(80, r.x + r.w - 36 - lblEnd - 20);
+        if (fonts_.regular.measure(v, 30) > maxValW) v = fonts_.regular.fit(v, 30, maxValW);
         int w = fonts_.regular.measure(v, 30);
         fonts_.regular.draw(c, v, r.x + r.w - 36 - w, fonts_.regular.centeredY(r.y, r.h, 30), 30, on ? kWhite : kGray);
     }
@@ -1663,8 +1694,9 @@ void AppUi::drawPadTester(Canvas& c) {
             c.fillRect(trRect, active ? rgba(255, 255, 255, 40) : rgba(255, 255, 255, 14), 12);
             if (active) c.strokeRect(trRect, kWhite, 2, 12);
             const char* tabLabel = t == 0 ? tr(Str::ControllerButtons) : tr(Str::TouchpadShortcuts);
-            int tw = fonts_.semibold.measure(tabLabel, 20);
-            fonts_.semibold.draw(c, tabLabel, trRect.x + (trRect.w - tw) / 2,
+            std::string tabText = fonts_.semibold.fit(tabLabel, 20, trRect.w - 16);
+            int tw = fonts_.semibold.measure(tabText, 20);
+            fonts_.semibold.draw(c, tabText, trRect.x + (trRect.w - tw) / 2,
                                  fonts_.semibold.centeredY(trRect.y, trRect.h, 20), 20, active ? kWhite : kGray);
         }
 
@@ -1903,9 +1935,9 @@ void AppUi::drawSignInCheck(Canvas& c, uint64_t nowMs) {
             c.line(cx - 5, cy + 5, cx + 5, cy - 5, 2.5f, kWhite);
         }
         int ty = fonts_.semibold.centeredY(r.y, r.h, 24);
-        fonts_.semibold.draw(c, st.name, r.x + 70, ty, 24, kWhite);
+        int nameEnd = fonts_.semibold.drawTruncated(c, st.name, r.x + 70, ty, 24, r.w / 2 + 120, kWhite);
         if (!st.detail.empty()) {
-            int maxW = r.w - 380;
+            int maxW = std::max(80, r.x + r.w - 28 - nameEnd - 24);
             std::string det = fonts_.regular.fit(st.detail, 22, maxW);
             int dw = fonts_.regular.measure(det, 22);
             Color detCol = st.pending ? kDim : (st.ok ? kGray : rgba(255, 130, 130));
@@ -1986,8 +2018,9 @@ void AppUi::drawDonationModal(Canvas& c) {
     // Left column: message and link vertically centered aligned with QR code
     int textW = 600;
     int textX = panel.x + 60;
-    auto lines = fonts_.regular.wrap(tr(Str::SupportMessage), 26, textW, 10);
-    constexpr int kLineH = 38;
+    const int maxSupportLines = settings_.uiScale >= 2 ? 7 : (settings_.uiScale == 1 ? 8 : 10);
+    auto lines = fonts_.regular.wrap(tr(Str::SupportMessage), 26, textW, maxSupportLines);
+    const int kLineH = fonts_.scaleMetric(38);
     int textContentH = static_cast<int>(lines.size()) * kLineH + 24 + 26;
     int textY = centerY - textContentH / 2;
 
@@ -2009,14 +2042,15 @@ void AppUi::drawTrophyDisclaimerModal(Canvas& c) {
     int textW = panel.w - 112;
     int textX = panel.x + 56;
     int textY = panel.y + 110;
-    auto lines = fonts_.regular.wrap(tr(Str::TrophiesDisclaimerBody), 24, textW, 8);
-    constexpr int kLineH = 34;
+    const int maxLines = settings_.uiScale >= 2 ? 6 : (settings_.uiScale == 1 ? 7 : 8);
+    auto lines = fonts_.regular.wrap(tr(Str::TrophiesDisclaimerBody), 24, textW, maxLines);
+    const int kLineH = fonts_.scaleMetric(34);
     for (const auto& line : lines) {
         fonts_.regular.draw(c, line, textX, textY, 24, rgba(230, 230, 230));
         textY += kLineH;
     }
 
-    constexpr int kBtnW = 260, kBtnH = 58, kBtnGap = 40;
+    constexpr int kBtnW = 300, kBtnH = 58, kBtnGap = 40;
     int totalBtnsW = 2 * kBtnW + kBtnGap;
     int btnStartX = panel.x + (panel.w - totalBtnsW) / 2;
     int btnY = panel.y + panel.h - 90;
@@ -2035,10 +2069,11 @@ void AppUi::drawTrophyDisclaimerModal(Canvas& c) {
         }
 
         const char* label = (b == 0) ? tr(Str::TrophiesDisclaimerAware) : tr(Str::TrophiesDisclaimerCancel);
-        int tw = fonts_.bold.measure(label, 24);
+        std::string btnText = fonts_.bold.fit(label, 24, btnRect.w - 20);
+        int tw = fonts_.bold.measure(btnText, 24);
         int tx = btnRect.x + (btnRect.w - tw) / 2;
         int ty = fonts_.bold.centeredY(btnRect.y, btnRect.h, 24);
-        fonts_.bold.draw(c, label, tx, ty, 24, kWhite);
+        fonts_.bold.draw(c, btnText, tx, ty, 24, kWhite);
     }
 
     c.fillRect({0, kH - 80, kW, 80}, kBg);
@@ -2051,14 +2086,15 @@ void AppUi::drawRemoveTrophiesConfirmModal(Canvas& c) {
     int textW = panel.w - 112;
     int textX = panel.x + 56;
     int textY = panel.y + 110;
-    auto lines = fonts_.regular.wrap(tr(Str::RemoveTrophiesConfirmBody), 24, textW, 8);
-    constexpr int kLineH = 34;
+    const int maxLines = settings_.uiScale >= 2 ? 5 : (settings_.uiScale == 1 ? 6 : 8);
+    auto lines = fonts_.regular.wrap(tr(Str::RemoveTrophiesConfirmBody), 24, textW, maxLines);
+    const int kLineH = fonts_.scaleMetric(34);
     for (const auto& line : lines) {
         fonts_.regular.draw(c, line, textX, textY, 24, rgba(230, 230, 230));
         textY += kLineH;
     }
 
-    constexpr int kBtnW = 260, kBtnH = 58, kBtnGap = 40;
+    constexpr int kBtnW = 300, kBtnH = 58, kBtnGap = 40;
     int totalBtnsW = 2 * kBtnW + kBtnGap;
     int btnStartX = panel.x + (panel.w - totalBtnsW) / 2;
     int btnY = panel.y + panel.h - 90;
@@ -2077,10 +2113,11 @@ void AppUi::drawRemoveTrophiesConfirmModal(Canvas& c) {
         }
 
         const char* label = (b == 0) ? tr(Str::RemoveTrophiesConfirm) : tr(Str::TrophiesDisclaimerCancel);
-        int tw = fonts_.bold.measure(label, 24);
+        std::string btnText = fonts_.bold.fit(label, 24, btnRect.w - 20);
+        int tw = fonts_.bold.measure(btnText, 24);
         int tx = btnRect.x + (btnRect.w - tw) / 2;
         int ty = fonts_.bold.centeredY(btnRect.y, btnRect.h, 24);
-        fonts_.bold.draw(c, label, tx, ty, 24, kWhite);
+        fonts_.bold.draw(c, btnText, tx, ty, 24, kWhite);
     }
 
     c.fillRect({0, kH - 80, kW, 80}, kBg);
@@ -2130,8 +2167,9 @@ void AppUi::drawKeysTester(Canvas& c) {
             std::string text = on && capturing ? "..." : code ? input::keyName(code) : "\xE2\x80\x94";  // an em dash: none
             c.fillRect(chip, on ? kWhite : rgba(255, 255, 255, code ? 26 : 10), 10);
             if (on && capturing) c.strokeRect({chip.x - 4, chip.y - 4, chip.w + 8, chip.h + 8}, rgba(90, 220, 110), 3, 13);
-            int tw = fonts_.semibold.measure(text, 22);
-            fonts_.semibold.draw(c, text, chip.x + (chip.w - tw) / 2, fonts_.semibold.centeredY(chip.y, chip.h, 22), 22,
+            std::string fitKey = fonts_.semibold.fit(text, 22, chip.w - 16);
+            int tw = fonts_.semibold.measure(fitKey, 22);
+            fonts_.semibold.draw(c, fitKey, chip.x + (chip.w - tw) / 2, fonts_.semibold.centeredY(chip.y, chip.h, 22), 22,
                                  on ? kBg : code ? kWhite : kDim);
         }
     }
@@ -2340,7 +2378,8 @@ void AppUi::drawGameSettings(Canvas& c) {
         }
     }
     constexpr int kModalW = 1140, kModalH = 960;
-    constexpr int kRowH = 38, kGap = 4, kGroupGap = 7;
+    const int kRowH = gameSettingsRowH(settings_.uiScale);
+    constexpr int kGap = 4, kGroupGap = 7;
     // The rows caps_ allows; the panel loses the height of those it hides
     // (the same as ever with all of them, "Reset to default" or not).
     const auto rows = visibleGameSettingsRows(caps_, activeGameHasCustom_, activeGameMouseSupported_);
@@ -2348,9 +2387,10 @@ void AppUi::drawGameSettings(Canvas& c) {
     auto groups = [](const std::vector<SettingsRowPos>& v) {
         return static_cast<int>(std::count_if(v.begin(), v.end(), [](const SettingsRowPos& r) { return r.groupStart; }));
     };
-    const int modalH = kModalH - static_cast<int>(all.size() - most.size()) * (kRowH + kGap) -
-                       (groups(all) - groups(most)) * kGroupGap;
-    Rect panel = drawModal(c, kModalW, modalH, title);
+    const int baseModalH = settings_.uiScale > 0
+        ? std::min(970, 112 + static_cast<int>(most.size()) * (kRowH + kGap) + groups(most) * kGroupGap)
+        : (kModalH - static_cast<int>(all.size() - most.size()) * (kRowH + kGap) - (groups(all) - groups(most)) * kGroupGap);
+    Rect panel = drawModal(c, kModalW, baseModalH, title);
     int y = panel.y + 92;
 
     for (int pos = 0; pos < static_cast<int>(rows.size()); ++pos) {
@@ -2487,7 +2527,7 @@ void AppUi::drawGameSettings(Canvas& c) {
         default: break;
         }
 
-        fonts_.semibold.draw(c, label, r.x + 28, ty, 26, kWhite);
+        int labelEnd = fonts_.semibold.drawTruncated(c, label, r.x + 28, ty, 26, r.w / 2 + 80, kWhite);
 
         if (i == 7) {
             float cx = static_cast<float>(r.x + r.w - 50), cy = static_cast<float>(r.y + r.h / 2);
@@ -2526,7 +2566,9 @@ void AppUi::drawGameSettings(Canvas& c) {
                 c.line(acx - 2.0f, acy - 4.0f, acx + 2.5f, acy, 2.0f, arrowCol);
                 c.line(acx + 2.5f, acy, acx - 2.0f, acy + 4.0f, 2.0f, arrowCol);
             }
+            int maxValW = std::max(80, valueRight - labelEnd - 24);
             std::string disp = (focused && canCycle) ? ("\xE2\x80\xB9  " + value + "  \xE2\x80\xBA") : value;
+            if (fonts_.regular.measure(disp, 26) > maxValW) disp = fonts_.regular.fit(disp, 26, maxValW);
             int vw = fonts_.regular.measure(disp, 26);
             fonts_.regular.draw(c, disp, valueRight - vw, fonts_.regular.centeredY(r.y, r.h, 26), 26,
                                 focused ? kWhite : kGray);

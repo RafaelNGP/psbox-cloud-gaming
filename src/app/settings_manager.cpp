@@ -500,6 +500,16 @@ bool SettingsManager::updateFromJson(const json::Value& root, bool fromWebUi) {
                 ev.affectsUi = true;
             }
         }
+        if (root.has("uiScale") || root.has("ui_scale")) {
+            const json::Value& rawScale = root.has("uiScale") ? root["uiScale"] : root["ui_scale"];
+            int v = parseUiScale(rawScale, settings_.uiScale);
+            if (v != settings_.uiScale) {
+                settings_.uiScale = v;
+                changed = true;
+                ev.affectsUi = true;
+                ev.affectsDisplay = true;
+            }
+        }
         if (root.has("padMap")) {
             input::PadMap newPad;
             if (input::readPadMap(root["padMap"], newPad)) {

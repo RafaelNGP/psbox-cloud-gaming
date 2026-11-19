@@ -589,4 +589,9 @@ constexpr Column kSpanish = {
     "Guardar",                                                                        // Save
     "Abrir navegador para iniciar sesión",                                            // SignInOpenBrowser
     "Toca aquí o presiona A para abrir en el navegador",                              // SignInOpenBrowserHint
+    "Tamaño de texto e interfaz",                                                     // UiScale
+    "Normal (100%)",                                                                  // UiScaleNormal
+    "Grande (115%)",                                                                  // UiScaleLarge
+    "Muy Grande (130%)",                                                              // UiScaleExtraLarge
+    "Aumenta el tamaño de los textos, menús y filas para facilitar la lectura en televisores, portátiles y móviles.", // SettingDescUiScale
 };

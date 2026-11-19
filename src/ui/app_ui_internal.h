@@ -67,9 +67,9 @@ constexpr int kResolutionOrder[3] = {1, 0, 2};
 // stream (resolution, a desktop's display mode, 120 Hz, bitrate, region, network test);
 // the controller, keyboard and queue-ready alert; support and updates last. A group starts at each
 // kSettingsGroupStart.
-constexpr int kSettingsCount = 27;
-constexpr int kSettingsOrder[kSettingsCount] = {0, 2, 8, 27, 17, 18, 24, 25, 1, 20, 13, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23};
-constexpr bool kSettingsGroupStart[kSettingsCount] = {false, false, false, false, false, false, false, false, true, false, false, false, false, false,
+constexpr int kSettingsCount = 28;
+constexpr int kSettingsOrder[kSettingsCount] = {0, 28, 2, 8, 27, 17, 18, 24, 25, 1, 20, 13, 9, 26, 10, 14, 12, 3, 15, 4, 21, 5, 6, 16, 22, 19, 7, 23};
+constexpr bool kSettingsGroupStart[kSettingsCount] = {false, false, false, false, false, false, false, false, false, true, false, false, false, false, false,
                                                       true, false, false, false, false, false, false, false, false, false, true, false, true};
 // The game settings' rows on screen (ids: 0 profile, 1 upscaler, 2
 // sharpness, 3 block smoothing, 4 resolution, 5 dead zone, 6 triggers, 7
@@ -92,18 +92,47 @@ constexpr int kSettingsRowW = 1140, kSettingsRowH = 30, kSettingsGap = 1, kSetti
 constexpr int kSettingsListTop = 188, kSettingsClipTop = 180;
 #endif
 
-inline int settingsTotalHeight(const UiCaps& caps) {
+inline int settingsRowH(int scaleChoice = 0) {
+    if (scaleChoice <= 0) return kSettingsRowH;
+    float f = app::uiScaleFactor(scaleChoice);
+    return static_cast<int>(std::lround(static_cast<float>(kSettingsRowH) * f));
+}
+
+inline int settingsGap(int scaleChoice = 0) {
+    if (scaleChoice <= 0) return kSettingsGap;
+    return kSettingsGap + std::clamp(scaleChoice, 1, 2);
+}
+
+inline int settingsGroupGap(int scaleChoice = 0) {
+    if (scaleChoice <= 0) return kSettingsGroupGap;
+    float f = scaleChoice >= 2 ? 1.50f : 1.25f;
+    return static_cast<int>(std::lround(static_cast<float>(kSettingsGroupGap) * f));
+}
+
+inline int gameSettingsRowH(int scaleChoice = 0) {
+    if (scaleChoice <= 0) return 38;
+    return scaleChoice >= 2 ? 42 : 40;
+}
+
+inline int settingsClipBottom(int scaleChoice = 0) {
+    return kH - (scaleChoice >= 2 ? 118 : (scaleChoice == 1 ? 104 : 80));
+}
+
+inline int settingsTotalHeight(const UiCaps& caps, int scaleChoice = 0) {
     int totalH = 0;
+    const int rowH = settingsRowH(scaleChoice);
+    const int gap = settingsGap(scaleChoice);
+    const int groupGap = settingsGroupGap(scaleChoice);
     for (const auto& [i, groupStart] : visibleSettingsRows(caps)) {
-        if (groupStart) totalH += kSettingsGroupGap;
-        totalH += kSettingsRowH + kSettingsGap;
+        if (groupStart) totalH += groupGap;
+        totalH += rowH + gap;
     }
     return totalH;
 }
 
-inline float settingsMaxScroll(const UiCaps& caps) {
-    const float viewportH = static_cast<float>(kH - kSettingsListTop - 80);
-    return std::max(0.0f, static_cast<float>(settingsTotalHeight(caps)) - viewportH);
+inline float settingsMaxScroll(const UiCaps& caps, int scaleChoice = 0) {
+    const float viewportH = static_cast<float>(settingsClipBottom(scaleChoice) - kSettingsListTop);
+    return std::max(0.0f, static_cast<float>(settingsTotalHeight(caps, scaleChoice)) - viewportH);
 }
 
 // The rows of `order` that `shown` keeps. A group starts on screen where the

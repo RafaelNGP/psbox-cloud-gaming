@@ -109,6 +109,14 @@ void mergePads(ControllerState& pad, const ControllerState& e) {
     further(pad.rawRightY, e.rawRightY);
     pad.triggerL2 = std::max(pad.triggerL2, e.triggerL2);
     pad.triggerR2 = std::max(pad.triggerR2, e.triggerR2);
+    if (!pad.touching && e.touching) {
+        pad.touching = true;
+        pad.touchSecond = e.touchSecond;
+        pad.touchX = e.touchX;
+        pad.touchY = e.touchY;
+    } else if (pad.touching && e.touching) {
+        pad.touchSecond |= e.touchSecond;
+    }
 }
 
 void keyboardToPad(const std::vector<uint8_t>& held, ControllerState& pad) {

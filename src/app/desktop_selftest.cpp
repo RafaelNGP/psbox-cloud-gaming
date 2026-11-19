@@ -216,6 +216,25 @@ int desktopSelftest(const std::string& dir) {
     ui.render(canvas, platform::nowMs());
     drawCanvas(canvas);
     check(screenshot(dir, "2e-settings-all-rows.png", shot) && varied(shot), "Settings with every row (2e-settings-all-rows.png)");
+    {
+        const std::vector<uint8_t> normalRgb = shot.rgb;
+        ui::SettingsChoice sc = ui.settings();
+        sc.uiScale = 1;  // Large (115%)
+        ui.setSettings(sc);
+        ui.render(canvas, platform::nowMs());
+        drawCanvas(canvas);
+        check(screenshot(dir, "2f-settings-scale-large.png", shot) && varied(shot) && shot.rgb != normalRgb,
+              "Settings at Large scale 115% (2f-settings-scale-large.png)");
+        const std::vector<uint8_t> largeRgb = shot.rgb;
+        sc.uiScale = 2;  // Extra Large (130%)
+        ui.setSettings(sc);
+        ui.render(canvas, platform::nowMs());
+        drawCanvas(canvas);
+        check(screenshot(dir, "2g-settings-scale-xl.png", shot) && varied(shot) && shot.rgb != largeRgb,
+              "Settings at Extra Large scale 130% (2g-settings-scale-xl.png)");
+        sc.uiScale = 0;  // Restore Normal (100%)
+        ui.setSettings(sc);
+    }
     ui.setCaps(caps);
     // The same with an Xbox pad's glyphs (A / B, Menu, View...).
     {

@@ -589,4 +589,9 @@ constexpr Column kGerman = {
     "Speichern",                                                                      // Save
     "Browser zum Anmelden öffnen",                                                    // SignInOpenBrowser
     "Hier tippen oder A drücken, um im Browser zu öffnen",                            // SignInOpenBrowserHint
+    "Text- und Oberflächengröße",                                                     // UiScale
+    "Normal (100%)",                                                                  // UiScaleNormal
+    "Groß (115%)",                                                                    // UiScaleLarge
+    "Sehr groß (130%)",                                                               // UiScaleExtraLarge
+    "Vergrößert Menüs, Texte und Zeilen für bessere Lesbarkeit auf Fernsehern, Handhelds und Smartphones.", // SettingDescUiScale
 };

@@ -589,4 +589,9 @@ constexpr Column kItalian = {
     "Salva",                                                                          // Save
     "Apri il browser per accedere",                                                   // SignInOpenBrowser
     "Tocca qui o premi A per aprire nel browser",                                     // SignInOpenBrowserHint
+    "Dimensione testo e interfaccia",                                                 // UiScale
+    "Normale (100%)",                                                                 // UiScaleNormal
+    "Grande (115%)",                                                                  // UiScaleLarge
+    "Molto grande (130%)",                                                            // UiScaleExtraLarge
+    "Ingrandisce menu, testi e righe per facilitare la lettura su TV, console portatili e smartphone.", // SettingDescUiScale
 };

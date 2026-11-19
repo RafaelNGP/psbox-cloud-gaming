@@ -65,9 +65,9 @@ void TelemetryOverlay::drawTwoColumnStats(Canvas& c, const Fonts& fonts, int x, 
 
     auto drawRow = [&](int rx, int ry, int rw, Str labelKey, const std::string& val) {
         const char* label = tr(labelKey);
-        fonts.regular.draw(c, label, rx, ry, 16, kGray);
         int vw = fonts.semibold.measure(val, 16);
         fonts.semibold.draw(c, val, rx + rw - vw, ry, 16, kWhite);
+        fonts.regular.drawTruncated(c, label, rx, ry, 16, std::max(40, rw - vw - 8), kGray);
     };
 
     // Column 1: Region, Latency, Bitrate, Framerate/Resolution
@@ -158,7 +158,8 @@ void TelemetryOverlay::drawSparkline(Canvas& c, int x, int y, int w, int h) cons
 
 Canvas TelemetryOverlay::renderWarningPill(const Fonts& fonts) const {
     const char* text = tr(Str::ConnectionUnstable);
-    constexpr int kPx = 20, kH = 36, kDot = 6;
+    constexpr int kPx = 20, kDot = 6;
+    const int kH = fonts.scaleMetric(36);
     int w = fonts.semibold.measure(text, kPx) + 28 + 2 * kDot + 10;
     Canvas c(w, kH);
     c.clear(kPanel);
@@ -171,7 +172,8 @@ void TelemetryOverlay::drawWarningPill(Canvas& c, const Fonts& fonts, int x, int
     (void)w;
     (void)h;
     const char* text = tr(Str::ConnectionUnstable);
-    constexpr int kPx = 20, pillH = 36, kDot = 6;
+    constexpr int kPx = 20, kDot = 6;
+    const int pillH = fonts.scaleMetric(36);
     int pillW = fonts.semibold.measure(text, kPx) + 28 + 2 * kDot + 10;
     c.fillRect({x, y, pillW, pillH}, kPanel, 12);
     c.fillCircle(static_cast<float>(x + 14 + kDot), static_cast<float>(y + pillH / 2), static_cast<float>(kDot), kWarnColor);
@@ -221,14 +223,15 @@ Canvas TelemetryOverlay::renderHud(const Fonts& fonts, const StreamInfo& info, b
     w = std::max(w, 200);
 
     bool showGraph = (statsMask_ & StatsGraph) != 0;
-    int kH = showGraph ? 62 : 36;
+    const int kH = showGraph ? fonts.scaleMetric(62) : fonts.scaleMetric(36);
     Canvas c(w, kH);
     c.clear(kPanel);
     if (!text.empty()) fonts.semibold.draw(c, text, 14, 8, kPx, kWhite);
     if (!warn.empty()) fonts.semibold.draw(c, warn, 14 + tw, 8, kPx, kWarnColor);
 
     if (showGraph) {
-        drawSparkline(c, 14, 32, w - 28, 22);
+        const int graphY = fonts.scaleMetric(32);
+        drawSparkline(c, 14, graphY, w - 28, std::max(14, kH - graphY - 8));
     }
     return c;
 }

@@ -589,4 +589,9 @@ constexpr Column kFrench = {
     "Enregistrer",                                                                    // Save
     "Ouvrir le navigateur pour se connecter",                                         // SignInOpenBrowser
     "Touchez ici ou appuyez sur A pour ouvrir dans le navigateur",                    // SignInOpenBrowserHint
+    "Taille du texte et de l'interface",                                              // UiScale
+    "Normal (100%)",                                                                  // UiScaleNormal
+    "Grand (115%)",                                                                   // UiScaleLarge
+    "Très grand (130%)",                                                              // UiScaleExtraLarge
+    "Agrandit les menus, les textes et les lignes pour faciliter la lecture sur téléviseurs, consoles portables et mobiles.", // SettingDescUiScale
 };

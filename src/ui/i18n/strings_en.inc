@@ -589,4 +589,9 @@ constexpr Column kEnglish = {
     "Save",                                                                           // Save
     "Open browser to sign in",                                                        // SignInOpenBrowser
     "Tap here or press A to open in browser",                                         // SignInOpenBrowserHint
+    "Interface & text size",                                                          // UiScale
+    "Normal (100%)",                                                                  // UiScaleNormal
+    "Large (115%)",                                                                   // UiScaleLarge
+    "Extra Large (130%)",                                                             // UiScaleExtraLarge
+    "Scales menus, text and list rows for easier reading on TVs, handhelds and phones.", // SettingDescUiScale
 };
