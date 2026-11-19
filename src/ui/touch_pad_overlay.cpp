@@ -578,13 +578,6 @@ void TouchPadOverlay::update(uint64_t nowMs, bool physicalPadConnected, bool phy
     }
 
     // Auto-hide mode (0):
-    if (!platform::hasTouchscreen()) {
-        if (currentOpacity_ > 0.0f) {
-            currentOpacity_ = 0.0f;
-            markDirty();
-        }
-        return;
-    }
     if (physicalInputMs > 0) {
         if (physicalInputMs > lastPhysicalInputMs_) {
             lastPhysicalInputMs_ = physicalInputMs;

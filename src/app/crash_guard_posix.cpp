@@ -201,7 +201,14 @@ void setStage(const char* stage) {
     std::memcpy(g_stage, tmp, sizeof tmp);
 }
 
+static std::atomic<bool> g_suspended{false};
+
 void heartbeat() { g_beat = platform::nowMs(); }
+
+void setSuspended(bool suspended) {
+    g_suspended.store(suspended, std::memory_order_relaxed);
+    if (!suspended) heartbeat();
+}
 
 void startWatchdog(uint32_t stallMs) {
     heartbeat();
@@ -219,6 +226,10 @@ void startWatchdog(uint32_t stallMs) {
                 continue;
             }
             last = now;
+            if (g_suspended.load(std::memory_order_relaxed)) {
+                heartbeat();
+                continue;
+            }
             uint64_t beat = g_beat.load();
             uint64_t idle = now > beat ? now - beat : 0;
             if (!stalled && idle > stallMs) {

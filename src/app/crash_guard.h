@@ -21,6 +21,9 @@ void setStage(const char* stage);
 // marker after `stallMs` without a heartbeat, and removes it if the loop
 // comes back (a long hang, not a crash).
 void heartbeat();
+// Pause stall detection while the app is legitimately suspended in the background
+// (e.g. Android Activity paused with SDL_HINT_ANDROID_BLOCK_ON_PAUSE=1).
+void setSuspended(bool suspended);
 void startWatchdog(uint32_t stallMs);
 
 struct Previous {

@@ -11,6 +11,7 @@
 #include "app/shell.h"
 
 #include "app/app_core.h"
+#include "app/crash_guard.h"
 #include "display/display.h"
 #include "display/display_sdl.h"
 #include "input/input_ext.h"
@@ -96,6 +97,7 @@ bool pumpEvents() {
             display::sdlRepaint();
             break;
         case SDL_EVENT_WILL_ENTER_BACKGROUND:
+            app::crash::setSuspended(true);
             display::sdlSetSuspended(true);
             media::audioPause();
             break;
@@ -105,6 +107,7 @@ bool pumpEvents() {
         case SDL_EVENT_WILL_ENTER_FOREGROUND:
             break;
         case SDL_EVENT_DID_ENTER_FOREGROUND:
+            app::crash::setSuspended(false);
             display::sdlSetSuspended(false);
             media::audioResume();
             app::onEnteredForeground();

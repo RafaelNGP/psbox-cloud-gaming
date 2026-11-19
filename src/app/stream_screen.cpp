@@ -201,7 +201,11 @@ void StreamScreen::syncFromSettings() {
         g_player->setMicMuted(!g_settings.micEnabled);
         menu_.setMicMuted(!g_settings.micEnabled || g_player->isMicHardwareMuted());
     }
-    touchOverlay_.setSettings(g_settings);
+    if (platform::hasTouchscreen()) {
+        touchOverlay_.setSettings(g_settings);
+    } else {
+        touchOverlay_.setVisible(false);
+    }
     overlaySeq_ = 0;
 }
 
@@ -378,9 +382,13 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             g_player->setMicGain(g_settings.micGainFactor());
             g_player->setMicMuted(!g_settings.micEnabled);
         }
-        menu_.setTouchOverlayEnabled(g_settings.touchOverlayMode != 2);
+        menu_.setTouchOverlayEnabled(platform::hasTouchscreen() && g_settings.touchOverlayMode != 2);
         menu_.setTouchInvertSticks(g_settings.touchInvertSticks);
-        touchOverlay_.setSettings(g_settings);
+        if (platform::hasTouchscreen()) {
+            touchOverlay_.setSettings(g_settings);
+        } else {
+            touchOverlay_.setVisible(false);
+        }
         overlaySeq_ = 0;
     }
     if (g_player) {
