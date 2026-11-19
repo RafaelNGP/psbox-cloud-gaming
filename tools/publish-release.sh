@@ -50,10 +50,12 @@ echo -e "${BOLD}${BLUE}  PSBox Cloud Gaming: Tri-Platform Release Publisher  ${N
 echo -e "${BOLD}${BLUE}  Target: $tag (PS5 + PS4 + Linux AppImage)            ${NC}"
 echo -e "${BOLD}${BLUE}======================================================${NC}"
 
-# Check release notes
-[[ -f "$root/notes.md" ]] || { echo -e "${RED}error: notes.md not found${NC}" >&2; exit 1; }
-grep -q "<!-- LANG:EN -->" "$root/notes.md" || { echo -e "${RED}error: notes.md missing <!-- LANG:EN -->${NC}" >&2; exit 1; }
-grep -q "<!-- LANG:PT -->" "$root/notes.md" || { echo -e "${RED}error: notes.md missing <!-- LANG:PT -->${NC}" >&2; exit 1; }
+# Check release notes (prefer docs/notes.md, fall back to notes.md)
+notes_file="$root/docs/notes.md"
+[[ -f "$notes_file" ]] || notes_file="$root/notes.md"
+[[ -f "$notes_file" ]] || { echo -e "${RED}error: docs/notes.md (or notes.md) not found${NC}" >&2; exit 1; }
+grep -q "<!-- LANG:EN -->" "$notes_file" || { echo -e "${RED}error: $notes_file missing <!-- LANG:EN -->${NC}" >&2; exit 1; }
+grep -q "<!-- LANG:PT -->" "$notes_file" || { echo -e "${RED}error: $notes_file missing <!-- LANG:PT -->${NC}" >&2; exit 1; }
 
 # Phase 1: Build & Package PS5 and PS4
 if [[ $skip_build -eq 0 ]]; then
@@ -115,10 +117,10 @@ gh release create "$tag" \
     "${initial_assets[@]}" \
     --target "$(git rev-parse HEAD)" \
     --title "PSBox Cloud Gaming $tag" \
-    --notes-file "$root/notes.md" 2>/dev/null || {
+    --notes-file "$notes_file" 2>/dev/null || {
     echo "Release $tag might already exist; updating assets..."
     gh release upload "$tag" "${initial_assets[@]}" --clobber
-    gh release edit "$tag" --notes-file "$root/notes.md"
+    gh release edit "$tag" --notes-file "$notes_file"
 }
 
 # Phase 4: Wait for Linux AppImage from GitHub Actions
