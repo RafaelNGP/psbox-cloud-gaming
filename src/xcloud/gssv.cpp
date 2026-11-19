@@ -351,9 +351,12 @@ bool GssvClient::listTitles(std::vector<Title>& out, std::string& err, bool rece
             err = "title list failed: " + describe(r);
             return false;
         }
+        std::string().swap(r.body);
         // Debugging: XC_DUMP_TITLES="ID1,ID2" prints those entries as sent.
         static const char* dump = std::getenv("XC_DUMP_TITLES");
-        for (const auto& t : (*j)["results"].items()) {
+        const auto& results = (*j)["results"].items();
+        out.reserve(out.size() + results.size());
+        for (const auto& t : results) {
             if (dump && ("," + std::string(dump) + ",").find("," + t["titleId"].str() + ",") != std::string::npos)
                 std::printf("%s\n", t.dump().c_str());
             Title title;

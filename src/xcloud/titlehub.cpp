@@ -4,6 +4,7 @@
 #include "xcloud/titlehub.h"
 
 #include "net/http.h"
+#include "platform/platform.h"
 #include "util/json.h"
 
 #include <algorithm>
@@ -47,6 +48,7 @@ bool fetchBatch(const std::string& auth, const std::vector<std::string>& ids, st
         return fetchBatch(auth, a, out, err, unknownLeft) && fetchBatch(auth, b, out, err, unknownLeft);
     }
     auto j = json::parse(r.body);
+    std::string().swap(r.body);
     if (!r.ok() || !j) {
         err = "titlehub: " + (r.status ? "HTTP " + std::to_string(r.status) : r.error);
         return false;
@@ -77,7 +79,7 @@ bool fetchBatch(const std::string& auth, const std::vector<std::string>& ids, st
 
 bool fetchPlatforms(const std::string& auth, const std::vector<std::string>& xboxTitleIds,
                     std::map<std::string, std::string>& out, std::string& err) {
-    constexpr size_t kBatch = 100;
+    const size_t kBatch = platform::isPS4() ? 50 : 100;
     for (size_t i = 0; i < xboxTitleIds.size(); i += kBatch) {
         std::vector<std::string> batch(xboxTitleIds.begin() + static_cast<long>(i),
                                        xboxTitleIds.begin() + static_cast<long>(std::min(xboxTitleIds.size(), i + kBatch)));

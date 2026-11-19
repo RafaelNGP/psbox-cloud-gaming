@@ -302,6 +302,11 @@ void AppUi::rebuild(bool keepPosition) {
     int oldOffset = gridFocus_ - oldStarts[oldSection];
     std::string oldRowTitle = focusRow_ < static_cast<int>(rows_.size()) ? rows_[static_cast<size_t>(focusRow_)].title : "";
     int oldCol = focusRow_ < static_cast<int>(focusCol_.size()) ? focusCol_[static_cast<size_t>(focusRow_)] : 0;
+    // Release previous filtered copies before allocating the new ones so peak RAM does not double.
+    std::vector<GameTile>().swap(owned_);
+    std::vector<GameTile>().swap(purchasable_);
+    std::vector<GameTile>().swap(hiddenTiles_);
+    std::vector<GameRow>().swap(rows_);
     auto visible = [&](const std::vector<GameTile>& in) {
         std::vector<GameTile> out;
         out.reserve(in.size());
@@ -394,8 +399,12 @@ void AppUi::rebuild(bool keepPosition) {
     sortByName(hiddenRow.tiles);
 
     std::vector<GameRow> rows;
+    rows.reserve(allRows_.size() + (hiddenRow.tiles.empty() ? 0 : 1));
     for (const auto& row : allRows_) {
-        GameRow r = row;
+        GameRow r;
+        r.title = row.title;
+        r.gamePassBadges = row.gamePassBadges;
+        r.isGrid = row.isGrid;
         r.tiles = visible(row.tiles);
         rows.push_back(std::move(r));
     }

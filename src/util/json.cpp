@@ -114,9 +114,12 @@ private:
     bool string(std::string& out) {
         ++pos_;  // opening quote
         while (pos_ < t_.size()) {
+            size_t runStart = pos_;
+            while (pos_ < t_.size() && t_[pos_] != '"' && t_[pos_] != '\\') ++pos_;
+            if (pos_ > runStart) out.append(t_.data() + runStart, pos_ - runStart);
+            if (pos_ >= t_.size()) break;
             char c = t_[pos_++];
             if (c == '"') return true;
-            if (c != '\\') { out += c; continue; }
             if (pos_ >= t_.size()) break;
             char e = t_[pos_++];
             switch (e) {
@@ -192,90 +195,115 @@ private:
 };
 }  // namespace
 
-const std::string& Value::asString() const { return isString() ? str_ : kEmpty; }
+const std::string& Value::asString() const { return isString() ? std::get<std::string>(data_) : kEmpty; }
 
 size_t Value::size() const {
-    if (isArray()) return arr_->size();
-    if (isObject()) return obj_->size();
+    if (isArray()) return std::get<std::shared_ptr<Array>>(data_)->size();
+    if (isObject()) return std::get<std::shared_ptr<Object>>(data_)->size();
     return 0;
 }
 
 const Value& Value::operator[](size_t i) const {
-    if (!isArray() || i >= arr_->size()) return kNull;
-    return (*arr_)[i];
+    if (!isArray()) return kNull;
+    const auto& arr = *std::get<std::shared_ptr<Array>>(data_);
+    return i >= arr.size() ? kNull : arr[i];
 }
 
 void Value::push(Value v) {
     if (!isArray()) { *this = array(); }
+    auto& arr = std::get<std::shared_ptr<Array>>(data_);
     // Copy-on-write: values share storage after copies.
-    if (arr_.use_count() > 1) arr_ = std::make_shared<Array>(*arr_);
-    arr_->push_back(std::move(v));
+    if (arr.use_count() > 1) arr = std::make_shared<Array>(*arr);
+    arr->push_back(std::move(v));
 }
 
-const Value::Array& Value::items() const { return isArray() ? *arr_ : kEmptyArray; }
+const Value::Array& Value::items() const {
+    return isArray() ? *std::get<std::shared_ptr<Array>>(data_) : kEmptyArray;
+}
 
 const Value& Value::operator[](std::string_view key) const {
     if (!isObject()) return kNull;
-    auto it = obj_->find(std::string(key));
-    return it == obj_->end() ? kNull : it->second;
+    const auto& obj = *std::get<std::shared_ptr<Object>>(data_);
+    auto it = obj.find(std::string(key));
+    return it == obj.end() ? kNull : it->second;
 }
 
 Value& Value::set(const std::string& key, Value v) {
     if (!isObject()) { *this = object(); }
-    if (obj_.use_count() > 1) obj_ = std::make_shared<Object>(*obj_);
-    (*obj_)[key] = std::move(v);
+    auto& obj = std::get<std::shared_ptr<Object>>(data_);
+    if (obj.use_count() > 1) obj = std::make_shared<Object>(*obj);
+    (*obj)[key] = std::move(v);
     return *this;
 }
 
 bool Value::has(std::string_view key) const {
-    return isObject() && obj_->count(std::string(key)) != 0;
+    return isObject() && std::get<std::shared_ptr<Object>>(data_)->count(std::string(key)) != 0;
 }
 
-const Value::Object& Value::members() const { return isObject() ? *obj_ : kEmptyObject; }
+const Value::Object& Value::members() const {
+    return isObject() ? *std::get<std::shared_ptr<Object>>(data_) : kEmptyObject;
+}
+
+void appendEscaped(std::string& out, std::string_view s) {
+    size_t runStart = 0;
+    for (size_t i = 0; i < s.size(); ++i) {
+        unsigned char c = static_cast<unsigned char>(s[i]);
+        const char* esc = nullptr;
+        switch (c) {
+            case '"': esc = "\\\""; break;
+            case '\\': esc = "\\\\"; break;
+            case '\n': esc = "\\n"; break;
+            case '\r': esc = "\\r"; break;
+            case '\t': esc = "\\t"; break;
+            case '\b': esc = "\\b"; break;
+            case '\f': esc = "\\f"; break;
+            default:
+                if (c >= 0x20) continue;
+                break;
+        }
+        if (i > runStart) out.append(s.data() + runStart, i - runStart);
+        if (esc) {
+            out += esc;
+        } else {
+            char buf[8];
+            std::snprintf(buf, sizeof buf, "\\u%04x", c);
+            out += buf;
+        }
+        runStart = i + 1;
+    }
+    if (runStart < s.size()) out.append(s.data() + runStart, s.size() - runStart);
+}
 
 std::string escape(std::string_view s) {
     std::string out;
     out.reserve(s.size() + 2);
-    for (unsigned char c : s) {
-        switch (c) {
-            case '"': out += "\\\""; break;
-            case '\\': out += "\\\\"; break;
-            case '\n': out += "\\n"; break;
-            case '\r': out += "\\r"; break;
-            case '\t': out += "\\t"; break;
-            case '\b': out += "\\b"; break;
-            case '\f': out += "\\f"; break;
-            default:
-                if (c < 0x20) {
-                    char buf[8];
-                    std::snprintf(buf, sizeof buf, "\\u%04x", c);
-                    out += buf;
-                } else {
-                    out += static_cast<char>(c);
-                }
-        }
-    }
+    appendEscaped(out, s);
     return out;
 }
 
 void Value::dumpTo(std::string& out) const {
-    switch (type_) {
+    switch (type()) {
         case Type::Null: out += "null"; break;
-        case Type::Bool: out += bool_ ? "true" : "false"; break;
+        case Type::Bool: out += std::get<bool>(data_) ? "true" : "false"; break;
         case Type::Number: {
+            double num = std::get<double>(data_);
             char buf[32];
-            if (std::isfinite(num_) && num_ == std::floor(num_) && std::fabs(num_) < 9.007199254740992e15)
-                std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(num_));
+            if (std::isfinite(num) && num == std::floor(num) && std::fabs(num) < 9.007199254740992e15)
+                std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(num));
             else
-                std::snprintf(buf, sizeof buf, "%.17g", num_);
+                std::snprintf(buf, sizeof buf, "%.17g", num);
             out += buf;
             break;
         }
-        case Type::String: out += '"'; out += escape(str_); out += '"'; break;
+        case Type::String:
+            out += '"';
+            appendEscaped(out, std::get<std::string>(data_));
+            out += '"';
+            break;
         case Type::Array: {
             out += '[';
             bool first = true;
-            for (const auto& v : *arr_) {
+            for (const auto& v : *std::get<std::shared_ptr<Array>>(data_)) {
                 if (!first) out += ',';
                 first = false;
                 v.dumpTo(out);
@@ -286,11 +314,11 @@ void Value::dumpTo(std::string& out) const {
         case Type::Object: {
             out += '{';
             bool first = true;
-            for (const auto& [k, v] : *obj_) {
+            for (const auto& [k, v] : *std::get<std::shared_ptr<Object>>(data_)) {
                 if (!first) out += ',';
                 first = false;
                 out += '"';
-                out += escape(k);
+                appendEscaped(out, k);
                 out += "\":";
                 v.dumpTo(out);
             }

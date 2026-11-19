@@ -9,6 +9,7 @@
 #include <ctime>
 
 #include "net/http.h"
+#include "platform/platform.h"
 #include "util/json.h"
 
 namespace xc::xcloud {
@@ -63,6 +64,7 @@ bool fetchList(const std::string& siglId, const std::string& market, const std::
                    {"calling-app-version", "0.1"}};
     auto r = net::perform(req);
     auto j = json::parse(r.body);
+    std::string().swap(r.body);
     if (!r.ok() || !j || (!j->isArray() && !(j->isObject() && j->has("productIds")))) {
         err = "catalog list " + siglId + ": " + describe(r);
         return false;
@@ -90,12 +92,19 @@ bool fetchList(const std::string& siglId, const std::string& market, const std::
 
 bool fetchProducts(const std::vector<std::string>& ids, const std::string& market, const std::string& language,
                    std::map<std::string, Product>& out, std::string& err, bool full) {
-    const size_t kBatch = full ? 20 : 60;
+    // Smaller batches on PS4 halve the transient HTTP + JSON DOM peak per request.
+    const size_t kBatch = platform::isPS4() ? (full ? 10 : 30) : (full ? 20 : 60);
     for (size_t i = 0; i < ids.size(); i += kBatch) {
-        json::Value list = json::Value::array();
-        for (size_t k = i; k < ids.size() && k < i + kBatch; ++k) list.push(ids[k]);
-        json::Value body = json::Value::object();
-        body.set("Products", list);
+        std::string reqBody;
+        reqBody.reserve(kBatch * 16 + 20);
+        reqBody += "{\"Products\":[";
+        for (size_t k = i; k < ids.size() && k < i + kBatch; ++k) {
+            if (k > i) reqBody += ',';
+            reqBody += '"';
+            json::appendEscaped(reqBody, ids[k]);
+            reqBody += '"';
+        }
+        reqBody += "]}";
 
         net::Request req;
         req.method = "POST";
@@ -107,9 +116,10 @@ bool fetchProducts(const std::vector<std::string>& ids, const std::string& marke
                        {"ms-cv", "0.0"},
                        {"calling-app-name", "xcloud-ps5"},
                        {"calling-app-version", "0.1"}};
-        req.body = body.dump();
+        req.body = std::move(reqBody);
         auto r = net::perform(req);
         auto j = json::parse(r.body);
+        std::string().swap(r.body);
         if (!r.ok() || !j) {
             err = "catalog products: " + describe(r);
             return false;
