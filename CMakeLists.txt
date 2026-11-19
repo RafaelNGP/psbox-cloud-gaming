@@ -160,6 +160,21 @@ foreach(icon guitar)
     list(APPEND XC_BUILTIN_ICONS "${out}")
 endforeach()
 
+# The Smartglass WebUI (src/app/webui/{index.html,style.css,app.js}), assembled and embedded at build time.
+set(XC_BUILTIN_WEBUI "${CMAKE_CURRENT_BINARY_DIR}/generated/webui_index_html.cpp")
+add_custom_command(
+    OUTPUT "${XC_BUILTIN_WEBUI}"
+    COMMAND ${CMAKE_COMMAND}
+            -DHTML=${CMAKE_CURRENT_SOURCE_DIR}/src/app/webui/index.html
+            -DCSS=${CMAKE_CURRENT_SOURCE_DIR}/src/app/webui/style.css
+            -DJS=${CMAKE_CURRENT_SOURCE_DIR}/src/app/webui/app.js
+            -DVERSION=${PROJECT_VERSION}
+            -DOUT=${XC_BUILTIN_WEBUI}
+            -DNAME=xc_webui_index_html
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_webui.cmake
+    DEPENDS src/app/webui/index.html src/app/webui/style.css src/app/webui/app.js cmake/embed_webui.cmake
+    COMMENT "Embedding src/app/webui/ (index.html, style.css, app.js)")
+
 if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Windows")
     set(XC_CRASH_GUARD_SRC src/app/crash_guard_windows.cpp)
 else()
@@ -169,6 +184,7 @@ endif()
 add_library(xcloud_ui STATIC
     ${XC_BUILTIN_FONTS}
     ${XC_BUILTIN_ICONS}
+    ${XC_BUILTIN_WEBUI}
     ${XC_CRASH_GUARD_SRC}
     src/ui/svg_icon.cpp
     src/ui/strings.cpp
@@ -363,7 +379,19 @@ else()
         target_link_libraries(xcloud-cli PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg)
 
         enable_testing()
-        add_executable(xcloud-tests tests/test_main.cpp)
+        add_executable(xcloud-tests
+            tests/test_main.cpp
+            tests/test_core.cpp
+            tests/test_auth.cpp
+            tests/test_xcloud.cpp
+            tests/test_stream.cpp
+            tests/test_media.cpp
+            tests/test_input.cpp
+            tests/test_ui.cpp
+            tests/test_webui.cpp
+            tests/test_app.cpp
+            src/app/stream_player.cpp
+        )
         target_link_libraries(xcloud-tests PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg datachannel-static)
         add_test(NAME unit COMMAND xcloud-tests)
     endif()
