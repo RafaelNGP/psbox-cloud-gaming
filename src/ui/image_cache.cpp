@@ -21,18 +21,36 @@
 #include <atomic>
 
 #include <algorithm>
+#include <climits>
 #include <cstring>
+#include <new>
 
 namespace xc::ui {
 
 bool decodeImage(const std::string& bytes, Image& out) {
-    int w, h, n;
+    if (bytes.empty() || bytes.size() > static_cast<size_t>(INT_MAX)) return false;
+    int w = 0, h = 0, n = 0;
+    if (!stbi_info_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
+                               static_cast<int>(bytes.size()), &w, &h, &n)) {
+        return false;
+    }
+    // Reject oversized images (>16M pixels = 64 MB RGBA) before decoding to prevent OOM.
+    constexpr uint64_t kMaxImagePixels = 4096ull * 4096ull;
+    if (w <= 0 || h <= 0 || static_cast<uint64_t>(w) * static_cast<uint64_t>(h) > kMaxImagePixels) {
+        return false;
+    }
     unsigned char* data = stbi_load_from_memory(reinterpret_cast<const stbi_uc*>(bytes.data()),
                                                 static_cast<int>(bytes.size()), &w, &h, &n, 4);
     if (!data) return false;
-    out.w = w;
-    out.h = h;
-    out.px.resize(static_cast<size_t>(w) * h);
+    try {
+        out.w = w;
+        out.h = h;
+        out.px.resize(static_cast<size_t>(w) * static_cast<size_t>(h));
+    } catch (const std::bad_alloc&) {
+        stbi_image_free(data);
+        out = {};
+        return false;
+    }
     std::memcpy(out.px.data(), data, out.px.size() * 4);
     stbi_image_free(data);
     if (n < 4) {
@@ -152,6 +170,16 @@ void ImageCache::evict() {
         bytes_ -= victim->second.image->bytes();
         entries_.erase(victim);
     }
+    // Prune stale empty entries (dropped jobs) so the map stays bounded across large catalogs.
+    if (entries_.size() > 512) {
+        for (auto it = entries_.begin(); it != entries_.end(); ) {
+            if (!it->second.image && !it->second.loading && !it->second.failed) {
+                it = entries_.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
 }
 
 void ImageCache::shrink() {
@@ -233,6 +261,7 @@ void ImageCache::loop() {
         if (!path.empty() && platform::readFile(path, cached) && decodeImage(cached, decoded)) {
             r.status = 200;  // from disk
         } else {
+            std::string().swap(cached);
             r = net::perform(req);
             if (r.ok() && !path.empty() && decodeImage(r.body, decoded)) {
                 static std::atomic<bool> warned{false};  // once: a full disk would say it for every image
@@ -242,10 +271,18 @@ void ImageCache::loop() {
                 decodeImage(r.body, decoded);
             }
         }
+        // Release compressed image bytes before coverResize allocates the RGBA target.
+        std::string().swap(cached);
+        std::string().swap(r.body);
         if (r.ok() && decoded.w > 0) {
-            result = std::make_shared<Image>(decoded.w == job.w && decoded.h == job.h
-                                                 ? std::move(decoded)
-                                                 : coverResize(decoded, job.w, job.h));
+            try {
+                result = std::make_shared<Image>(decoded.w == job.w && decoded.h == job.h
+                                                     ? std::move(decoded)
+                                                     : coverResize(decoded, job.w, job.h));
+            } catch (const std::bad_alloc&) {
+                XC_LOGW("image cache: out of memory resizing %s", req.url.c_str());
+                result.reset();
+            }
         } else {
             XC_LOGW("image %s: %s", req.url.c_str(), r.status ? ("HTTP " + std::to_string(r.status)).c_str()
                                                               : r.error.c_str());

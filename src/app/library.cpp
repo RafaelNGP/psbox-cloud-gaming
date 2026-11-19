@@ -13,6 +13,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstdio>
 #include <ctime>
 #include <map>
 
@@ -20,37 +21,99 @@ namespace xc::app {
 
 namespace {
 
-json::Value productToJson(const xcloud::Product& p) {
-    json::Value v = json::Value::object();
-    v.set("xt", p.xcloudTitleId);
-    v.set("xbox", p.xboxTitleId);
-    v.set("title", p.title);
-    v.set("publisher", p.publisher);
-    v.set("description", p.description);
-    v.set("tile", p.tileUrl);
-    v.set("poster", p.posterUrl);
-    v.set("hero", p.heroUrl);
-    json::Value cats = json::Value::array();
-    for (const auto& c : p.categories) cats.push(c);
-    v.set("categories", cats);
+void appendJsonStr(std::string& out, std::string_view s) {
+    out += '"';
+    json::appendEscaped(out, s);
+    out += '"';
+}
+
+void appendJsonKey(std::string& out, bool& first, std::string_view key) {
+    if (!first) out += ',';
+    first = false;
+    appendJsonStr(out, key);
+    out += ':';
+}
+
+void appendJsonInt(std::string& out, int64_t v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%lld", static_cast<long long>(v));
+    out += buf;
+}
+
+template <typename Range>
+void appendJsonStrArray(std::string& out, const Range& items, bool skipEmpty = false) {
+    out += '[';
+    bool first = true;
+    for (const auto& s : items) {
+        if (skipEmpty && s.empty()) continue;
+        if (!first) out += ',';
+        first = false;
+        appendJsonStr(out, s);
+    }
+    out += ']';
+}
+
+void appendItemsJson(std::string& out, const std::vector<std::pair<std::string, std::string>>& items) {
+    out += '[';
+    bool first = true;
+    for (const auto& [pid, tid] : items) {
+        if (!first) out += ',';
+        first = false;
+        out += "{\"p\":";
+        appendJsonStr(out, pid);
+        out += ",\"t\":";
+        appendJsonStr(out, tid);
+        out += '}';
+    }
+    out += ']';
+}
+
+void appendProductJson(std::string& out, const xcloud::Product& p) {
+    out += "{\"xt\":";
+    appendJsonStr(out, p.xcloudTitleId);
+    out += ",\"xbox\":";
+    appendJsonStr(out, p.xboxTitleId);
+    out += ",\"title\":";
+    appendJsonStr(out, p.title);
+    out += ",\"publisher\":";
+    appendJsonStr(out, p.publisher);
+    out += ",\"description\":";
+    appendJsonStr(out, p.description);
+    out += ",\"tile\":";
+    appendJsonStr(out, p.tileUrl);
+    out += ",\"poster\":";
+    appendJsonStr(out, p.posterUrl);
+    out += ",\"hero\":";
+    appendJsonStr(out, p.heroUrl);
+    out += ",\"categories\":";
+    appendJsonStrArray(out, p.categories);
     if (p.detailed) {
-        v.set("d", true);
-        v.set("at", p.detailedAt);
-        v.set("modes", static_cast<int64_t>(p.modes));
-        if (p.plan) v.set("plan", static_cast<int64_t>(p.plan));
-        json::Value langs = json::Value::object();
-        for (const auto& [lang, bits] : p.languages) langs.set(lang, static_cast<int64_t>(bits));
-        v.set("langs", langs);
+        out += ",\"d\":true,\"at\":";
+        appendJsonInt(out, p.detailedAt);
+        out += ",\"modes\":";
+        appendJsonInt(out, static_cast<int64_t>(p.modes));
+        if (p.plan) {
+            out += ",\"plan\":";
+            appendJsonInt(out, static_cast<int64_t>(p.plan));
+        }
+        out += ",\"langs\":{";
+        bool firstLang = true;
+        for (const auto& [lang, bits] : p.languages) {
+            appendJsonKey(out, firstLang, lang);
+            appendJsonInt(out, static_cast<int64_t>(bits));
+        }
+        out += '}';
     }
     if (!p.ratingAge.empty()) {
-        v.set("rage", p.ratingAge);
-        v.set("rsys", p.ratingSystem);
-        json::Value rdesc = json::Value::array();
-        for (const auto& d : p.ratingDescriptors) rdesc.push(d);
-        v.set("rdesc", rdesc);
+        out += ",\"rage\":";
+        appendJsonStr(out, p.ratingAge);
+        out += ",\"rsys\":";
+        appendJsonStr(out, p.ratingSystem);
+        out += ",\"rdesc\":";
+        appendJsonStrArray(out, p.ratingDescriptors);
     }
-    if (p.isPcOnly) v.set("isPc", true);
-    return v;
+    if (p.isPcOnly) out += ",\"isPc\":true";
+    out += '}';
 }
 
 xcloud::Product productFromJson(const std::string& id, const json::Value& v) {
@@ -77,17 +140,6 @@ xcloud::Product productFromJson(const std::string& id, const json::Value& v) {
     p.ratingSystem = v["rsys"].str();
     for (const auto& d : v["rdesc"].items()) p.ratingDescriptors.push_back(d.str());
     return p;
-}
-
-json::Value itemsToJson(const std::vector<std::pair<std::string, std::string>>& items) {
-    json::Value a = json::Value::array();
-    for (const auto& [pid, tid] : items) {
-        json::Value o = json::Value::object();
-        o.set("p", pid);
-        o.set("t", tid);
-        a.push(o);
-    }
-    return a;
 }
 
 }  // namespace
@@ -665,6 +717,8 @@ bool Library::loadCache(bool withLayout) {
         }
     }
     auto j = json::parse(text);
+    // Free the raw cache file buffer immediately before populating products_ and rows.
+    std::string().swap(text);
     if (!j) return false;
     int ver = (*j)["version"].asInt();
     if (ver != 2 && ver != 3 && ver != kCacheVersion) return false;
@@ -811,6 +865,8 @@ bool Library::loadCache(bool withLayout) {
             }
         }
     }
+    // Release the parsed JSON DOM before post-processing and sorting.
+    j.reset();
     for (const auto& pid : acquiredProducts_) {
         ownedProducts_.insert(pid);
         purchasableSet_.erase(pid);
@@ -875,82 +931,140 @@ bool Library::loadCache(bool withLayout) {
 
 void Library::saveCache() const {
     if (cachePath_.empty()) return;
-    json::Value root = json::Value::object();
-    root.set("version", kCacheVersion);
-    root.set("market", market_);
-    root.set("language", language_);
-    json::Value titles = json::Value::array(), prods = json::Value::array();
-    for (const auto& t : ownedTitles_) titles.push(t);
-    for (const auto& p : ownedProducts_) prods.push(p);
-    root.set("ownedTitles", titles);
-    json::Value acqP = json::Value::array(), acqT = json::Value::array();
-    for (const auto& p : acquiredProducts_) acqP.push(p);
-    for (const auto& t : acquiredTitles_) acqT.push(t);
-    root.set("acquiredProducts", acqP);
-    root.set("acquiredTitles", acqT);
-    json::Value recentArr = json::Value::array();
-    for (const auto& r : recent_) recentArr.push(r);
-    root.set("recent", recentArr);
-    root.set("gamePassMember", gamePassMember_);
-    root.set("freeTierSession", freeTierSessionSeconds_);
-    if (!subscription_.empty()) root.set("subscription", subscription_);
-    root.set("ownedProducts", prods);
-    root.set("owned", itemsToJson(owned_));
-    json::Value gamePass = json::Value::array();
-    for (const auto& id : allGames_) gamePass.push(id);
-    root.set("gamePass", gamePass);  // the next start tells the games added since
-    root.set("purchasable", itemsToJson(purchasable_));
-    json::Value layoutArr = json::Value::array();
-    std::set<std::string> layoutTitles;
-    for (const auto& r : layout_) {
-        if (!layoutTitles.insert(r.title).second) continue;  // each row once
-        json::Value rowObj = json::Value::object();
-        rowObj.set("title", r.title);
-        rowObj.set("badges", r.badges);
-        rowObj.set("isGrid", r.isGrid);
-        rowObj.set("recent", r.recent);
-        if (!r.siglId.empty()) rowObj.set("siglId", r.siglId);
-        rowObj.set("items", itemsToJson(r.items));
-        layoutArr.push(std::move(rowObj));
+    // Stream-serialize directly into a single pre-reserved buffer instead of
+    // building a full json::Value DOM (~40-60 MB peak for ~2800 products on PS4).
+    std::string out;
+    out.reserve(products_.size() * 768 + (owned_.size() + purchasable_.size()) * 48 + 65536);
+    out += '{';
+    bool first = true;
+
+    appendJsonKey(out, first, "version");
+    appendJsonInt(out, kCacheVersion);
+    appendJsonKey(out, first, "market");
+    appendJsonStr(out, market_);
+    appendJsonKey(out, first, "language");
+    appendJsonStr(out, language_);
+
+    appendJsonKey(out, first, "ownedTitles");
+    appendJsonStrArray(out, ownedTitles_);
+    appendJsonKey(out, first, "acquiredProducts");
+    appendJsonStrArray(out, acquiredProducts_);
+    appendJsonKey(out, first, "acquiredTitles");
+    appendJsonStrArray(out, acquiredTitles_);
+    appendJsonKey(out, first, "recent");
+    appendJsonStrArray(out, recent_);
+
+    appendJsonKey(out, first, "gamePassMember");
+    out += gamePassMember_ ? "true" : "false";
+    appendJsonKey(out, first, "freeTierSession");
+    appendJsonInt(out, freeTierSessionSeconds_);
+    if (!subscription_.empty()) {
+        appendJsonKey(out, first, "subscription");
+        appendJsonStr(out, subscription_);
     }
-    root.set("layout", layoutArr);
+
+    appendJsonKey(out, first, "ownedProducts");
+    appendJsonStrArray(out, ownedProducts_);
+    appendJsonKey(out, first, "owned");
+    appendItemsJson(out, owned_);
+    appendJsonKey(out, first, "gamePass");
+    appendJsonStrArray(out, allGames_);  // the next start tells the games added since
+    appendJsonKey(out, first, "purchasable");
+    appendItemsJson(out, purchasable_);
+
+    appendJsonKey(out, first, "layout");
+    out += '[';
+    {
+        bool firstRow = true;
+        std::set<std::string> layoutTitles;
+        for (const auto& r : layout_) {
+            if (!layoutTitles.insert(r.title).second) continue;  // each row once
+            if (!firstRow) out += ',';
+            firstRow = false;
+            out += "{\"title\":";
+            appendJsonStr(out, r.title);
+            out += ",\"badges\":";
+            out += r.badges ? "true" : "false";
+            out += ",\"isGrid\":";
+            out += r.isGrid ? "true" : "false";
+            out += ",\"recent\":";
+            out += r.recent ? "true" : "false";
+            if (!r.siglId.empty()) {
+                out += ",\"siglId\":";
+                appendJsonStr(out, r.siglId);
+            }
+            out += ",\"items\":";
+            appendItemsJson(out, r.items);
+            out += '}';
+        }
+    }
+    out += ']';
+
     // Details of everything on the home screen, in "Your games", in the
     // Game Pass catalog, and all catalog products resolved: the next launch
     // shows them without re-fetching, and prevents false-positive new title alerts.
-    json::Value details = json::Value::object();
-    for (const auto& [pid, prod] : products_) {
-        details.set(pid, productToJson(prod));
+    appendJsonKey(out, first, "products");
+    out += '{';
+    {
+        bool firstProd = true;
+        for (const auto& [pid, prod] : products_) {
+            appendJsonKey(out, firstProd, pid);
+            appendProductJson(out, prod);
+        }
     }
-    root.set("products", details);
-    std::set<std::string> allKnown = knownProducts_;
-    for (const auto& [pid, _] : products_) {
-        if (!pid.empty()) allKnown.insert(pid);
+    out += '}';
+
+    appendJsonKey(out, first, "knownProducts");
+    out += '[';
+    {
+        bool firstKp = true;
+        for (const auto& p : knownProducts_) {
+            if (p.empty()) continue;
+            if (!firstKp) out += ',';
+            firstKp = false;
+            appendJsonStr(out, p);
+        }
+        for (const auto& [pid, _] : products_) {
+            if (pid.empty() || knownProducts_.count(pid)) continue;
+            if (!firstKp) out += ',';
+            firstKp = false;
+            appendJsonStr(out, pid);
+        }
     }
-    json::Value kp = json::Value::array();
-    for (const auto& p : allKnown) {
-        if (!p.empty()) kp.push(p);
+    out += ']';
+
+    appendJsonKey(out, first, "allowedDevices");
+    out += '{';
+    {
+        bool firstDev = true;
+        for (const auto& [pid, devices] : allowedDevices_) {
+            appendJsonKey(out, firstDev, pid);
+            appendJsonStrArray(out, devices);
+        }
     }
-    root.set("knownProducts", kp);
-    json::Value platforms = json::Value::object(), xboxTitles = json::Value::object(), cloudTitles = json::Value::object(), allowedDevices = json::Value::object();
-    for (const auto& [id, code] : platform_) platforms.set(id, code);
-    for (const auto& [pid, xbox] : xboxTitleOf_) xboxTitles.set(pid, xbox);
-    for (const auto& [pid, title] : cloudTitleOf_) cloudTitles.set(pid, title);
-    for (const auto& [pid, devices] : allowedDevices_) {
-        json::Value arr = json::Value::array();
-        for (const auto& d : devices) arr.push(d);
-        allowedDevices.set(pid, arr);
-    }
-    root.set("allowedDevices", allowedDevices);
-    root.set("platforms", platforms);
-    root.set("xboxTitles", xboxTitles);
-    root.set("cloudTitles", cloudTitles);
-    json::Value free = json::Value::array();
-    for (const auto& id : freeInStore_) free.push(id);
-    root.set("freeInStore", free);
-    json::Value mkb = json::Value::array();
-    for (const auto& id : mouseKeyboard_) mkb.push(id);
-    root.set("mouseKeyboard", mkb);
-    if (!platform::writeFileAtomic(cachePath_, root.dump())) XC_LOGW("library: could not write %s", cachePath_.c_str());
+    out += '}';
+
+    auto appendStringMap = [&](std::string_view key, const std::map<std::string, std::string>& m) {
+        appendJsonKey(out, first, key);
+        out += '{';
+        bool firstEntry = true;
+        for (const auto& [k, v] : m) {
+            appendJsonKey(out, firstEntry, k);
+            appendJsonStr(out, v);
+        }
+        out += '}';
+    };
+    appendStringMap("platforms", platform_);
+    appendStringMap("xboxTitles", xboxTitleOf_);
+    appendStringMap("cloudTitles", cloudTitleOf_);
+
+    appendJsonKey(out, first, "freeInStore");
+    appendJsonStrArray(out, freeInStore_);
+    appendJsonKey(out, first, "mouseKeyboard");
+    appendJsonStrArray(out, mouseKeyboard_);
+
+    out += '}';
+    if (!platform::writeFileAtomic(cachePath_, out)) XC_LOGW("library: could not write %s", cachePath_.c_str());
 }
 
 void Library::markAsOwned(const std::string& productId, const std::string& titleId, const std::string& name) {

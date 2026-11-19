@@ -186,6 +186,7 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
         }
         newCount = actuallyAdded.size();
     }
+    std::vector<std::string>().swap(newProducts);
 
     allGames_.erase(std::remove_if(allGames_.begin(), allGames_.end(),
                                    [&](const std::string& id) {
@@ -241,6 +242,7 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
             }
         }
     }
+    std::vector<FetchedShelf>().swap(fetchedShelves);
 
     for (auto& row : layout_) {
         if (row.isGrid) {
@@ -268,9 +270,10 @@ size_t Library::syncDelta(xcloud::GssvClient& gssv, const Changed& changed, std:
     }
 
     loadOwned(gssv, changed, nullptr, &titles);
+    // Free the 2800+ raw Title structs before loadCatalogNames() fetches metadata.
+    std::vector<xcloud::Title>().swap(titles);
     loadCatalogNames(changed, nullptr);
-    saveCache();
-    changed();
+    // loadCatalogNames() already calls saveCache() and changed().
     return newCount;
 }
 
@@ -691,7 +694,7 @@ void Library::loadCatalogNames(const Changed& changed, const std::atomic<bool>* 
     for (const auto& id : freeInStore_) want(id);
     progress_ = {true, 0, missing.size()};
     changed();
-    constexpr size_t kBatch = 100;
+    const size_t kBatch = platform::isPS4() ? 60 : 100;
     for (size_t i = 0; i < missing.size(); i += kBatch) {
         if (stop && *stop) break;
         std::vector<std::string> batch(missing.begin() + static_cast<long>(i),

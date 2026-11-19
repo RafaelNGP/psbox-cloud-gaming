@@ -1200,7 +1200,7 @@ bool hasTouchscreen() { return false; }
 bool isPS5() { return false; }
 
 size_t imageCacheBudget() {
-    return 48u << 20;
+    return 32u << 20;
 }
 
 std::string diagnostics() {

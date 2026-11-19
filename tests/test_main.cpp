@@ -11538,6 +11538,103 @@ static void testWorkerMobileM4Features() {
     }
 }
 
+static void testPs4MemoryOptimizations() {
+    // 1. Compact json::Value layout (std::variant shrinks 80B -> 40B on libstdc++, 72B -> 32B on libc++).
+    CHECK(sizeof(json::Value) <= 48);
+
+    // 2. json::appendEscaped matches json::escape and round-trips through json::parse.
+    const std::string tricky = "Hello \"world\" \\ line1\nline2\r\t\b\f\x01\x1f UTF8: ação 🎮";
+    std::string appended;
+    json::appendEscaped(appended, tricky);
+    CHECK(appended == json::escape(tricky));
+    auto parsed = json::parse("\"" + appended + "\"");
+    CHECK(parsed.has_value() && parsed->isString() && parsed->str() == tricky);
+
+    // 3. Zero-DOM streaming Library::saveCache() -> loadCache() round-trip fidelity.
+    const std::string cacheFile = "/tmp/xc_test_frente2_cache_" + std::to_string(getpid()) + ".json";
+    fs::removeFile(cacheFile);
+    {
+        net::setTestTransport([](const net::Request& req) -> net::Response {
+            net::Response r;
+            r.status = 200;
+            if (req.url.find("sigls/v2") != std::string::npos) {
+                r.body = R"([{"siglId":"id","title":"All games"},{"id":"9P0000000001"}])";
+            } else if (req.url.find("v3/products") != std::string::npos) {
+                r.body = R"({"Products":{"9P0000000001":{
+                    "XCloudTitleId":"TESTGAME1",
+                    "XboxTitleId":"12345678",
+                    "ProductTitle":"Test \"Quoted\" Game\nLine2",
+                    "PublisherName":"Pub\\Co",
+                    "ProductDescription":"A rich description with \"quotes\", tabs\tand unicode: ação!",
+                    "Image_Tile":{"URL":"https://example.com/tile.jpg"},
+                    "Image_Poster":{"URL":"https://example.com/poster.jpg"},
+                    "Image_Hero":{"URL":"https://example.com/hero.jpg"},
+                    "LocalizedCategories":["Action","RPG"],
+                    "Platforms":["XboxSeriesX"],
+                    "PassMetadataByPassProductId":{"CFQ7TTC0K5DJ":{}},
+                    "Attributes":[{"Name":"SinglePlayer"},{"Name":"XblOnlineCoop"}],
+                    "LanguageSupport":{"pt-BR":{"InterfaceLanguageSupport":1,"SubtitlesLanguageSupport":1,"GamePlayAudioLanguageSupport":0}}
+                }}})";
+            } else if (req.url.find("/v2/titles") != std::string::npos) {
+                r.body = R"({"results":[{"titleId":"TESTGAME1","details":{"productId":"9P0000000001","xboxTitleId":"12345678","hasEntitlement":true,"isFreeInStore":true,"supportedInputTypes":["Controller","MKB"],"allowedDeviceTypes":["Console","Mobile"],"userPrograms":["F2P"]}}]})";
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+
+        xcloud::GssvClient gssv;
+        app::Library lib;
+        lib.setCachePath(cacheFile);
+        lib.setSubscription("Ultimate");
+        std::string err;
+        bool loaded = lib.load(gssv, "pt-BR", [] {}, err, false, "BR");
+        CHECK(loaded);
+        lib.markAsOwned("9P0000000001", "TESTGAME1", "Test \"Quoted\" Game\nLine2");
+        lib.saveCache();
+        net::setTestTransport(nullptr);
+    }
+
+    // Reload from the streaming-serialized cache and verify every field survived intact.
+    {
+        std::string raw;
+        CHECK(platform::readFile(cacheFile, raw));
+        auto parsedCache = json::parse(raw);
+        CHECK(parsedCache.has_value() && parsedCache->isObject());
+        CHECK((*parsedCache)["market"].str() == "BR");
+        CHECK((*parsedCache)["language"].str() == "pt-BR");
+        CHECK((*parsedCache)["subscription"].str() == "Ultimate");
+        CHECK((*parsedCache)["products"]["9P0000000001"]["title"].str() == "Test \"Quoted\" Game\nLine2");
+
+        app::Library reloaded;
+        reloaded.setCachePath(cacheFile);
+        CHECK(reloaded.loadCache(true));
+        CHECK(reloaded.ownedKnown());
+        ui::GameTile t = reloaded.tile("9P0000000001", "TESTGAME1");
+        CHECK(t.name == "Test \"Quoted\" Game\nLine2");
+        CHECK(t.publisher == "Pub\\Co");
+        CHECK(t.description == "A rich description with \"quotes\", tabs\tand unicode: ação!");
+        CHECK(t.playable);
+        CHECK(t.categories.size() == 2);
+    }
+    fs::removeFile(cacheFile);
+
+    // 4. Image decode guards: empty and oversized (8192x8192 PNG header) must fail cleanly without OOM.
+    ui::Image img;
+    CHECK(!ui::decodeImage("", img));
+    // Minimal PNG signature + IHDR chunk declaring 8192x8192 RGBA (would be 256 MB RGBA if decoded).
+    const unsigned char hugePng[] = {
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  // PNG signature
+        0x00, 0x00, 0x00, 0x0D,                          // IHDR length = 13
+        0x49, 0x48, 0x44, 0x52,                          // "IHDR"
+        0x00, 0x00, 0x20, 0x00,                          // width = 8192
+        0x00, 0x00, 0x20, 0x00,                          // height = 8192
+        0x08, 0x06, 0x00, 0x00, 0x00,                    // 8-bit RGBA
+        0x00, 0x00, 0x00, 0x00                           // CRC placeholder
+    };
+    CHECK(!ui::decodeImage(std::string(reinterpret_cast<const char*>(hugePng), sizeof(hugePng)), img));
+}
+
 int main() {
     testMilestone1TouchOverlayCanvasAndHaptics();
     testHwPictureContract();
@@ -11668,6 +11765,7 @@ int main() {
     testM4DebugNoticesExterminationAndToasts();
     testAndroidM5QualityAndUxRefinements();
     testWorkerMobileM4Features();
+    testPs4MemoryOptimizations();
     if (g_failures) {
         std::fprintf(stderr, "%d failure(s)\n", g_failures);
         return 1;
