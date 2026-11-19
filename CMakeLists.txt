@@ -379,7 +379,19 @@ else()
         target_link_libraries(xcloud-cli PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg)
 
         enable_testing()
-        add_executable(xcloud-tests tests/test_main.cpp)
+        add_executable(xcloud-tests
+            tests/test_main.cpp
+            tests/test_core.cpp
+            tests/test_auth.cpp
+            tests/test_xcloud.cpp
+            tests/test_stream.cpp
+            tests/test_media.cpp
+            tests/test_input.cpp
+            tests/test_ui.cpp
+            tests/test_webui.cpp
+            tests/test_app.cpp
+            src/app/stream_player.cpp
+        )
         target_link_libraries(xcloud-tests PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg datachannel-static)
         add_test(NAME unit COMMAND xcloud-tests)
     endif()
