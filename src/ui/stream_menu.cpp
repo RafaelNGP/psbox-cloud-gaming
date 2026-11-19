@@ -32,6 +32,57 @@ std::string fmt(const char* f, double v) {
     return b;
 }
 
+struct StreamMenuPolicy {
+    bool unifiedMenu;          // single unified list (kAndroidOrder), no General/Controls split
+    bool showTouchItems;       // touch overlay / vibration / mic rows shown
+    bool showTabBar;           // tab header, L1/R1 switching, Q/E & L1/R1 footer hints, tab tap
+    bool pixelScroll;          // scrollPixelOffset_-driven viewport + snap on drag/d-pad
+    bool pinLeaveRowToBottom;  // push Leave row down toward stats separator on non-Controls tabs
+    int rowHeight;
+    int listTop;
+    int fontPx;
+    int maxVisible;
+};
+
+constexpr StreamMenuPolicy streamMenuPolicy() {
+#if defined(__ANDROID__)
+    return {
+        .unifiedMenu = true,
+        .showTouchItems = true,
+        .showTabBar = false,
+        .pixelScroll = true,
+        .pinLeaveRowToBottom = false,
+        .rowHeight = 50,
+        .listTop = 110,
+        .fontPx = 23,
+        .maxVisible = 10,
+    };
+#else
+    return {
+        .unifiedMenu = false,
+        .showTouchItems = false,
+        .showTabBar = true,
+        .pixelScroll = false,
+        .pinLeaveRowToBottom = true,
+        .rowHeight = 38,
+        .listTop = 128,
+        .fontPx = 18,
+        .maxVisible = 14,
+    };
+#endif
+}
+
+constexpr StreamMenuPolicy kPolicy = streamMenuPolicy();
+
+int computeStartIndex(int totalShown, int selIdx, float scrollPixelOffset) {
+    if (totalShown <= kPolicy.maxVisible) return 0;
+    const int maxStart = totalShown - kPolicy.maxVisible;
+    if (kPolicy.pixelScroll) {
+        return std::clamp(static_cast<int>(scrollPixelOffset / kPolicy.rowHeight), 0, maxStart);
+    }
+    return std::clamp(selIdx - kPolicy.maxVisible / 2, 0, maxStart);
+}
+
 }  // namespace
 
 bool StreamMenu::itemInTab(int item, MenuTab tab) const {
@@ -39,13 +90,13 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
         return item == XboxButton || item == PlayerItem || item == StrumItem || item == TiltItem || item == Leave ||
                (item >= GuitarLane0 && item <= GuitarReset);
     if (item >= GuitarLane0 && item <= GuitarReset) return false;
-#if defined(__ANDROID__)
-    (void)tab;
-    for (int it : kAndroidOrder) {
-        if (it == item) return true;
+    if (kPolicy.unifiedMenu) {
+        (void)tab;
+        for (int it : kAndroidOrder) {
+            if (it == item) return true;
+        }
+        return false;
     }
-    return false;
-#else
     if (tab == MenuTab::General) {
         return item == XboxButton || item == TouchOverlayItem || item == TouchInvertSticksItem ||
                item == TouchLayoutStudioItem || item == MicMuteItem ||
@@ -53,12 +104,11 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
                item == Resolution || item == VideoDecoderItem || item == FpsLimiterItem ||
                item == BitrateLimiterItem || item == VrrItem ||
                item == ReloadStreamItem || item == Leave;
-    } else { // Controls
-        return item == PlayerItem || item == ConfirmItem || item == Triggers ||
-               item == DeadzoneItem || item == TouchpadShortcutsItem || item == GyroItem ||
-               item == AudioHapticsItem || item == PadSpeakerVolumeItem;
     }
-#endif
+    // Controls
+    return item == PlayerItem || item == ConfirmItem || item == Triggers ||
+           item == DeadzoneItem || item == TouchpadShortcutsItem || item == GyroItem ||
+           item == AudioHapticsItem || item == PadSpeakerVolumeItem;
 }
 
 bool StreamMenu::itemShown(int item) const {
@@ -72,11 +122,7 @@ bool StreamMenu::itemShown(int item) const {
     case TouchLayoutStudioItem:
     case VibrationItem:
     case MicMuteItem:
-#if defined(__ANDROID__)
-        return true;
-#else
-        return false;
-#endif
+        return kPolicy.showTouchItems;
     case VideoDecoderItem: return true;
     case FpsLimiterItem: return true;
     case BitrateLimiterItem: return true;
@@ -98,21 +144,30 @@ bool StreamMenu::itemShown(int item) const {
 
 void StreamMenu::selectFirstItem() {
     scrollPixelOffset_ = 0.0f;
-#if defined(__ANDROID__)
-    for (int i : kAndroidOrder) {
-        if (itemShown(i)) {
-            selected_ = i;
-            return;
+    int shownList[ItemCount];
+    int selIdx = 0;
+    if (collectShownItems(shownList, selIdx) > 0) {
+        selected_ = shownList[0];
+    }
+}
+
+int StreamMenu::collectShownItems(int* out, int& selIdx) const {
+    int totalShown = 0;
+    selIdx = 0;
+    if (kPolicy.unifiedMenu) {
+        for (int i : kAndroidOrder) {
+            if (!itemShown(i)) continue;
+            if (i == selected_) selIdx = totalShown;
+            out[totalShown++] = i;
+        }
+    } else {
+        for (int i = 0; i < ItemCount; ++i) {
+            if (!itemShown(i)) continue;
+            if (i == selected_) selIdx = totalShown;
+            out[totalShown++] = i;
         }
     }
-#else
-    for (int i = 0; i < ItemCount; ++i) {
-        if (itemShown(i)) {
-            selected_ = i;
-            return;
-        }
-    }
-#endif
+    return totalShown;
 }
 
 void StreamMenu::setCapabilities(const UiCaps& caps) {
@@ -315,10 +370,7 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
     }
 
     // Shoulder tabs switching (L1 / R1); a guitar's menu has one tab (its orange fret is LB).
-#if defined(__ANDROID__)
-    in.l1 = in.r1 = false;
-#else
-    if (activeTab_ == MenuTab::Guitar) in.l1 = in.r1 = false;
+    if (!kPolicy.showTabBar || activeTab_ == MenuTab::Guitar) in.l1 = in.r1 = false;
     if (in.l1) {
         activeTab_ = (activeTab_ == MenuTab::Controls) ? MenuTab::General : MenuTab::Controls;
         selectFirstItem();
@@ -329,7 +381,6 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         selectFirstItem();
         return MenuAction::None;
     }
-#endif
 
     // Up / down within active tab; the guitar's rows in the order they are drawn.
     if (activeTab_ == MenuTab::Guitar && (in.up || in.down)) {
@@ -341,41 +392,42 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         selected_ = kGuitarOrder[pos];
         in.up = in.down = false;
     }
-#if defined(__ANDROID__)
-    if (in.up || in.down) {
-        constexpr int n = static_cast<int>(std::size(kAndroidOrder));
-        int pos = 0;
-        for (int k = 0; k < n; ++k)
-            if (kAndroidOrder[k] == selected_) pos = k;
-        do pos = (pos + (in.up ? n - 1 : 1)) % n; while (!itemShown(kAndroidOrder[pos]));
-        selected_ = kAndroidOrder[pos];
-        in.up = in.down = false;
+    if (kPolicy.unifiedMenu) {
+        if (in.up || in.down) {
+            constexpr int n = static_cast<int>(std::size(kAndroidOrder));
+            int pos = 0;
+            for (int k = 0; k < n; ++k)
+                if (kAndroidOrder[k] == selected_) pos = k;
+            do pos = (pos + (in.up ? n - 1 : 1)) % n; while (!itemShown(kAndroidOrder[pos]));
+            selected_ = kAndroidOrder[pos];
+            in.up = in.down = false;
 
-        // Keep the selected item visible inside the scrollable Android menu viewport
-        // (supports both step-by-step navigation and top/bottom wrap-around).
-        constexpr int kRowH = 50, kMaxVisible = 10;
-        int totalShown = 0;
-        int selIdx = 0;
-        for (int i : kAndroidOrder) {
-            if (!itemShown(i)) continue;
-            if (i == selected_) selIdx = totalShown;
-            ++totalShown;
-        }
-        if (totalShown <= kMaxVisible) {
-            scrollPixelOffset_ = 0.0f;
-        } else {
-            int startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-            if (selIdx < startIdx) {
-                scrollPixelOffset_ = static_cast<float>(selIdx * kRowH);
-            } else if (selIdx >= startIdx + kMaxVisible) {
-                scrollPixelOffset_ = static_cast<float>((selIdx - kMaxVisible + 1) * kRowH);
+            // Keep the selected item visible inside the scrollable Android menu viewport
+            // (supports both step-by-step navigation and top/bottom wrap-around).
+            if (kPolicy.pixelScroll) {
+                int totalShown = 0;
+                int selIdx = 0;
+                for (int i : kAndroidOrder) {
+                    if (!itemShown(i)) continue;
+                    if (i == selected_) selIdx = totalShown;
+                    ++totalShown;
+                }
+                if (totalShown <= kPolicy.maxVisible) {
+                    scrollPixelOffset_ = 0.0f;
+                } else {
+                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+                    if (selIdx < startIdx) {
+                        scrollPixelOffset_ = static_cast<float>(selIdx * kPolicy.rowHeight);
+                    } else if (selIdx >= startIdx + kPolicy.maxVisible) {
+                        scrollPixelOffset_ = static_cast<float>((selIdx - kPolicy.maxVisible + 1) * kPolicy.rowHeight);
+                    }
+                }
             }
         }
+    } else {
+        if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
+        if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
     }
-#else
-    if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));
-    if (in.down) do selected_ = (selected_ + 1) % ItemCount; while (!itemShown(selected_));
-#endif
 
     if (selected_ == PlayerItem && (in.left || in.right || in.accept)) {
         usbOwnerPlayer_ = (usbOwnerPlayer_ + (in.left ? 3 : 1)) % 4;
@@ -879,98 +931,77 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     }
 
     // Tabs Header: [L1]  Geral  |  Controles  [R1]; a guitar's menu: its one tab, no badges.
-#if !defined(__ANDROID__)
-    int tabY = 66, tabH = 34;
-    if (activeTab_ == MenuTab::Guitar) {
-        const char* tabGuitar = tr(Str::MenuTabGuitar);
-        const int gw = fonts_.semibold.measure(tabGuitar, 18) + 24;
-        const Rect r{kPad, tabY, gw, tabH};
-        c.fillRect(r, rgba(255, 255, 255, 24), 6);
-        c.fillRect({r.x + 6, r.y + r.h - 3, r.w - 12, 3}, kGreen, 2);
-        fonts_.semibold.draw(c, tabGuitar, r.x + 12, fonts_.semibold.centeredY(r.y, r.h, 18), 18, kWhite);
-    } else {
-        int bx = kPad;
-        constexpr int badgeW = 36, badgeH = 24;
-        const int badgeY = tabY + (tabH - badgeH) / 2;
+    if (kPolicy.showTabBar) {
+        int tabY = 66, tabH = 34;
+        if (activeTab_ == MenuTab::Guitar) {
+            const char* tabGuitar = tr(Str::MenuTabGuitar);
+            const int gw = fonts_.semibold.measure(tabGuitar, 18) + 24;
+            const Rect r{kPad, tabY, gw, tabH};
+            c.fillRect(r, rgba(255, 255, 255, 24), 6);
+            c.fillRect({r.x + 6, r.y + r.h - 3, r.w - 12, 3}, kGreen, 2);
+            fonts_.semibold.draw(c, tabGuitar, r.x + 12, fonts_.semibold.centeredY(r.y, r.h, 18), 18, kWhite);
+        } else {
+            int bx = kPad;
+            constexpr int badgeW = 36, badgeH = 24;
+            const int badgeY = tabY + (tabH - badgeH) / 2;
 
-        auto drawBadge = [&](const char* text, int x) {
-            Rect r{x, badgeY, badgeW, badgeH};
-            c.fillRect(r, rgba(255, 255, 255, 30), 4);
-            int tw = fonts_.bold.measure(text, 14);
-            int tx = r.x + (r.w - tw) / 2;
-            int ty = fonts_.bold.centeredY(r.y, r.h, 14);
-            fonts_.bold.draw(c, text, tx, ty, 14, kWhite);
-        };
+            auto drawBadge = [&](const char* text, int x) {
+                Rect r{x, badgeY, badgeW, badgeH};
+                c.fillRect(r, rgba(255, 255, 255, 30), 4);
+                int tw = fonts_.bold.measure(text, 14);
+                int tx = r.x + (r.w - tw) / 2;
+                int ty = fonts_.bold.centeredY(r.y, r.h, 14);
+                fonts_.bold.draw(c, text, tx, ty, 14, kWhite);
+            };
 
-        // L1 badge
-        drawBadge("L1", bx);
-        bx += badgeW + 8;
+            // L1 badge
+            drawBadge("L1", bx);
+            bx += badgeW + 8;
 
-        // General Tab
-        bool genActive = (activeTab_ == MenuTab::General);
-        const char* tabGen = tr(Str::MenuTabGeneral);
-        int gw = fonts_.semibold.measure(tabGen, 18) + 24;
-        Rect genRect{bx, tabY, gw, tabH};
-        if (genActive) {
-            c.fillRect(genRect, rgba(255, 255, 255, 24), 6);
-            c.fillRect({genRect.x + 6, genRect.y + genRect.h - 3, genRect.w - 12, 3}, kGreen, 2);
+            // General Tab
+            bool genActive = (activeTab_ == MenuTab::General);
+            const char* tabGen = tr(Str::MenuTabGeneral);
+            int gw = fonts_.semibold.measure(tabGen, 18) + 24;
+            Rect genRect{bx, tabY, gw, tabH};
+            if (genActive) {
+                c.fillRect(genRect, rgba(255, 255, 255, 24), 6);
+                c.fillRect({genRect.x + 6, genRect.y + genRect.h - 3, genRect.w - 12, 3}, kGreen, 2);
+            }
+            fonts_.semibold.draw(c, tabGen, genRect.x + 12, fonts_.semibold.centeredY(genRect.y, genRect.h, 18), 18,
+                                 genActive ? kWhite : kDim);
+            bx += gw + 10;
+
+            // Separator
+            fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, rgba(80, 80, 80));
+            bx += 16;
+
+            // Controls Tab
+            bool ctrlActive = (activeTab_ == MenuTab::Controls);
+            const char* tabCtrl = tr(Str::Controllers);
+            int cw = fonts_.semibold.measure(tabCtrl, 18) + 24;
+            Rect ctrlRect{bx, tabY, cw, tabH};
+            if (ctrlActive) {
+                c.fillRect(ctrlRect, rgba(255, 255, 255, 24), 6);
+                c.fillRect({ctrlRect.x + 6, ctrlRect.y + ctrlRect.h - 3, ctrlRect.w - 12, 3}, kGreen, 2);
+            }
+            fonts_.semibold.draw(c, tabCtrl, ctrlRect.x + 12, fonts_.semibold.centeredY(ctrlRect.y, ctrlRect.h, 18), 18,
+                                 ctrlActive ? kWhite : kDim);
+            bx += cw + 10;
+
+            // R1 badge
+            drawBadge("R1", bx);
         }
-        fonts_.semibold.draw(c, tabGen, genRect.x + 12, fonts_.semibold.centeredY(genRect.y, genRect.h, 18), 18,
-                             genActive ? kWhite : kDim);
-        bx += gw + 10;
-
-        // Separator
-        fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, rgba(80, 80, 80));
-        bx += 16;
-
-        // Controls Tab
-        bool ctrlActive = (activeTab_ == MenuTab::Controls);
-        const char* tabCtrl = tr(Str::Controllers);
-        int cw = fonts_.semibold.measure(tabCtrl, 18) + 24;
-        Rect ctrlRect{bx, tabY, cw, tabH};
-        if (ctrlActive) {
-            c.fillRect(ctrlRect, rgba(255, 255, 255, 24), 6);
-            c.fillRect({ctrlRect.x + 6, ctrlRect.y + ctrlRect.h - 3, ctrlRect.w - 12, 3}, kGreen, 2);
-        }
-        fonts_.semibold.draw(c, tabCtrl, ctrlRect.x + 12, fonts_.semibold.centeredY(ctrlRect.y, ctrlRect.h, 18), 18,
-                             ctrlActive ? kWhite : kDim);
-        bx += cw + 10;
-
-        // R1 badge
-        drawBadge("R1", bx);
     }
-#endif
 
     // The Items List
-#if defined(__ANDROID__)
-    constexpr int kRowH = 50, kTop = 110, kPx = 23, kMaxVisible = 10;
-#else
-    constexpr int kRowH = 38, kTop = 128, kPx = 18, kMaxVisible = 14;
-#endif
+    const int kRowH = kPolicy.rowHeight;
+    const int kTop = kPolicy.listTop;
+    const int kPx = kPolicy.fontPx;
+    const int kMaxVisible = kPolicy.maxVisible;
     int shownList[ItemCount];
-    int totalShown = 0;
     int selIdx = 0;
-#if defined(__ANDROID__)
-    for (int i : kAndroidOrder) {
-        if (!itemShown(i)) continue;
-        if (i == selected_) selIdx = totalShown;
-        shownList[totalShown++] = i;
-    }
-#else
-    for (int i = 0; i < ItemCount; ++i) {
-        if (!itemShown(i)) continue;
-        if (i == selected_) selIdx = totalShown;
-        shownList[totalShown++] = i;
-    }
-#endif
-    int startIdx = 0;
-    if (totalShown > kMaxVisible) {
-#if defined(__ANDROID__)
-        startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-#else
-        startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
-#endif
-    }
+    int totalShown = collectShownItems(shownList, selIdx);
+    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
     int visibleCount = std::min(totalShown, kMaxVisible);
 
     for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {  // the guitar's: drawGuitarTab
@@ -978,13 +1009,9 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         constexpr int kStatsSepY = 704;
         constexpr int kLeaveMarginBottom = 18;
         const int kLeaveTargetY = kStatsSepY - kLeaveMarginBottom - (kRowH - 4); // 704 - 18 - 34 = 652
-#if defined(__ANDROID__)
-        int rowY = kTop + v * kRowH;
-#else
-        int rowY = (activeTab_ != MenuTab::Controls && i == Leave)
+        int rowY = (kPolicy.pinLeaveRowToBottom && activeTab_ != MenuTab::Controls && i == Leave)
             ? std::max(kTop + v * kRowH + 16, kLeaveTargetY)
             : (kTop + v * kRowH);
-#endif
         Rect row{kPad - 16, rowY, kMenuW - 2 * (kPad - 16), kRowH - 4};
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
@@ -1304,10 +1331,10 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         x = fonts_.semibold.draw(c, "QR Code", x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
         kw = cap("Esc");
         x = fonts_.semibold.draw(c, tr(Str::Back), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray) + 20;
-#if !defined(__ANDROID__)
-        kw = cap("Q/E");
-        fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray);
-#endif
+        if (kPolicy.showTabBar) {
+            kw = cap("Q/E");
+            fonts_.semibold.draw(c, tr(Str::MenuTabLabel), x + kw + 8, fonts_.semibold.centeredY(hy, 26, 18), 18, kGray);
+        }
         return c;
     }
 
@@ -1318,15 +1345,14 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
     icon(circleConfirms_, x, hy);
     x = fonts_.semibold.draw(c, tr(Str::Back), x + 34, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray) + 20;
 
-#if !defined(__ANDROID__)
     // L1 / R1 Tab Switch Hint (separated with clear spacing); a guitar's menu has one tab.
-    if (activeTab_ == MenuTab::Guitar) return c;
-    const char* tabBadge = "L1 / R1";
-    int bw = fonts_.bold.measure(tabBadge, 13) + 20;
-    c.fillRect({x, hy + 1, bw, 22}, rgba(255, 255, 255, 30), 4);
-    fonts_.bold.draw(c, tabBadge, x + 10, fonts_.bold.centeredY(hy + 1, 22, 13), 13, kWhite);
-    fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + bw + 10, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray);
-#endif
+    if (kPolicy.showTabBar && activeTab_ != MenuTab::Guitar) {
+        const char* tabBadge = "L1 / R1";
+        int bw = fonts_.bold.measure(tabBadge, 13) + 20;
+        c.fillRect({x, hy + 1, bw, 22}, rgba(255, 255, 255, 30), 4);
+        fonts_.bold.draw(c, tabBadge, x + 10, fonts_.bold.centeredY(hy + 1, 22, 13), 13, kWhite);
+        fonts_.semibold.draw(c, tr(Str::MenuTabsLabel), x + bw + 10, fonts_.semibold.centeredY(hy, 24, 18), 18, kGray);
+    }
 
     return c;
 }
@@ -1470,14 +1496,9 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         if (touchDragging_) {
             float dy = ev.y - touchLastY_;
             touchLastY_ = ev.y;
-#if defined(__ANDROID__)
-            constexpr int kRowH = 50, kMaxVisible = 10;
-#else
-            constexpr int kRowH = 38, kMaxVisible = 14;
-#endif
             int totalShown = 0;
             for (int i = 0; i < ItemCount; ++i) if (itemShown(i)) totalShown++;
-            int maxScroll = std::max(0, (totalShown - kMaxVisible) * kRowH);
+            int maxScroll = std::max(0, (totalShown - kPolicy.maxVisible) * kPolicy.rowHeight);
             scrollPixelOffset_ = std::clamp(scrollPixelOffset_ - dy, 0.0f, static_cast<float>(maxScroll));
             return true;
         }
@@ -1488,25 +1509,19 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         touchActive_ = false;
         if (touchDragging_) {
             touchDragging_ = false;
-#if defined(__ANDROID__)
-            constexpr int kRowH = 50, kMaxVisible = 10;
-            int shownList[ItemCount];
-            int totalShown = 0;
-            int selIdx = 0;
-            for (int i : kAndroidOrder) {
-                if (!itemShown(i)) continue;
-                if (i == selected_) selIdx = totalShown;
-                shownList[totalShown++] = i;
-            }
-            if (totalShown > kMaxVisible) {
-                int startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-                if (selIdx < startIdx) {
-                    selected_ = shownList[startIdx];
-                } else if (selIdx >= startIdx + kMaxVisible) {
-                    selected_ = shownList[startIdx + kMaxVisible - 1];
+            if (kPolicy.pixelScroll) {
+                int shownList[ItemCount];
+                int selIdx = 0;
+                int totalShown = collectShownItems(shownList, selIdx);
+                if (totalShown > kPolicy.maxVisible) {
+                    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
+                    if (selIdx < startIdx) {
+                        selected_ = shownList[startIdx];
+                    } else if (selIdx >= startIdx + kPolicy.maxVisible) {
+                        selected_ = shownList[startIdx + kPolicy.maxVisible - 1];
+                    }
                 }
             }
-#endif
             return true;
         }
 
@@ -1539,9 +1554,8 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
             return false;
         }
 
-#if !defined(__ANDROID__)
         // Tabs header (General / Controls)
-        if (my >= 56 && my <= 108 && activeTab_ != MenuTab::Guitar) {
+        if (kPolicy.showTabBar && my >= 56 && my <= 108 && activeTab_ != MenuTab::Guitar) {
             if (mx < kMenuW / 2.0f) {
                 if (activeTab_ != MenuTab::General) {
                     activeTab_ = MenuTab::General;
@@ -1555,38 +1569,15 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
             }
             return true;
         }
-#endif
 
         // Items List tap
-#if defined(__ANDROID__)
-        constexpr int kRowH = 50, kTop = 110, kPx = 23, kMaxVisible = 10;
-#else
-        constexpr int kRowH = 38, kTop = 128, kPx = 18, kMaxVisible = 14;
-#endif
+        const int kRowH = kPolicy.rowHeight;
+        const int kTop = kPolicy.listTop;
+        const int kMaxVisible = kPolicy.maxVisible;
         int shownList[ItemCount];
-        int totalShown = 0;
         int selIdx = 0;
-#if defined(__ANDROID__)
-        for (int i : kAndroidOrder) {
-            if (!itemShown(i)) continue;
-            if (i == selected_) selIdx = totalShown;
-            shownList[totalShown++] = i;
-        }
-#else
-        for (int i = 0; i < ItemCount; ++i) {
-            if (!itemShown(i)) continue;
-            if (i == selected_) selIdx = totalShown;
-            shownList[totalShown++] = i;
-        }
-#endif
-        int startIdx = 0;
-        if (totalShown > kMaxVisible) {
-#if defined(__ANDROID__)
-            startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
-#else
-            startIdx = std::clamp(selIdx - kMaxVisible / 2, 0, totalShown - kMaxVisible);
-#endif
-        }
+        int totalShown = collectShownItems(shownList, selIdx);
+        int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_);
         int visibleCount = std::min(totalShown, kMaxVisible);
 
         for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {

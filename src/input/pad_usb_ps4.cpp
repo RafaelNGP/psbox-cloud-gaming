@@ -9,6 +9,7 @@
 // each receiver channel, has a thread of its own reading its interrupt IN endpoint with
 // synchronous transfers; a thread looks for pads plugged in and unplugged every 1.5 s.
 #include "input/pad_usb.h"
+#include "input/pad_usb_common.h"
 #include "input/pad_usb_hid.h"
 #include "input/usb_xray.h"
 #include "platform/platform.h"
@@ -525,13 +526,6 @@ std::string whereName(uint8_t bus, uint8_t addr, uint16_t vid, uint16_t pid) {
     return b;
 }
 
-std::string hex(const uint8_t* p, int n) {
-    std::string s;
-    char b[4];
-    for (int i = 0; i < n && i < 32; ++i) std::snprintf(b, sizeof b, "%02x ", p[i]), s += b;
-    return s;
-}
-
 // A string descriptor (UTF-16, ASCII kept), asked for with GET_DESCRIPTOR: the arguments the
 // library's own ASCII reader takes are not known for sure.
 std::string stringDescriptor(libusb_device_handle* h, uint8_t index) {
@@ -599,46 +593,18 @@ void xrayDescribe(libusb_device_handle* h, const std::string& where, const struc
     x.config = config, x.configLen = configLen, x.why = why;
     usbXrayDescribe(x);
     if (!p_sceUsbdControlTransfer) return;
-    uint8_t iface = 0, sub = 0xff;
-    bool hid = false;
-    for (size_t off = 0; off + 2 <= configLen; off += config[off]) {
-        const size_t l = config[off];
-        if (l < 2 || off + l > configLen) break;
-        if (config[off + 1] == 0x04 && l >= 9) iface = config[off + 2], hid = config[off + 5] == 0x03, sub = config[off + 6];
-        if (config[off + 1] != 0x21 || l < 9 || !hid || sub != 0x00) continue;  // a HID descriptor, no boot device
-        uint8_t desc[1024] = {};
-        const uint16_t want = std::min<uint16_t>(static_cast<uint16_t>(config[off + 7] | (config[off + 8] << 8)), sizeof desc);
-        if (!want) continue;
-        const int r = p_sceUsbdControlTransfer(h, 0x81, 0x06, 0x2200, iface, desc, want, 300);
-        if (r <= 0) {
-            XC_LOGI("usb x-ray: %s interface %u report descriptor: 0x%08x", where.c_str(), iface, static_cast<unsigned>(r));
-            continue;
-        }
-        const size_t got = std::min<size_t>(static_cast<size_t>(r), want);
-        usbXrayReportDescriptor(where, iface, desc, got);
-        if (report && report->empty() && isGamepadReportDescriptor(desc, got)) report->assign(desc, desc + got);
-    }
-}
-
-// A controller's interface by its descriptors, for the X-ray only: the first HID (not a boot
-// keyboard or mouse) or vendor-class interface with an interrupt IN endpoint, and its OUT if any.
-UsbPadInterface xrayInterface(const uint8_t* config, size_t configLen) {
-    UsbPadInterface found;
-    bool candidate = false;
-    for (size_t off = 0; off + 2 <= configLen; off += config[off]) {
-        const size_t l = config[off];
-        if (l < 2 || off + l > configLen) break;
-        if (config[off + 1] == 0x04 && l >= 9) {
-            if (candidate && found.epIn) return found;
-            found = {UsbPadProtocol::GenericHid, config[off + 2], 0, 0, false};
-            candidate = (config[off + 5] == 0x03 && !isBootKeyboardOrMouse(config[off + 5], config[off + 6], config[off + 7])) ||
-                        config[off + 5] == 0xFF;
-        } else if (config[off + 1] == 0x05 && l >= 7 && candidate && (config[off + 3] & 0x03) == 0x03) {
-            uint8_t& ep = (config[off + 2] & 0x80) ? found.epIn : found.epOut;
-            if (!ep) ep = config[off + 2];
-        }
-    }
-    return candidate && found.epIn ? found : UsbPadInterface{};
+    usbPadXrayReadHidReports(
+        where, config, configLen,
+        [&](uint8_t iface, uint8_t* desc, uint16_t want) -> int {
+            const int r = p_sceUsbdControlTransfer(h, 0x81, 0x06, 0x2200, iface, desc, want, 300);
+            if (r <= 0) {
+                XC_LOGI("usb x-ray: %s interface %u report descriptor: 0x%08x", where.c_str(), iface,
+                        static_cast<unsigned>(r));
+                return 0;
+            }
+            return r;
+        },
+        report);
 }
 
 // One pad on a USB device: a wired pad is its device's only one; an Xbox 360 wireless receiver has
@@ -658,12 +624,8 @@ struct Link {
     std::atomic<uint32_t> pendingRumble{0};
     std::atomic<bool> hasPendingRumble{false};
     uint8_t rumbleSequence = 0;
-    ControllerState state;
-    int shown = 0, changesLogged = 0, lightPlayer = -1, sticksLogged = 0;
-    float loggedRightX = 0, loggedRightY = 0;
-    unsigned buttons = 0;
-    std::chrono::steady_clock::time_point lastOther{};
-    UsbXrayCapture xray;  // its reports in the log, for a while (usb_xray.h)
+    int lightPlayer = -1;
+    UsbPadLinkReportState report;
     std::atomic<bool> dead{false};
     std::thread thread;
 };
@@ -697,23 +659,11 @@ std::thread g_scanner;
 std::atomic<bool> g_running{false};
 
 // The player slots taken (any thread: a receiver's channel takes one as something links to it).
-std::array<std::atomic<bool>, kMaxUsbPads> g_slotTaken{};
+UsbPadSlotPool g_slots;
 
 uint64_t deviceKey(uint8_t bus, uint8_t addr, uint16_t vid, uint16_t pid) {
     return (static_cast<uint64_t>(bus) << 40) | (static_cast<uint64_t>(addr) << 32) |
            (static_cast<uint64_t>(vid) << 16) | static_cast<uint64_t>(pid);
-}
-
-int takeSlot() {
-    for (int s = 0; s < kMaxUsbPads; ++s) {
-        bool expected = false;
-        if (g_slotTaken[s].compare_exchange_strong(expected, true)) return s;
-    }
-    return -1;
-}
-
-void releaseSlot(int slot) {
-    if (slot >= 0 && slot < kMaxUsbPads) g_slotTaken[slot] = false;
 }
 
 // One packet out a link's interrupt OUT endpoint; false when it was not sent.
@@ -928,38 +878,10 @@ void sendDeviceRumble(Device& d, Link& l, uint8_t large, uint8_t small) {
     }
 }
 
-unsigned buttonBits(const ControllerState& s) {
-    const bool b[] = {s.btnA, s.btnB, s.btnX, s.btnY, s.dpadUp, s.dpadDown, s.dpadLeft, s.dpadRight,
-                      s.btnL1, s.btnR1, s.btnL3, s.btnR3, s.btnOptions, s.btnTouchpad, s.btnNexus,
-                      s.triggerL2 > 0.5f, s.triggerR2 > 0.5f};
-    unsigned bits = 0;
-    for (size_t i = 0; i < sizeof b; ++i) bits |= b[i] ? 1u << i : 0;
-    return bits;
-}
-
-std::string buttonNames(unsigned bits) {
-    static const char* names[] = {"A", "B", "X", "Y", "Up", "Down", "Left", "Right", "LB",
-                                  "RB", "LS", "RS", "Menu", "View", "Xbox", "LT", "RT"};
-    std::string s;
-    for (size_t i = 0; i < sizeof names / sizeof *names; ++i)
-        if (bits & (1u << i)) s += s.empty() ? names[i] : std::string(" ") + names[i];
-    return s.empty() ? "none" : s;
-}
-
-// The name a receiver's device goes by, from what it says it is.
-std::string receiverDeviceName(int subtype) {
-    switch (usbPadKindForSubtype(subtype)) {
-        case UsbPadKind::Guitar: return "Xbox 360 Guitar";
-        case UsbPadKind::Drums: return "Xbox 360 Drum Kit";
-        case UsbPadKind::Other: return std::string("Xbox 360 ") + xinputSubtypeName(subtype);
-        default: return subtype < 0 ? "Xbox 360 Wireless" : "Xbox 360 Controller";
-    }
-}
-
 // A receiver's channel got something linked to it (or reporting): it becomes a player.
 void linkAttach(Device& d, Link& l) {
     if (l.slot >= 0) return;
-    const int slot = takeSlot();
+    const int slot = g_slots.take();
     if (slot < 0) {
         if (!l.noSlotLogged) XC_LOGW("usb pad: %s channel %d: no free player for it", d.where.c_str(), l.channel);
         l.noSlotLogged = true;
@@ -967,9 +889,9 @@ void linkAttach(Device& d, Link& l) {
     }
     l.slot = slot;
     l.lightPlayer = -1;
-    l.state = ControllerState{};
-    l.shown = l.changesLogged = 0;
-    usbPadAttached(slot, receiverDeviceName(l.subtype), usbPadKindForSubtype(l.subtype));
+    l.report.state = ControllerState{};
+    l.report.shown = l.report.changesLogged = 0;
+    usbPadAttached(slot, usbPadReceiverDeviceName(l.subtype), usbPadKindForSubtype(l.subtype));
     l.attached = true;
     if (l.subtype < 0) {
         // Linked before the app started: its link report is not sent again. Ask for its
@@ -986,7 +908,7 @@ void linkDetach(Link& l) {
     const int slot = l.slot;
     if (slot < 0) return;
     usbPadDetached(slot);
-    releaseSlot(slot);
+    g_slots.release(slot);
     l.slot = -1;
     l.attached = false;
     l.hasPendingRumble = false;
@@ -994,86 +916,24 @@ void linkDetach(Link& l) {
 
 // One report off a link.
 void handleReport(Device& d, Link& l, const uint8_t* buf, int n) {
-    if (l.xray.active()) l.xray.feed(buf, static_cast<size_t>(n), platform::nowMs());
-    if (d.xrayOnly) return;
-    // GIP ACK responses using standard gipAcksFor
-    if (d.protocol == UsbPadProtocol::Gip)
-        for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) sendOut(d, l, ack.data(), ack.size(), 40);
-    if (l.iface.wireless) {
-        // Linked (08 80) or gone (08 00); the link report that follows says what it is.
-        if (n >= 2 && buf[0] == 0x08) {
-            const bool linked = (buf[1] & 0x80) != 0;
-            XC_LOGI("usb pad: %s channel %d: device %s", d.where.c_str(), l.channel, linked ? "linked" : "gone");
-            l.present = linked;
-            if (!linked) linkDetach(l);
-            return;
-        }
-        if (n >= 16 && buf[0] == 0x00 && buf[1] == 0x05 && buf[5] == 0x12) {
-            XC_LOGI("usb pad: %s channel %d: capabilities: vendor %04x product %04x version %04x: %s", d.where.c_str(),
-                    l.channel, buf[10] | buf[11] << 8, buf[12] | buf[13] << 8, buf[14] | buf[15] << 8, hex(buf, n).c_str());
-            // No link report (linked before the app started): an instrument told by its maker.
-            if (l.subtype < 0)
-                if (const int subtype = xinputSubtypeFromCapabilities(buf, static_cast<size_t>(n)); subtype >= 0) {
-                    l.subtype = subtype;
-                    XC_LOGI("usb pad: %s channel %d: device is a %s (subtype 0x%02x, from its maker and product)",
-                            d.where.c_str(), l.channel, xinputSubtypeName(subtype), subtype);
-                    if (l.slot >= 0) usbPadSetKind(l.slot, usbPadKindForSubtype(subtype));
-                }
-            return;
-        }
-        if (const int subtype = xinputWirelessSubtype(buf, static_cast<size_t>(n)); subtype >= 0) {
-            l.subtype = subtype;
-            l.present = true;
-            XC_LOGI("usb pad: %s channel %d: device is a %s (subtype 0x%02x%s): %s", d.where.c_str(), l.channel,
-                    xinputSubtypeName(subtype), subtype, (buf[25] & 0x80) ? ", motors flag" : "", hex(buf, n).c_str());
-            if (l.slot < 0) linkAttach(d, l);
-            else usbPadSetKind(l.slot, usbPadKindForSubtype(subtype));
-            return;
-        }
-    }
-    ControllerState state = l.state;
-    bool parsed = false;
-    if (d.ps3 != Ps3Instrument::None) {
-        parsed = parsePs3InstrumentReport(d.ps3, buf, static_cast<size_t>(n), state);
-    } else if (d.protocol == UsbPadProtocol::GenericHid) {
-        parsed = d.hidConfigured ? parseGenericHidReport(d.hidCtx, buf, static_cast<size_t>(n), state)
-                                 : parseGenericHidFallback(buf, static_cast<size_t>(n), state);
-    } else {
-        parsed = parseUsbPadReport(d.protocol, buf, static_cast<size_t>(n), state);
-    }
-    // Input from a receiver's channel nobody announced (linked before the app started): a player
-    // too, of a kind not known until its capabilities report says it.
-    if (parsed && l.iface.wireless && l.slot < 0) linkAttach(d, l);
-    const int slot = l.slot;
-    if (l.shown < 6) XC_LOGI("usb pad %d: report %d: %d bytes: %s", slot, ++l.shown, n, hex(buf, n).c_str());
-    if (!parsed) {
-        if (std::chrono::steady_clock::now() - l.lastOther > std::chrono::seconds(5)) {
-            l.lastOther = std::chrono::steady_clock::now();
-            XC_LOGD("usb pad %d: other report, %d bytes: %s", slot, n, hex(buf, n).c_str());
-        }
-        return;
-    }
-    l.state = state;
-    if (slot < 0) return;
-    usbPadState(slot, state);
-    // An instrument's sticks (a guitar's whammy and tilt, a drum kit's pad strengths): their moves,
-    // to set what raising the guitar reads.
-    const UsbPadKind kind = d.ps3 != Ps3Instrument::None ? ps3InstrumentKind(d.ps3) : usbPadKindForSubtype(l.subtype);
-    if (kind != UsbPadKind::Gamepad && l.sticksLogged < 3000 &&
-        (std::abs(state.rawRightY - l.loggedRightY) > 0.08f || std::abs(state.rawRightX - l.loggedRightX) > 0.15f)) {
-        ++l.sticksLogged;
-        l.loggedRightX = state.rawRightX, l.loggedRightY = state.rawRightY;
-        XC_LOGI("usb pad %d: %s sticks: left %.2f,%.2f right %.2f,%.2f (whammy x, tilt y)", slot, usbPadKindName(kind),
-                state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY);
-    }
-    // The first presses, to check the buttons from the log (an instrument's, more of them).
-    const unsigned now = buttonBits(state);
-    if (now != l.buttons && l.changesLogged < (kind != UsbPadKind::Gamepad ? 400 : 80)) {
-        ++l.changesLogged;
-        XC_LOGI("usb pad %d: buttons %s, sticks %.2f,%.2f %.2f,%.2f, triggers %.2f %.2f", slot, buttonNames(now).c_str(),
-                state.rawLeftX, state.rawLeftY, state.rawRightX, state.rawRightY, state.triggerL2, state.triggerR2);
-    }
-    l.buttons = now;
+    UsbPadReportContext ctx;
+    ctx.where = d.where;
+    ctx.channel = l.channel;
+    ctx.protocol = d.protocol;
+    ctx.wireless = l.iface.wireless;
+    ctx.xrayOnly = d.xrayOnly;
+    ctx.ps3 = d.ps3;
+    ctx.hid = (d.protocol == UsbPadProtocol::GenericHid && d.hidConfigured) ? &d.hidCtx : nullptr;
+    ctx.useGenericHidFallback = true;
+    ctx.nowMs = platform::nowMs();
+    ctx.subtype = &l.subtype;
+    ctx.link = &l.report;
+    ctx.getSlot = [&]() { return l.slot.load(); };
+    ctx.sendAck = [&](const uint8_t* data, size_t len) { sendOut(d, l, data, len, 40); };
+    ctx.onAttach = [&]() { linkAttach(d, l); };
+    ctx.onDetach = [&]() { linkDetach(l); };
+    ctx.onPresent = [&](bool linked) { l.present = linked; };
+    usbPadHandleReport(ctx, buf, n);
 }
 
 // One link's thread: a wired pad's from the start, as a player; a receiver's channel, a player
@@ -1191,7 +1051,7 @@ void closeDevice(Device& d) {
         const int slot = l->slot;
         if (slot < 0) continue;
         if (l->attached) usbPadDetached(slot);
-        releaseSlot(slot);
+        g_slots.release(slot);
         l->slot = -1;
     }
     if (d.handle) {
@@ -1269,7 +1129,7 @@ std::unique_ptr<Device> probeUnknown(libusb_device* dev, const struct libusb_dev
     }
     uint8_t config[1024] = {};
     const size_t configLen = readConfigDescriptor(h, where, config, sizeof config);
-    const UsbPadInterface xi = configLen ? xrayInterface(config, configLen) : UsbPadInterface{};
+    const UsbPadInterface xi = configLen ? usbPadXrayInterface(config, configLen) : UsbPadInterface{};
     if (!xi.epIn) {
         p_sceUsbdClose(h);
         return nullptr;
@@ -1306,7 +1166,7 @@ std::unique_ptr<Device> probeUnknown(libusb_device* dev, const struct libusb_dev
     // One report a transfer, as the device sends them, so that each is recorded as it is.
     const int maxPacket = endpointMaxPacket(config, configLen, xi.epIn);
     l->readSize = maxPacket > 0 ? std::min(maxPacket, 256) : 64;
-    l->xray.start(where, d->name, platform::nowMs());
+    l->report.xray.start(where, d->name, platform::nowMs());
     d->links.push_back(std::move(l));
     return d;
 }
@@ -1448,7 +1308,7 @@ void scan() {
             continue;
         }
 
-        const int slot = takeSlot();
+        const int slot = g_slots.take();
         if (slot < 0) {
             XC_LOGW("usb pad: all %d slots taken, cannot attach %s", kMaxUsbPads, det.name.c_str());
             continue;
@@ -1457,7 +1317,7 @@ void scan() {
         libusb_device_handle* h = nullptr;
         if (p_sceUsbdOpen(dev, &h) != 0 || !h) {
             XC_LOGW("usb pad: sceUsbdOpen failed for %s (%04x:%04x)", det.name.c_str(), desc.idVendor, desc.idProduct);
-            releaseSlot(slot);
+            g_slots.release(slot);
             g_ignored.insert(key);
             continue;
         }
@@ -1478,7 +1338,7 @@ void scan() {
                 XC_LOGI("usb pad: rejecting unverified / non-gamepad HID device (%04x:%04x, if %u)",
                         desc.idVendor, desc.idProduct, det.interfaceNum);
                 p_sceUsbdClose(h);
-                releaseSlot(slot);
+                g_slots.release(slot);
                 g_ignored.insert(key);
                 continue;
             }
@@ -1493,7 +1353,7 @@ void scan() {
         if (p_sceUsbdClaimInterface && p_sceUsbdClaimInterface(h, det.interfaceNum) != 0) {
             XC_LOGW("usb pad: claim interface %d failed for %s", det.interfaceNum, det.name.c_str());
             p_sceUsbdClose(h);
-            releaseSlot(slot);
+            g_slots.release(slot);
             g_ignored.insert(key);
             continue;
         }
@@ -1523,10 +1383,10 @@ void scan() {
                 if (!product.empty()) d->name = product;
                 XC_LOGI("usb pad: %s: %s (%04x:%04x)", d->where.c_str(), ps3InstrumentName(det.ps3), d->vid, d->pid);
                 xrayDescribe(h, d->where, desc, config, configLen, "a PS3 instrument, not yet confirmed on a console");
-                l->xray.start(d->where, d->name, platform::nowMs(), false);
+                l->report.xray.start(d->where, d->name, platform::nowMs(), false);
             } else {
                 xrayDescribe(h, d->where, desc, config, configLen, "a generic HID pad, its layout guessed from its descriptor");
-                l->xray.start(d->where, product.empty() ? d->name : product, platform::nowMs());
+                l->report.xray.start(d->where, product.empty() ? d->name : product, platform::nowMs());
             }
         }
         d->links.push_back(std::move(l));

@@ -60,6 +60,7 @@ add_library(xcloud_core STATIC
     src/input/pad_map.cpp
     src/input/keyboard_nav.cpp
     src/input/pad_usb.cpp
+    src/input/pad_usb_common.cpp
     src/input/pad_usb_hid.cpp
     src/input/usb_xray.cpp
     src/input/sdl_mapping.cpp
@@ -225,6 +226,7 @@ add_library(xcloud_appcore OBJECT
     src/app/price_loop.cpp
     src/app/autoplay.cpp
     src/app/stream_player.cpp
+    src/app/stream_player_diag.cpp
 )
 target_link_libraries(xcloud_appcore PUBLIC xcloud_stream xcloud_media xcloud_ui)
 if(NOT MSVC)
@@ -363,7 +365,7 @@ else()
         target_link_libraries(xcloud-cli PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg)
 
         enable_testing()
-        add_executable(xcloud-tests tests/test_main.cpp)
+        add_executable(xcloud-tests tests/test_main.cpp src/app/stream_player_diag.cpp)
         target_link_libraries(xcloud-tests PRIVATE xcloud_stream xcloud_media xcloud_ui xcloud_backends_null xc_ffmpeg datachannel-static)
         add_test(NAME unit COMMAND xcloud-tests)
     endif()

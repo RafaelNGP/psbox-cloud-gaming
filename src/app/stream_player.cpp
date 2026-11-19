@@ -2,6 +2,7 @@
 // Copyright (C) 2026 RafaelNGP
 #include <cstdint>
 #include "app/stream_player.h"
+#include "app/stream_player_diag.h"
 
 #include "display/display.h"
 #include "input/controller.h"
@@ -24,16 +25,12 @@
 #include <cstdlib>
 #include <cstdio>
 #include <condition_variable>
-#include <ctime>
 #include <deque>
 #include <mutex>
 #include <set>
 #include <thread>
 #include <utility>
 #include <vector>
-#if !defined(_WIN32)
-#include <sys/resource.h>
-#endif
 
 namespace xc::app {
 
@@ -112,97 +109,6 @@ void AudioLatency::update(uint64_t now, media::AudioQueue* queue) {
 }
 
 namespace {
-// A recording of the game's picture as it arrives (the H.264 the cloud sends, as it is: nothing
-// re-encoded, no sound, none of the app's overlay), for diagnosis: rec.h264, and rec.idx with each
-// frame's number, its arrival (ms after the start) and the wall clock, to match the log's times.
-// Written by a thread of its own; frames beyond a backlog of 240 are dropped, not waited for.
-class StreamRecorder {
-public:
-    ~StreamRecorder() { stop(); }
-    bool start(const std::string& dir, int seconds) {
-        stop();
-        video_ = std::fopen((dir + "/rec.h264").c_str(), "wb");
-        index_ = std::fopen((dir + "/rec.idx").c_str(), "wb");
-        if (!video_ || !index_) {
-            XC_LOGW("recording: cannot open %s/rec.h264 or rec.idx", dir.c_str());
-            stop();
-            return false;
-        }
-        startMs_ = platform::nowMs(), untilMs_ = startMs_ + static_cast<uint64_t>(seconds) * 1000;
-        frames_ = bytes_ = dropped_ = 0;
-        running_ = true;
-        writer_ = std::thread([this] { writeLoop(); });
-        XC_LOGI("recording: started, %d s, into %s/rec.h264 (frame times in rec.idx)", seconds, dir.c_str());
-        return true;
-    }
-    void stop() {
-        {
-            std::lock_guard<std::mutex> lock(mutex_);
-            if (!running_ && !writer_.joinable()) return;
-            running_ = false;
-        }
-        cv_.notify_all();
-        if (writer_.joinable()) writer_.join();
-        if (video_) std::fclose(video_), video_ = nullptr;
-        if (index_) std::fclose(index_), index_ = nullptr;
-        if (frames_ || dropped_)
-            XC_LOGI("recording: stopped, %llu frames, %llu MB, %llu dropped", static_cast<unsigned long long>(frames_),
-                    static_cast<unsigned long long>(bytes_ >> 20), static_cast<unsigned long long>(dropped_));
-        frames_ = dropped_ = 0;
-    }
-    bool active() const { return running_.load(std::memory_order_relaxed); }
-    bool expired() const { return active() && platform::nowMs() >= untilMs_; }
-    // From the receive thread: a complete access unit (Annex B).
-    void frame(const uint8_t* d, size_t n) {
-        if (!active()) return;
-        std::lock_guard<std::mutex> lock(mutex_);
-        if (queue_.size() >= 240) {
-            ++dropped_;
-            return;
-        }
-        queue_.push_back({std::vector<uint8_t>(d, d + n), platform::nowMs() - startMs_});
-        cv_.notify_one();
-    }
-
-private:
-    struct Item {
-        std::vector<uint8_t> data;
-        uint64_t atMs;
-    };
-    void writeLoop() {
-        for (;;) {
-            Item item;
-            {
-                std::unique_lock<std::mutex> lock(mutex_);
-                cv_.wait(lock, [this] { return !running_ || !queue_.empty(); });
-                if (queue_.empty()) return;
-                item = std::move(queue_.front());
-                queue_.pop_front();
-            }
-            std::fwrite(item.data.data(), 1, item.data.size(), video_);
-            const std::time_t now = std::time(nullptr);
-            std::tm local{};
-#if defined(_WIN32)
-            localtime_s(&local, &now);
-#else
-            localtime_r(&now, &local);
-#endif
-            char clock[16];
-            std::strftime(clock, sizeof clock, "%H:%M:%S", &local);
-            std::fprintf(index_, "%llu %llu %s\n", static_cast<unsigned long long>(frames_),
-                         static_cast<unsigned long long>(item.atMs), clock);
-            ++frames_, bytes_ += item.data.size();
-        }
-    }
-    std::FILE* video_ = nullptr;
-    std::FILE* index_ = nullptr;
-    std::thread writer_;
-    std::mutex mutex_;
-    std::condition_variable cv_;
-    std::deque<Item> queue_;
-    std::atomic<bool> running_{false};
-    uint64_t startMs_ = 0, untilMs_ = 0, frames_ = 0, bytes_ = 0, dropped_ = 0;
-};
 }  // namespace
 
 struct StreamPlayer::Impl {
@@ -275,71 +181,13 @@ struct StreamPlayer::Impl {
         }
     }
 
-    // Measurement windows (markBenchWindow): every frame's times from one
-    // mark to the next, for the percentiles a per-second average can't give.
-    // Off (nothing recorded, no lock taken) until the first mark.
-    struct Hist {
-        static constexpr uint64_t kStepUs = 10, kBuckets = 10000;  // 10 us steps up to 100 ms
-        std::vector<uint32_t> n = std::vector<uint32_t>(kBuckets + 1, 0);
-        uint64_t count = 0, sumUs = 0, maxUs = 0;
-        void add(uint64_t us) {
-            ++n[std::min(us / kStepUs, kBuckets)];
-            ++count;
-            sumUs += us;
-            maxUs = std::max(maxUs, us);
-        }
-        double avgMs() const { return count ? sumUs / 1000.0 / static_cast<double>(count) : 0.0; }
-        double maxMs() const { return maxUs / 1000.0; }
-        double pctMs(double p) const {
-            if (!count) return 0.0;
-            const uint64_t want = static_cast<uint64_t>(p * static_cast<double>(count - 1)) + 1;
-            uint64_t seen = 0;
-            for (uint64_t i = 0; i <= kBuckets; ++i) {
-                seen += n[i];
-                if (seen >= want) return std::min((i + 0.5) * kStepUs, static_cast<double>(maxUs)) / 1000.0;
-            }
-            return maxMs();
-        }
-    };
-    struct BenchWindow {
-        std::string name;
-        uint64_t startMs = 0;
-        Hist decode, hwDecode, hwDecodeCpu, hwFlush, qpParse, draw, onScreen, glass;
-        int64_t cpu0Us = -1;  // the process's CPU time at the start (processCpuUs())
-        uint64_t swCalls = 0, hwCalls = 0, flushed = 0;
-        uint64_t decoded0 = 0, dropped0 = 0, late0 = 0, failures0 = 0;
-        uint64_t rtpLost0 = 0, rtpRecovered0 = 0, rtpDropped0 = 0;
-    };
-    std::atomic<bool> benchOn{false};
-    std::mutex benchMutex;
-    BenchWindow bench;
-    void benchDecode(uint64_t us, const media::VideoDecoder& d) {
-        if (!benchOn) return;
-        std::lock_guard<std::mutex> lock(benchMutex);
-        bench.decode.add(us);
-        if (!d.isHardware()) {
-            ++bench.swCalls;
-            return;
-        }
-        ++bench.hwCalls;
-        const auto& t = d.hwTiming();
-        bench.hwDecode.add(t.decodeUs);
-        if (t.decodeCpuUs >= 0) bench.hwDecodeCpu.add(static_cast<uint64_t>(t.decodeCpuUs));
-        if (t.flushed) ++bench.flushed, bench.hwFlush.add(t.flushUs);
-        if (d.lastQpParseUs() >= 0) bench.qpParse.add(static_cast<uint64_t>(d.lastQpParseUs()));
-    }
-    void benchAdd(Hist BenchWindow::*h, uint64_t us) {
-        if (!benchOn) return;
-        std::lock_guard<std::mutex> lock(benchMutex);
-        (bench.*h).add(us);
-    }
+    StreamBenchTracker bench;
     bool loggedFirstDecode = false;
     FILE* dumpFile = nullptr;
     uint64_t dumpUntilMs = 0;
-    std::mutex snapshotMutex;
-    std::string snapshotPath;
+    StreamSnapshotter snapshotter;
     StreamRecorder recorder;  // rec.req: the game's picture to a file (diagnosis)
-    std::string screenPath;  // video thread only
+    StreamMotionRecorder motion;
     uint64_t lastKeyframeRequestMs = 0;
     // The game's text requests not yet taken, and those it withdrew (mutex).
     std::deque<stream::TextInputRequest> textRequests;
@@ -394,8 +242,6 @@ struct StreamPlayer::Impl {
     } micStats;
     bool encoderInitialized = false;
     platform::Thread inputThread;
-    platform::Thread snapshotThread;
-    platform::Thread screenThread;
     struct LatestPicture {
         media::Picture pic;
         std::vector<uint8_t> yPlane;
@@ -675,7 +521,7 @@ struct StreamPlayer::Impl {
                 }
             }
 
-            bool screenshot = saveSnapshotIfAsked(cur.pic);
+            bool screenshot = snapshotter.saveSnapshotIfAsked(cur.pic);
             std::unique_lock<std::recursive_mutex> lock(display::frameMutex());
             if (!loggedFirstPresent) {
                 XC_LOGI("first draw %dx%d (%s, %s)", cur.pic.width, cur.pic.height,
@@ -733,7 +579,7 @@ struct StreamPlayer::Impl {
                         displayUs += lat;
                         ++displayCount;
                         atomicMax(displayMaxUs, lat);
-                        benchAdd(&BenchWindow::onScreen, lat);
+                        bench.record(&StreamBenchTracker::Window::onScreen, lat);
                     }
                 }
             }
@@ -747,11 +593,11 @@ struct StreamPlayer::Impl {
                         cur.meta.submittedMs - cur.meta.firstPacketArrivalMs,
                         cur.meta.decodedMs - cur.meta.firstPacketArrivalMs,
                         cur.meta.renderedMs - cur.meta.firstPacketArrivalMs);
-            if (screenshot) saveScreen();
+            if (screenshot) snapshotter.saveScreen();
             drawUs += tDrawDone - t2;
             ++drawCalls;
             atomicMax(drawMaxUs, tDrawDone - t2);
-            benchAdd(&BenchWindow::draw, tDrawDone - t2);
+            bench.record(&StreamBenchTracker::Window::draw, tDrawDone - t2);
             if (!loggedFirstPresent) {
                 loggedFirstPresent = true;
                 XC_LOGI("first frame presented");
@@ -839,14 +685,14 @@ struct StreamPlayer::Impl {
                 displayUs += lat;
                 ++displayCount;
                 atomicMax(displayMaxUs, lat);
-                benchAdd(&BenchWindow::onScreen, lat);
+                bench.record(&StreamBenchTracker::Window::onScreen, lat);
             }
             if (q.firstPacketUs && shownAt > q.firstPacketUs) {
                 uint64_t lat = shownAt - q.firstPacketUs;
                 glassUs += lat;
                 ++glassCount;
                 atomicMax(glassMaxUs, lat);
-                benchAdd(&BenchWindow::glass, lat);
+                bench.record(&StreamBenchTracker::Window::glass, lat);
             }
         };
         while (running) {
@@ -965,7 +811,7 @@ struct StreamPlayer::Impl {
             decodeUs += t1 - t0;
             ++decodeCalls;
             atomicMax(decodeMaxUs, t1 - t0);
-            benchDecode(t1 - t0, *decoder);
+            bench.recordDecode(t1 - t0, *decoder);
             if (first) {
                 loggedFirstDecode = true;
                 XC_LOGI("first video decode done: ok=%d", ok);
@@ -1028,7 +874,7 @@ struct StreamPlayer::Impl {
                 ++droppedFrames;
                 continue;
             }
-            bool screenshot = saveSnapshotIfAsked(pic);
+            bool screenshot = snapshotter.saveSnapshotIfAsked(pic);
             std::unique_lock<std::recursive_mutex> lock(display::frameMutex());
             if (decodedFrames == 1) {
                 XC_LOGI("first draw %dx%d (%s, %s)", pic.width, pic.height,
@@ -1088,20 +934,20 @@ struct StreamPlayer::Impl {
                         meta.submittedMs - meta.firstPacketArrivalMs, meta.decodedMs - meta.firstPacketArrivalMs,
                         meta.renderedMs - meta.firstPacketArrivalMs);
             if (screenshot) {
-                saveScreen();
+                snapshotter.saveScreen();
                 lock.unlock();
             }
             drawUs += t3 - t2;
             ++drawCalls;
             atomicMax(drawMaxUs, t3 - t2);
-            benchAdd(&BenchWindow::draw, t3 - t2);
+            bench.record(&StreamBenchTracker::Window::draw, t3 - t2);
             if (decodedFrames == 1) XC_LOGI("first frame presented");
-            motionMeasure(pic, t3);
+            motion.measure(pic, t3);
             if (hasFrameTap.load(std::memory_order_relaxed)) {
                 std::lock_guard<std::mutex> tapLock(frameTapMutex);
                 if (frameTap && pic.y) frameTap(pic.y, pic.strideY, pic.width, pic.height, t3);
             }
-            if (imageTestWanted.exchange(false)) imageTest(pic, drawPic);
+            if (imageTestWanted.exchange(false)) runStreamImageTest(pic, drawPic);
         }
     }
 
@@ -1337,195 +1183,13 @@ struct StreamPlayer::Impl {
         platform::notify(ui::tr(ui::Str::Reconnected));
     }
 
-    // Returns true when a snapshot was taken: the caller then saves what the
-    // screen shows too (saveScreen()).
-    bool saveSnapshotIfAsked(const media::Picture& pic) {
-        std::string path;
-        {
-            std::lock_guard<std::mutex> lock(snapshotMutex);
-            path.swap(snapshotPath);
-        }
-        if (path.empty()) return false;
-        screenPath = path.substr(0, path.rfind('/') + 1) + "screen.ppm";
-        int w = pic.width / 2, h = pic.height / 2;
-        std::vector<uint8_t> rgb(static_cast<size_t>(w) * h * 3);
-        const bool isNv12 = (pic.format == media::Picture::Format::Nv12);
-        for (int y = 0; y < h; ++y)
-            for (int x = 0; x < w; ++x) {
-                int c = (pic.y[(2 * y) * pic.strideY + 2 * x] - 16) * 1192;
-                int d = isNv12 ? (pic.u[y * pic.strideU + 2 * x] - 128)
-                               : (pic.u[y * pic.strideU + x] - 128);
-                int e = isNv12 ? (pic.u[y * pic.strideU + 2 * x + 1] - 128)
-                               : (pic.v[y * pic.strideV + x] - 128);
-                auto clamp = [](int v) { return static_cast<uint8_t>(v < 0 ? 0 : v > 255 ? 255 : v); };
-                uint8_t* o = &rgb[(static_cast<size_t>(y) * w + x) * 3];
-                o[0] = clamp((c + 1836 * e + 512) >> 10);
-                o[1] = clamp((c - 218 * d - 546 * e + 512) >> 10);
-                o[2] = clamp((c + 2163 * d + 512) >> 10);
-            }
-        if (snapshotThread.joinable()) snapshotThread.join();
-        platform::startThread(snapshotThread, [path, rgb = std::move(rgb), w, h]() mutable {
-            std::string data = "P6\n" + std::to_string(w) + " " + std::to_string(h) + "\n255\n";
-            data.append(reinterpret_cast<const char*>(rgb.data()), rgb.size());
-            bool ok = platform::writeFileAtomic(path, data);
-            XC_LOGI("snapshot %dx%d -> %s: %s", w, h, path.c_str(), ok ? "ok" : "failed");
-        }, 512u << 10);
-        return true;
-    }
-
-    // The scan-out buffer just presented, at full resolution.
     // Measurements (autoplay "imgtest"): this picture drawn again with each
     // look (upscaler, sharpening), a 1280x720 crop of the 4K output
     // saved for each (img_<name>.ppm). The stream is left with the defaults.
     std::atomic<bool> imageTestWanted{false};
-
-    // Measurements (startMotionRecording): the picture's shift between frames,
-    // from its luma's column and row averages over the upper middle (away from
-    // the HUD and the player's character).
-    std::mutex motionMutex;
-    std::vector<StreamPlayer::MotionSample> motionRec;
-    std::vector<float> motionPrevCols, motionPrevRows;
-    uint64_t motionUntilUs = 0;
-    std::atomic<int> motionState{0};  // 0 idle, 1 recording, 2 done
-    StreamPlayer::MotionStick motionStick = nullptr;
     std::mutex frameTapMutex;
     StreamPlayer::FrameTap frameTap;
     std::atomic<bool> hasFrameTap{false};
-    bool motionRawDump = false;
-    std::string motionRaw;
-    static float profileShift(const std::vector<float>& prev, const std::vector<float>& cur, int range, float& fit) {
-        const int n = static_cast<int>(cur.size());
-        std::vector<float> cost(static_cast<size_t>(2 * range + 1));
-        float sum = 0;
-        int best = 0;
-        for (int s = -range; s <= range; ++s) {
-            float c = 0;
-            int m = 0;
-            for (int i = range; i < n - range; ++i, ++m) c += std::abs(cur[i] - prev[i - s]);
-            c /= static_cast<float>(m > 0 ? m : 1);
-            cost[static_cast<size_t>(s + range)] = c;
-            sum += c;
-            if (c < cost[static_cast<size_t>(best + range)]) best = s;
-        }
-        const float mean = sum / static_cast<float>(cost.size()), c0 = cost[static_cast<size_t>(best + range)];
-        fit = mean > 1e-6f ? c0 / mean : 1.0f;
-        float sub = 0;
-        if (best > -range && best < range) {
-            const float a = cost[static_cast<size_t>(best + range - 1)], b = cost[static_cast<size_t>(best + range + 1)];
-            const float den = a - 2 * c0 + b;
-            if (den > 1e-9f) sub = 0.5f * (a - b) / den;
-        }
-        return static_cast<float>(best) + sub;
-    }
-    void motionMeasure(const media::Picture& pic, uint64_t nowUs) {
-        if (motionState.load(std::memory_order_relaxed) != 1 || !pic.y || pic.width < 640 || pic.height < 360) return;
-        const int x0 = pic.width / 5, x1 = pic.width * 4 / 5, y0 = pic.height / 8, y1 = pic.height / 2;
-        std::vector<float> cols(static_cast<size_t>((x1 - x0) / 2)), rows(static_cast<size_t>((y1 - y0) / 2));
-        for (size_t i = 0; i < cols.size(); ++i) {
-            const int x = x0 + static_cast<int>(i) * 2;
-            uint32_t sum = 0;
-            for (int y = y0; y < y1; y += 4) sum += pic.y[static_cast<size_t>(y) * pic.strideY + x] + pic.y[static_cast<size_t>(y) * pic.strideY + x + 1];
-            cols[i] = static_cast<float>(sum) / static_cast<float>(2 * ((y1 - y0 + 3) / 4));
-        }
-        for (size_t j = 0; j < rows.size(); ++j) {
-            const int y = y0 + static_cast<int>(j) * 2;
-            uint32_t sum = 0;
-            for (int x = x0; x < x1; x += 4) sum += pic.y[static_cast<size_t>(y) * pic.strideY + x] + pic.y[static_cast<size_t>(y + 1) * pic.strideY + x];
-            rows[j] = static_cast<float>(sum) / static_cast<float>(2 * ((x1 - x0 + 3) / 4));
-        }
-        std::lock_guard<std::mutex> lock(motionMutex);
-        if (nowUs >= motionUntilUs || motionRec.size() >= motionRec.capacity()) {
-            motionState = 2;
-            return;
-        }
-        if (motionRawDump && motionRaw.size() + 12000 < motionRaw.capacity() && motionPrevCols.size() == cols.size()) {
-            motionRaw.append(reinterpret_cast<const char*>(cols.data()), cols.size() * sizeof(float));
-            const int bw = pic.width / 128, bh = pic.height / 72;
-            for (int ty = 0; ty < 72; ++ty)
-                for (int tx = 0; tx < 128; ++tx) {
-                    uint32_t sum = 0;
-                    for (int yy = 0; yy < bh; yy += 3)
-                        for (int xx = 0; xx < bw; xx += 3) sum += pic.y[static_cast<size_t>(ty * bh + yy) * pic.strideY + tx * bw + xx];
-                    motionRaw.push_back(static_cast<char>(sum / static_cast<uint32_t>(((bh + 2) / 3) * ((bw + 2) / 3))));
-                }
-        }
-        if (motionPrevCols.size() == cols.size() && motionPrevRows.size() == rows.size()) {
-            StreamPlayer::MotionSample s{};
-            s.us = nowUs;
-            s.dx = 2.0f * profileShift(motionPrevCols, cols, 120, s.fitX);
-            s.dy = 2.0f * profileShift(motionPrevRows, rows, 60, s.fitY);
-            if (motionStick) motionStick(nowUs, s.stickX, s.stickY);
-            motionRec.push_back(s);
-        }
-        motionPrevCols.swap(cols);
-        motionPrevRows.swap(rows);
-    }
-    template <class Draw>
-    void imageTest(const media::Picture& pic, const Draw& drawPic) {
-        struct Look {
-            const char* name;
-            int upscaler, sharpness;  // stream_screen.cpp's applyUpscaler mode, kSharpAmount
-            bool legacy8 = false;     // rounded to 8 bits between the passes, no dither (before the 16-bit images)
-            bool full = false;        // the whole output saved, not a crop
-            bool evenChroma = false;  // colour samples spread evenly (before they followed the brightness edges)
-        };
-        static constexpr Look kLooks[] = {
-            {"1_clean_med", 2, 176}, {"2_fsr_med", 0, 176},  {"3_clean_high", 2, 256}, {"4_clean_low", 2, 96},
-            {"5_clean_off", 2, 0},   {"6_fsr_off", 0, 0},    {"7_a4k_med", 1, 176},    {"8_a4k_clean_med", 3, 176},
-{"A_default_8bit", 2, 176, true, true},
-            {"B_default_16bit", 2, 176, false, true}, {"C_fsr_8bit", 0, 176, true, true},
-            {"D_fsr_16bit", 0, 176, false, true},     {"E_chroma_even", 2, 176, false, true, true},
-            {"F_chroma_guided", 2, 176, false, true}, {"9_default", 2, 176},
-        };
-        for (const Look& look : kLooks) {
-            display::setUpscaler(look.upscaler & 1);
-            display::setRestore(look.upscaler >= 2);
-            display::setSharpness(look.sharpness);
-            display::setLegacyPrecision(look.legacy8);
-            display::setChromaGuide(!look.evenChroma);
-            std::vector<uint8_t> rgb;
-            int w = 0, h = 0;
-            {
-                std::lock_guard<std::recursive_mutex> lock(display::frameMutex());
-                if (!drawPic(pic, true)) continue;
-                display::present();
-                if (!display::readBackRgb(rgb, w, h)) continue;
-            }
-            if (std::string(look.name) == "9_default") break;
-            const int cw = look.full ? w : std::min(1280, w), ch = look.full ? h : std::min(720, h);
-            const int x0 = look.full ? 0 : std::min(1100, w - cw), y0 = look.full ? 0 : std::min(300, h - ch);
-            std::string data = "P6\n" + std::to_string(cw) + " " + std::to_string(ch) + "\n255\n";
-            for (int y = 0; y < ch; ++y)
-                data.append(reinterpret_cast<const char*>(rgb.data() + (static_cast<size_t>(y0 + y) * w + x0) * 3),
-                            static_cast<size_t>(cw) * 3);
-            const std::string path = platform::dataDir() + "/img_" + look.name + ".ppm";
-            XC_LOGI("image test: %s (%dx%d of %dx%d) %s", look.name, cw, ch, w, h,
-                    platform::writeFileAtomic(path, data) ? "saved" : "not saved");
-        }
-    }
-
-    void saveScreen() {
-        try {
-            std::vector<uint8_t> rgb;
-            int w = 0, h = 0;
-            if (!display::readBackRgb(rgb, w, h)) return;
-            std::string path = screenPath;
-            if (screenThread.joinable()) screenThread.join();
-            platform::startThread(screenThread, [path, rgb = std::move(rgb), w, h]() mutable {
-                try {
-                    std::string data = "P6\n" + std::to_string(w) + " " + std::to_string(h) + "\n255\n";
-                    data.append(reinterpret_cast<const char*>(rgb.data()), rgb.size());
-                    std::vector<uint8_t>().swap(rgb); // release the 6.2 MB vector immediately
-                    bool ok = platform::writeFileAtomic(path, data);
-                    XC_LOGI("screen -> %s: %s", path.c_str(), ok ? "ok" : "failed");
-                } catch (const std::exception& e) {
-                    XC_LOGW("screen thread error: %s", e.what());
-                }
-            }, 512u << 10);
-        } catch (const std::exception& e) {
-            XC_LOGW("saveScreen failed: %s", e.what());
-        }
-    }
 
     // Video thread only (data channel sends are thread-safe).
     void requestKeyframeIfWanted() {
@@ -1569,8 +1233,7 @@ struct StreamPlayer::Impl {
         if (inputThread.joinable()) inputThread.join();
         if (videoThread.joinable()) videoThread.join();
         if (audioThread.joinable()) audioThread.join();
-        if (snapshotThread.joinable()) snapshotThread.join();
-        if (screenThread.joinable()) screenThread.join();
+        snapshotter.stop();
         std::shared_ptr<stream::StreamSession> last;
         {
             std::lock_guard<std::mutex> lock(sessionMutex);
@@ -1732,8 +1395,7 @@ void StreamPlayer::stopRecording() { impl_->recorder.stop(); }
 bool StreamPlayer::recordingExpired() const { return impl_->recorder.expired(); }
 
 void StreamPlayer::requestSnapshot(const std::string& path) {
-    std::lock_guard<std::mutex> lock(impl_->snapshotMutex);
-    impl_->snapshotPath = path;
+    impl_->snapshotter.request(path);
 }
 void StreamPlayer::stop() { impl_->stop(); }
 
@@ -1820,117 +1482,31 @@ void StreamPlayer::switchDecoder(bool hardware) { impl_->decoderSwitch = hardwar
 void StreamPlayer::recreateHwDecoder() { impl_->hwRecreate = true; }
 
 void StreamPlayer::setTierSequence(const std::string& seq) { impl_->tierSequence = seq; }
-void StreamPlayer::setMotionStick(MotionStick fn) { impl_->motionStick = fn; }
+void StreamPlayer::setMotionStick(MotionStick fn) { impl_->motion.setStick(fn); }
 void StreamPlayer::setFrameTap(FrameTap tap) {
     std::lock_guard<std::mutex> lock(impl_->frameTapMutex);
     impl_->frameTap = std::move(tap);
     impl_->hasFrameTap = static_cast<bool>(impl_->frameTap);
 }
-void StreamPlayer::setMotionRawDump(bool on) {
-    std::lock_guard<std::mutex> lock(impl_->motionMutex);
-    impl_->motionRawDump = on;
-    impl_->motionRaw.clear();
-    if (on) impl_->motionRaw.reserve(48u * 1024 * 1024);
-}
-bool StreamPlayer::motionRawTake(std::string& out) {
-    std::lock_guard<std::mutex> lock(impl_->motionMutex);
-    if (!impl_->motionRawDump || impl_->motionState == 1 || impl_->motionRaw.empty()) return false;
-    out.swap(impl_->motionRaw);
-    impl_->motionRaw = std::string();
-    impl_->motionRawDump = false;
-    return true;
-}
-void StreamPlayer::startMotionRecording(int seconds) {
-    std::lock_guard<std::mutex> lock(impl_->motionMutex);
-    seconds = std::clamp(seconds, 1, 180);
-    impl_->motionRec.clear();
-    impl_->motionRec.reserve(static_cast<size_t>(seconds) * 130);
-    impl_->motionPrevCols.clear();
-    impl_->motionPrevRows.clear();
-    impl_->motionUntilUs = platform::nowUs() + static_cast<uint64_t>(seconds) * 1000000u;
-    impl_->motionState = 1;
-}
-bool StreamPlayer::motionTake(std::vector<MotionSample>& out) {
-    std::lock_guard<std::mutex> lock(impl_->motionMutex);
-    if (impl_->motionState == 1 && platform::nowUs() >= impl_->motionUntilUs) impl_->motionState = 2;
-    if (impl_->motionState != 2) return false;
-    out.swap(impl_->motionRec);
-    impl_->motionRec.clear();
-    impl_->motionState = 0;
-    return true;
-}
-
-namespace {
-// The process's CPU time, every thread (system libraries' too): -1 where unknown.
-int64_t processCpuUs() {
-#if defined(_WIN32)
-    return -1;
-#else
-    rusage u{};
-    if (getrusage(RUSAGE_SELF, &u) != 0) return -1;
-    return (static_cast<int64_t>(u.ru_utime.tv_sec) + u.ru_stime.tv_sec) * 1000000 + u.ru_utime.tv_usec +
-           u.ru_stime.tv_usec;
-#endif
-}
-}  // namespace
+void StreamPlayer::setMotionRawDump(bool on) { impl_->motion.setRawDump(on); }
+bool StreamPlayer::motionRawTake(std::string& out) { return impl_->motion.rawTake(out); }
+void StreamPlayer::startMotionRecording(int seconds) { impl_->motion.start(seconds); }
+bool StreamPlayer::motionTake(std::vector<MotionSample>& out) { return impl_->motion.take(out); }
 
 void StreamPlayer::markBenchWindow(const std::string& name) {
     Impl& m = *impl_;
-    const int64_t cpuNow = processCpuUs();
-    uint64_t lost = 0, recovered = 0, rtpDropped = 0;
+    StreamBenchTracker::Counters c;
+    c.decoded = m.decodedFrames;
+    c.dropped = m.droppedFrames;
+    c.late = m.lateFrames;
+    c.failures = m.decodeFailures;
     if (auto s = m.current()) {
         const auto& v = s->videoStats();
-        lost = v.lost, recovered = v.recovered, rtpDropped = v.framesDropped;
+        c.rtpLost = v.lost;
+        c.rtpRecovered = v.recovered;
+        c.rtpDropped = v.framesDropped;
     }
-    std::lock_guard<std::mutex> lock(m.benchMutex);
-    const uint64_t now = platform::nowMs();
-    if (m.benchOn) {
-        const Impl::BenchWindow& b = m.bench;
-        const char* dec = b.hwCalls && b.swCalls ? "mixed" : b.hwCalls ? "HW" : b.swCalls ? "SW" : "none";
-        XC_LOGI("BENCH window \"%s\": %.1f s, decoder %s (%llu sw, %llu hw calls); "
-                "decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
-                "hw decode avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
-                "hw decode thread cpu avg %.2f p50 %.2f p95 %.2f ms; process cpu %.0f%% of a core; "
-                "flush %llu of %llu, avg %.2f p50 %.2f p95 %.2f max %.2f ms; "
-                "qp parse %llu, avg %.3f p95 %.3f max %.3f ms; "
-                "draw avg %.2f p95 %.2f max %.2f ms; "
-                "on screen avg %.2f p50 %.2f p95 %.2f p99 %.2f max %.2f ms; "
-                "first packet to screen avg %.2f p50 %.2f p95 %.2f max %.2f ms; "
-                "%llu decoded, %llu skipped, %llu late, %llu failed; rtp %llu lost, %llu recovered, %llu frames dropped",
-                b.name.c_str(), (now - b.startMs) / 1000.0, dec, static_cast<unsigned long long>(b.swCalls),
-                static_cast<unsigned long long>(b.hwCalls),
-                b.decode.avgMs(), b.decode.pctMs(0.5), b.decode.pctMs(0.95), b.decode.pctMs(0.99), b.decode.maxMs(),
-                b.hwDecode.avgMs(), b.hwDecode.pctMs(0.5), b.hwDecode.pctMs(0.95), b.hwDecode.pctMs(0.99),
-                b.hwDecode.maxMs(),
-                b.hwDecodeCpu.avgMs(), b.hwDecodeCpu.pctMs(0.5), b.hwDecodeCpu.pctMs(0.95),
-                (b.cpu0Us >= 0 && cpuNow >= 0 && now > b.startMs)
-                    ? 100.0 * static_cast<double>(cpuNow - b.cpu0Us) / 1000.0 / static_cast<double>(now - b.startMs)
-                    : -1.0,
-                static_cast<unsigned long long>(b.flushed), static_cast<unsigned long long>(b.hwCalls),
-                b.hwFlush.avgMs(), b.hwFlush.pctMs(0.5), b.hwFlush.pctMs(0.95), b.hwFlush.maxMs(),
-                static_cast<unsigned long long>(b.qpParse.count), b.qpParse.avgMs(), b.qpParse.pctMs(0.95),
-                b.qpParse.maxMs(),
-                b.draw.avgMs(), b.draw.pctMs(0.95), b.draw.maxMs(),
-                b.onScreen.avgMs(), b.onScreen.pctMs(0.5), b.onScreen.pctMs(0.95), b.onScreen.pctMs(0.99),
-                b.onScreen.maxMs(),
-                b.glass.avgMs(), b.glass.pctMs(0.5), b.glass.pctMs(0.95), b.glass.maxMs(),
-                static_cast<unsigned long long>(m.decodedFrames - b.decoded0),
-                static_cast<unsigned long long>(m.droppedFrames - b.dropped0),
-                static_cast<unsigned long long>(m.lateFrames - b.late0),
-                static_cast<unsigned long long>(m.decodeFailures - b.failures0),
-                static_cast<unsigned long long>(lost - b.rtpLost0),
-                static_cast<unsigned long long>(recovered - b.rtpRecovered0),
-                static_cast<unsigned long long>(rtpDropped - b.rtpDropped0));
-    }
-    m.bench = Impl::BenchWindow{};
-    m.bench.name = name;
-    m.bench.startMs = now;
-    m.bench.cpu0Us = cpuNow;
-    m.bench.decoded0 = m.decodedFrames, m.bench.dropped0 = m.droppedFrames;
-    m.bench.late0 = m.lateFrames, m.bench.failures0 = m.decodeFailures;
-    m.bench.rtpLost0 = lost, m.bench.rtpRecovered0 = recovered, m.bench.rtpDropped0 = rtpDropped;
-    m.benchOn = true;
-    XC_LOGI("BENCH mark: window \"%s\" starts", name.c_str());
+    m.bench.markWindow(name, c);
 }
 
 void StreamPlayer::setLegacyTuning(bool on) {
