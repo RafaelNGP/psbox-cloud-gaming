@@ -418,57 +418,55 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
         fonts_.regular.draw(c, warn2, left, 965, 20, kGray);
     }
 
-#if defined(__ANDROID__)
-    // Harmonized Xbox-styled primary action button for mobile browser sign-in
-    Rect btnBox{1180, 480, 560, 124};
-    c.fillRect(btnBox, kGreen, 24);
-    c.strokeRect(btnBox, rgba(30, 215, 96, 140), 2, 24);
+    if (platform::hasTouchscreen()) {
+        // Harmonized Xbox-styled primary action button for mobile/handheld browser sign-in
+        Rect btnBox{1180, 480, 560, 124};
+        c.fillRect(btnBox, kGreen, 24);
+        c.strokeRect(btnBox, rgba(30, 215, 96, 140), 2, 24);
 
-    const char* btnTxt = tr(Str::SignInOpenBrowser);
-    int bw = fonts_.bold.measure(btnTxt, 28);
-    fonts_.bold.draw(c, btnTxt, btnBox.x + (btnBox.w - bw) / 2,
-                     btnBox.y + 24, 28, kWhite);
+        const char* btnTxt = tr(Str::SignInOpenBrowser);
+        int bw = fonts_.bold.measure(btnTxt, 28);
+        fonts_.bold.draw(c, btnTxt, btnBox.x + (btnBox.w - bw) / 2,
+                         btnBox.y + 24, 28, kWhite);
 
-    const char* subTxt = tr(Str::SignInOpenBrowserHint);
-    int sw = fonts_.regular.measure(subTxt, 18);
-    fonts_.regular.draw(c, subTxt, btnBox.x + (btnBox.w - sw) / 2,
-                        btnBox.y + btnBox.h - 32, 18, rgba(220, 245, 225));
+        const char* subTxt = tr(Str::SignInOpenBrowserHint);
+        int sw = fonts_.regular.measure(subTxt, 18);
+        fonts_.regular.draw(c, subTxt, btnBox.x + (btnBox.w - sw) / 2,
+                            btnBox.y + btnBox.h - 32, 18, rgba(220, 245, 225));
 
-    // Under the code panel: clean copy affordance badge matching app palette
-    Rect copyBadge{left, 765, panel.w, 46};
-    c.fillRect(copyBadge, rgba(28, 28, 34, 220), 12);
-    c.strokeRect(copyBadge, rgba(255, 255, 255, 30), 1, 12);
-    const char* copyMsg = tr(Str::SignInClickToCopy);
-    int cw = fonts_.semibold.measure(copyMsg, 20);
-    fonts_.semibold.draw(c, copyMsg, copyBadge.x + (copyBadge.w - cw) / 2,
-                         fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 20), 20, kGray);
-#else
-    // QR code for the sign-in page with the device code prefilled (?otc=<code>).
-    // With OAuth v2.0 (login.microsoftonline.com + play.xbox.com client id),
-    // microsoft.com/link?otc=CODE pre-fills the code on the phone without triggering
-    // the legacy first-party consent refusal.
-    std::string target = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
-    if (!code_.empty() && target.find("otc=") == std::string::npos) {
-        target += (target.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+        // Under the code panel: clean copy affordance badge matching app palette
+        Rect copyBadge{left, 765, panel.w, 46};
+        c.fillRect(copyBadge, rgba(28, 28, 34, 220), 12);
+        c.strokeRect(copyBadge, rgba(255, 255, 255, 30), 1, 12);
+        const char* copyMsg = tr(Str::SignInClickToCopy);
+        int cw = fonts_.semibold.measure(copyMsg, 20);
+        fonts_.semibold.draw(c, copyMsg, copyBadge.x + (copyBadge.w - cw) / 2,
+                             fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 20), 20, kGray);
+    } else {
+        // QR code for the sign-in page with the device code prefilled (?otc=<code>).
+        // Shown on consoles, desktop, and non-touch Android TV devices (e.g. Nvidia Shield / TV boxes).
+        std::string target = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+        if (!code_.empty() && target.find("otc=") == std::string::npos) {
+            target += (target.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+        }
+        uint8_t qr[qrcodegen_BUFFER_LEN_MAX], tmp[qrcodegen_BUFFER_LEN_MAX];
+        if (qrcodegen_encodeText(target.c_str(), tmp, qr, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN,
+                                 qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true)) {
+            int n = qrcodegen_getSize(qr);
+            constexpr int kBox = 440;
+            int module = (kBox - 60) / (n + 2);
+            int size = module * (n + 2);
+            Rect box{1280, 300, size + 40, size + 40};
+            c.fillRect(box, kWhite, 24);
+            int ox = box.x + 20 + module, oy = box.y + 20 + module;
+            for (int yy = 0; yy < n; ++yy)
+                for (int xx = 0; xx < n; ++xx)
+                    if (qrcodegen_getModule(qr, xx, yy)) c.fillRect({ox + xx * module, oy + yy * module, module, module}, kBg);
+            int w = fonts_.regular.measure(tr(Str::SignInScan), 26);
+            fonts_.regular.draw(c, tr(Str::SignInScan), box.x + (box.w - w) / 2, box.y + box.h + 24, 26, kGray);
+        }
+        if (caps_.openUrl) drawHints(c, {{kIconCross, tr(Str::OpenInBrowser)}});  // a desktop: the page in the browser
     }
-    uint8_t qr[qrcodegen_BUFFER_LEN_MAX], tmp[qrcodegen_BUFFER_LEN_MAX];
-    if (qrcodegen_encodeText(target.c_str(), tmp, qr, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN,
-                             qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true)) {
-        int n = qrcodegen_getSize(qr);
-        constexpr int kBox = 440;
-        int module = (kBox - 60) / (n + 2);
-        int size = module * (n + 2);
-        Rect box{1280, 300, size + 40, size + 40};
-        c.fillRect(box, kWhite, 24);
-        int ox = box.x + 20 + module, oy = box.y + 20 + module;
-        for (int yy = 0; yy < n; ++yy)
-            for (int xx = 0; xx < n; ++xx)
-                if (qrcodegen_getModule(qr, xx, yy)) c.fillRect({ox + xx * module, oy + yy * module, module, module}, kBg);
-        int w = fonts_.regular.measure(tr(Str::SignInScan), 26);
-        fonts_.regular.draw(c, tr(Str::SignInScan), box.x + (box.w - w) / 2, box.y + box.h + 24, 26, kGray);
-    }
-    if (caps_.openUrl) drawHints(c, {{kIconCross, tr(Str::OpenInBrowser)}});  // a desktop: the page in the browser
-#endif
 }
 
 void AppUi::drawTabs(Canvas& c) {

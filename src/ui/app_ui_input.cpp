@@ -524,17 +524,17 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
             ev.clipboardText = code_;
             return ev;
         }
-#if defined(__ANDROID__)
-        Rect btnBox{1180, 480, 560, 124};
-        if (x >= btnBox.x && x < btnBox.x + btnBox.w && y >= btnBox.y && y < btnBox.y + btnBox.h) {
-            ev.action = Action::OpenUrl;
-            ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
-            if (!code_.empty() && ev.url.find("otc=") == std::string::npos) {
-                ev.url += (ev.url.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+        if (platform::hasTouchscreen()) {
+            Rect btnBox{1180, 480, 560, 124};
+            if (x >= btnBox.x && x < btnBox.x + btnBox.w && y >= btnBox.y && y < btnBox.y + btnBox.h) {
+                ev.action = Action::OpenUrl;
+                ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+                if (!code_.empty() && ev.url.find("otc=") == std::string::npos) {
+                    ev.url += (ev.url.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+                }
+                return ev;
             }
-            return ev;
         }
-#endif
     }
 
     if (reportOpen_) {
@@ -1581,12 +1581,8 @@ UiEvent AppUi::handleLocked(const NavInput& in) {
             handleHome(in, ev);
             break;
         case Screen::SignIn:
-            // Desktop or Android: Cross/A opens the sign-in page in the browser.
-            if (in.accept && (caps_.openUrl
-#if defined(__ANDROID__)
-                || true
-#endif
-            )) {
+            // Desktop or touchscreen Android: Cross/A opens the sign-in page in the browser.
+            if (in.accept && (caps_.openUrl || platform::hasTouchscreen())) {
                 ev.action = Action::OpenUrl;
                 ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
                 if (!code_.empty() && ev.url.find("otc=") == std::string::npos) {
