@@ -2123,7 +2123,8 @@ static void testTokenRefresh() {
                 AuthManager amRefused(store);
                 net::setTestTransport([&](const net::Request& req) {
                     net::Response r;
-                    if (req.url.find("oauth20_connect") != std::string::npos) {
+                    if (req.url.find("oauth20_connect") != std::string::npos ||
+                        req.url.find("oauth2/v2.0/devicecode") != std::string::npos) {
                         ++codeRequests;
                         r.status = 500;
                         return r;
@@ -2146,6 +2147,67 @@ static void testTokenRefresh() {
             CHECK(!amTransient.signIn(gssv, {}, err));
             CHECK(storedRefresh().empty() && !amTransient.hasStoredAccount());
         }
+    }
+    // OAuth v2.0 (play.xbox.com client id): device code + d= ticket + Passport transfer token
+    // without overwriting the v2 refresh token, plus prefilled ?otc=CODE sign-in URL.
+    {
+        std::string v2Store = dir + "/account_v2.json";
+        std::remove(v2Store.c_str());
+        bool sawV2DeviceCode = false, sawV2Token = false, sawDTicket = false, sawPassportTransfer = false;
+        net::setTestTransport([&](const net::Request& req) {
+            net::Response r;
+            r.status = 200;
+            const std::string& u = req.url;
+            if (u.find("login.microsoftonline.com/consumers/oauth2/v2.0/devicecode") != std::string::npos) {
+                sawV2DeviceCode = (req.body.find(kV2ClientId) != std::string::npos);
+                r.body = R"({"user_code":"ABCD1234","device_code":"dc1","verification_uri":"https://www.microsoft.com/link","interval":1,"expires_in":900})";
+            } else if (u.find("login.microsoftonline.com/consumers/oauth2/v2.0/token") != std::string::npos) {
+                sawV2Token = (req.body.find(kV2ClientId) != std::string::npos);
+                r.body = R"({"access_token":"v2_at","expires_in":3600,"refresh_token":"v2_rt_main"})";
+            } else if (u.find("login.live.com/oauth20_token.srf") != std::string::npos) {
+                sawPassportTransfer = (req.body.find("PURPOSE_XBOX_CLOUD_CONSOLE_TRANSFER_TOKEN") != std::string::npos &&
+                                       req.body.find(kV2ClientId) != std::string::npos);
+                r.body = R"({"access_token":"passport_transfer","expires_in":3600,"refresh_token":"passport_rt_ignored"})";
+            } else if (u.find("user.auth.xboxlive.com") != std::string::npos) {
+                sawDTicket = (req.body.find("\"RpsTicket\":\"d=v2_at\"") != std::string::npos);
+                r.body = R"({"Token":"ut","NotAfter":")" + iso(unixNow() + 14 * 86400) + R"(","DisplayClaims":{"xui":[{"uhs":"h"}]}})";
+            } else if (u.find("xsts.auth.xboxlive.com") != std::string::npos) {
+                r.body = R"({"Token":"xt","NotAfter":")" + iso(unixNow() + 16 * 3600) +
+                         R"(","DisplayClaims":{"xui":[{"uhs":"h","gtg":"V2Tester","xid":"2"}]}})";
+            } else if (u.find("gssv-play-prod.xboxlive.com/v2/login/user") != std::string::npos) {
+                r.body = R"({"gsToken":"gs_v2","market":"US","durationInSeconds":3600,"offeringSettings":{"regions":[{"name":"EastUS","baseUri":"https://eus.example","isDefault":true}]}})";
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+        AuthManager amV2(v2Store);
+        xcloud::GssvClient gssvV2;
+        std::string errV2;
+        CHECK(amV2.signIn(gssvV2, {}, errV2));
+        CHECK(sawV2DeviceCode && sawV2Token && sawDTicket);
+        std::string transfer;
+        CHECK(amV2.consoleTransferToken(transfer, errV2) && transfer == "passport_transfer" && sawPassportTransfer);
+        // Reload and verify the v2 refresh token was not overwritten by Passport's refresh token.
+        std::string raw;
+        CHECK(xc::platform::readFile(v2Store, raw));
+        std::string plain;
+        if (isSealedAccount(raw) && unsealAccount(raw, plain)) raw = plain;
+        auto jv2 = json::parse(raw);
+        CHECK(jv2 && (*jv2)["clientId"].str() == kV2ClientId && (*jv2)["refreshToken"].str() == "v2_rt_main");
+
+        // Verify SignIn OpenUrl appends ?otc=<CODE>.
+        ui::Fonts fonts;
+        ui::ImageCache images([] {});
+        ui::AppUi appUi(fonts, images);
+        ui::UiCaps caps;
+        caps.openUrl = true;
+        appUi.setCaps(caps);
+        appUi.showSignIn("ABCD1234", "https://www.microsoft.com/link");
+        ui::NavInput nav;
+        nav.accept = true;
+        auto ev = appUi.handle(nav);
+        CHECK(ev.action == ui::Action::OpenUrl && ev.url == "https://www.microsoft.com/link?otc=ABCD1234");
     }
     net::setTestTransport({});
     xc::fs::removeTree(dir);

@@ -14,8 +14,12 @@
 namespace xc::auth {
 
 namespace {
-constexpr const char* kConnectUrl = "https://login.live.com/oauth20_connect.srf";
-constexpr const char* kTokenUrl = "https://login.live.com/oauth20_token.srf";
+constexpr const char* kV2DeviceCodeUrl = "https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode";
+constexpr const char* kV2TokenUrl = "https://login.microsoftonline.com/consumers/oauth2/v2.0/token";
+constexpr const char* kLegacyConnectUrl = "https://login.live.com/oauth20_connect.srf";
+constexpr const char* kLegacyTokenUrl = "https://login.live.com/oauth20_token.srf";
+
+bool isPassportScope(const std::string& scope) { return scope.rfind("service::", 0) == 0; }
 
 net::Response postForm(const char* url, const std::vector<std::pair<std::string, std::string>>& fields) {
     net::Request req;
@@ -53,10 +57,14 @@ int64_t unixNow() { return static_cast<int64_t>(std::time(nullptr)); }
 bool MsaClient::startDeviceCode(DeviceCode& out, std::string& err) const {
     net::Response r;
     constexpr int kTries = 3;
+    const char* url = cfg_.oauthV2 ? kV2DeviceCodeUrl : kLegacyConnectUrl;
+    std::vector<std::pair<std::string, std::string>> fields = {
+        {"client_id", cfg_.clientId},
+        {"scope", cfg_.scope},
+    };
+    if (!cfg_.oauthV2) fields.emplace_back("response_type", "device_code");
     for (int attempt = 1; attempt <= kTries; ++attempt) {
-        r = postForm(kConnectUrl, {{"client_id", cfg_.clientId},
-                                   {"scope", cfg_.scope},
-                                   {"response_type", "device_code"}});
+        r = postForm(url, fields);
         bool transient = r.status == 0 || r.status == 408 || r.status == 429 || r.status >= 500;
         if (!transient || attempt == kTries) break;
         XC_LOGW("device code request: %s, trying again (%d/%d)", describe(r).c_str(), attempt + 1, kTries);
@@ -80,9 +88,10 @@ bool MsaClient::startDeviceCode(DeviceCode& out, std::string& err) const {
 }
 
 PollResult MsaClient::pollDeviceCode(const DeviceCode& dc, MsaTokens& out, std::string& err) const {
-    auto r = postForm(kTokenUrl, {{"client_id", cfg_.clientId},
-                                  {"device_code", dc.deviceCode},
-                                  {"grant_type", "urn:ietf:params:oauth:grant-type:device_code"}});
+    const char* url = cfg_.oauthV2 ? kV2TokenUrl : kLegacyTokenUrl;
+    auto r = postForm(url, {{"client_id", cfg_.clientId},
+                            {"device_code", dc.deviceCode},
+                            {"grant_type", "urn:ietf:params:oauth:grant-type:device_code"}});
     if (r.status == 0 || r.status >= 500) {
         err = describe(r);
         return PollResult::Pending;  // the network or the service, for now: keep polling
@@ -106,11 +115,15 @@ bool MsaClient::refresh(const std::string& refreshToken, MsaTokens& out, std::st
                         const std::string& scope, bool* networkError, bool* invalidGrant, bool* rejected) const {
     net::Response r;
     constexpr int kTries = 3;
+    const std::string effectiveScope = scope.empty() ? cfg_.scope : scope;
+    // Passport purpose scopes (e.g. console transfer token for /connect) are issued by
+    // login.live.com even when the account signed in through login.microsoftonline.com v2.0.
+    const char* url = (cfg_.oauthV2 && !isPassportScope(effectiveScope)) ? kV2TokenUrl : kLegacyTokenUrl;
     for (int attempt = 1; attempt <= kTries; ++attempt) {
-        r = postForm(kTokenUrl, {{"client_id", cfg_.clientId},
-                                 {"grant_type", "refresh_token"},
-                                 {"refresh_token", refreshToken},
-                                 {"scope", scope.empty() ? cfg_.scope : scope}});
+        r = postForm(url, {{"client_id", cfg_.clientId},
+                           {"grant_type", "refresh_token"},
+                           {"refresh_token", refreshToken},
+                           {"scope", effectiveScope}});
         bool transient = r.status == 0 || r.status == 408 || r.status == 429 || r.status >= 500;
         if (!transient || attempt == kTries) break;
         XC_LOGW("token refresh: %s, trying again (%d/%d)", describe(r).c_str(), attempt + 1, kTries);

@@ -25,7 +25,7 @@ constexpr const char* kTransferScope =
 }
 
 AuthManager::AuthManager(std::string storePath, MsaConfig cfg)
-    : storePath_(std::move(storePath)), msa_(std::move(cfg)) {
+    : storePath_(std::move(storePath)), defaultMsaCfg_(cfg), msa_(std::move(cfg)) {
     load();
 }
 
@@ -51,8 +51,13 @@ bool AuthManager::load() {
         XC_LOGW("ignoring unreadable token store %s", storePath_.c_str());
         return false;
     }
-    // A refresh token issued to another client id is useless: start over.
-    if ((*j)["clientId"].str() != msa_.config().clientId) {
+    // Keep existing accounts signed in with the legacy login.live.com client id
+    // working seamlessly; any fresh sign-in switches to the default OAuth v2.0 client.
+    const std::string storedClient = (*j)["clientId"].str();
+    if (storedClient == kLegacyClientId && defaultMsaCfg_.clientId == kV2ClientId) {
+        msa_ = MsaClient(MsaConfig::legacy());
+        XC_LOGI("loaded saved sign-in (legacy client id)");
+    } else if (storedClient != msa_.config().clientId) {
         XC_LOGI("saved sign-in from another client id: asking again");
         return false;
     }
@@ -89,6 +94,7 @@ bool AuthManager::save() const {
 void AuthManager::signOut() {
     signedIn_ = false;
     redirectUrl_.clear();
+    msa_ = MsaClient(defaultMsaCfg_);
     tokens_ = {};
     profile_ = {};
     gssvXsts_ = {};
@@ -98,6 +104,8 @@ void AuthManager::signOut() {
 
 bool AuthManager::deviceCodeSignIn(const DeviceCodeCallback& onCode, std::string& err,
                                    const std::atomic<bool>* cancel) {
+    // Always perform fresh device-code sign-ins with the configured default client (OAuth v2.0).
+    msa_ = MsaClient(defaultMsaCfg_);
     DeviceCode dc;
     if (!msa_.startDeviceCode(dc, err)) return false;
     // The code itself stays on the screen: nothing of the sign-in goes to the log.
@@ -135,12 +143,14 @@ bool AuthManager::deviceCodeSignIn(const DeviceCodeCallback& onCode, std::string
 
 bool AuthManager::xboxChain(xcloud::GssvClient* gssv, std::string& err, bool full) {
     XblToken user;
-    // login.live.com tokens for a custom client id use the "t=" ticket form;
-    // fall back to "d=" in case the service expects the MSAL form.
-    if (!xblUserToken(tokens_.accessToken, "t=", user, err, &redirectUrl_)) {
+    // OAuth v2.0 (login.microsoftonline.com) tokens use the "d=" ticket form;
+    // legacy login.live.com tokens use "t=". Fall back to the other form if needed.
+    const char* firstPrefix = msa_.config().oauthV2 ? "d=" : "t=";
+    const char* fallbackPrefix = msa_.config().oauthV2 ? "t=" : "d=";
+    if (!xblUserToken(tokens_.accessToken, firstPrefix, user, err, &redirectUrl_)) {
         std::string err2;
         if (err.find("HTTP ") == std::string::npos ||
-            !xblUserToken(tokens_.accessToken, "d=", user, err2, &redirectUrl_)) {
+            !xblUserToken(tokens_.accessToken, fallbackPrefix, user, err2, &redirectUrl_)) {
             return false;
         }
         err.clear();
@@ -645,8 +655,9 @@ bool AuthManager::consoleTransferToken(std::string& out, std::string& err) {
     }
     MsaTokens t;
     if (!msa_.refresh(tokens_.refreshToken, t, err, kTransferScope)) return false;
-    // Rotate the stored refresh token if the service issued a new one.
-    if (!t.refreshToken.empty() && t.refreshToken != tokens_.refreshToken) {
+    // Rotate the stored refresh token for legacy login.live.com accounts.
+    // For OAuth v2.0 accounts, Passport's refresh_token never replaces the v2 one.
+    if (!msa_.config().oauthV2 && !t.refreshToken.empty() && t.refreshToken != tokens_.refreshToken) {
         tokens_.refreshToken = t.refreshToken;
         save();
     }

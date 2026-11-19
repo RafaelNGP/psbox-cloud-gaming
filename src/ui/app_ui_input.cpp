@@ -529,6 +529,9 @@ UiEvent AppUi::handlePointerDown(float x, float y, int button, bool showCursor) 
         if (x >= btnBox.x && x < btnBox.x + btnBox.w && y >= btnBox.y && y < btnBox.y + btnBox.h) {
             ev.action = Action::OpenUrl;
             ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+            if (!code_.empty() && ev.url.find("otc=") == std::string::npos) {
+                ev.url += (ev.url.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+            }
             return ev;
         }
 #endif
@@ -1586,6 +1589,9 @@ UiEvent AppUi::handleLocked(const NavInput& in) {
             )) {
                 ev.action = Action::OpenUrl;
                 ev.url = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+                if (!code_.empty() && ev.url.find("otc=") == std::string::npos) {
+                    ev.url += (ev.url.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+                }
             }
             break;
         case Screen::Settings:

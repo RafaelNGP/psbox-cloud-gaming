@@ -140,6 +140,7 @@ private:
     std::string market_;  // the last sign-in's, for refreshCloudTime()
 
     std::string storePath_;
+    MsaConfig defaultMsaCfg_;
     MsaClient msa_;
     MsaTokens tokens_;
     Profile profile_;

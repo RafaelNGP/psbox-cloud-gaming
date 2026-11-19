@@ -443,14 +443,14 @@ void AppUi::drawSignIn(Canvas& c, uint64_t nowMs) {
     fonts_.semibold.draw(c, copyMsg, copyBadge.x + (copyBadge.w - cw) / 2,
                          fonts_.semibold.centeredY(copyBadge.y, copyBadge.h, 20), 20, kGray);
 #else
-    // QR code for the sign-in page. Not "?otc=<code>": that prefilled link
-    // goes through a consent flow that rejects this client id ("first party
-    // application ... pre-authorization"), so the code is typed on the phone.
-    // The plain link, the code typed by hand. With the code in it (microsoft.com/link?otc=CODE,
-    // tried 2026-11-12) Microsoft answers "the application is a first party application... users
-    // are not permitted to consent": the pre-filled path asks for a consent this app's client
-    // id (a Microsoft one) cannot be given. It works for apps with a client id of their own.
+    // QR code for the sign-in page with the device code prefilled (?otc=<code>).
+    // With OAuth v2.0 (login.microsoftonline.com + play.xbox.com client id),
+    // microsoft.com/link?otc=CODE pre-fills the code on the phone without triggering
+    // the legacy first-party consent refusal.
     std::string target = codeUrl_.empty() ? "https://www.microsoft.com/link" : codeUrl_;
+    if (!code_.empty() && target.find("otc=") == std::string::npos) {
+        target += (target.find('?') == std::string::npos ? "?otc=" : "&otc=") + code_;
+    }
     uint8_t qr[qrcodegen_BUFFER_LEN_MAX], tmp[qrcodegen_BUFFER_LEN_MAX];
     if (qrcodegen_encodeText(target.c_str(), tmp, qr, qrcodegen_Ecc_MEDIUM, qrcodegen_VERSION_MIN,
                              qrcodegen_VERSION_MAX, qrcodegen_Mask_AUTO, true)) {
