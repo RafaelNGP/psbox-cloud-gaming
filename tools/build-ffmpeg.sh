@@ -160,7 +160,16 @@ elif [[ $target == android-* ]]; then
         --extra-cflags="${cflags[*]}" --extra-ldflags="${ldflags[*]}" \
         "${asm[@]}"
 else
-    "$src/configure" "${common[@]}" --cc=clang --enable-vulkan --enable-hwaccel=h264_vulkan "${vkflags[@]}"
+    vaflags=()
+    if [[ $(uname -s) == Linux ]] && command -v pkg-config >/dev/null 2>&1 &&
+       pkg-config --exists "libva >= 0.35.0" libva-drm; then
+        # VA-API over DRM render nodes (/dev/dri/renderD*): works on Wayland,
+        # X11 and Steam Deck Game Mode without pulling X11/libdrm deps.
+        # cmake/deps/ffmpeg.cmake links src/media/vaapi_dlopen.c instead of
+        # -lva -lva-drm so the Linux AppImage has zero DT_NEEDED on libva*.
+        vaflags=(--enable-vaapi --enable-hwaccel=h264_vaapi)
+    fi
+    "$src/configure" "${common[@]}" --cc=clang --enable-vulkan --enable-hwaccel=h264_vulkan "${vkflags[@]}" "${vaflags[@]}"
 fi
 make -j"$(nproc)" >/dev/null
 make install >/dev/null

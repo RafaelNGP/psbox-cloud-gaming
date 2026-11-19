@@ -54,6 +54,17 @@ void installLogCallback() {
     std::call_once(once, [] { av_log_set_callback(ffmpegLog); });
 }
 
+bool codecHasHwConfig(const AVCodec* codec, enum AVHWDeviceType devType, enum AVPixelFormat pixFmt) {
+    for (int i = 0;; ++i) {
+        const AVCodecHWConfig* cfg = avcodec_get_hw_config(codec, i);
+        if (!cfg) return false;
+        if ((cfg->methods & AV_CODEC_HW_CONFIG_METHOD_HW_DEVICE_CTX) && cfg->device_type == devType &&
+            cfg->pix_fmt == pixFmt) {
+            return true;
+        }
+    }
+}
+
 void freeAll(AVCodecContext*& ctx, AVFrame*& frame, AVPacket*& packet) {
     avcodec_free_context(&ctx);
     av_frame_free(&frame);
@@ -578,6 +589,7 @@ bool VideoDecoder::init(int threads, bool preferHw) {
     installLogCallback();
     preferHw_ = preferHw;
     isHw_ = false;
+    hwPixFmt_ = -1;
     consecutiveHwErrors_ = 0;
     consecutivePending_ = 0;
     lastQp_ = -1;
@@ -611,16 +623,33 @@ bool VideoDecoder::init(int threads, bool preferHw) {
             enum AVHWDeviceType devType;
             enum AVPixelFormat pixFmt;
         } kHwConfigs[] = {
+#if defined(__linux__) && !defined(__ANDROID__)
+            // On Linux / Steam Deck, probe VA-API before Vulkan Video:
+            // 1. AMD (Mesa RadeonSI/Steam Deck) and Intel (iHD/i965) have mature,
+            //    low-latency H.264 decode via VA-API over /dev/dri/renderD*.
+            // 2. av_hwdevice_ctx_create(VULKAN) succeeds on any Vulkan-capable GPU
+            //    (even llvmpipe or GPUs lacking VK_KHR_video_decode_h264) and only
+            //    fails later in get_format(), which would fall straight to CPU and
+            //    skip VA-API if Vulkan were probed first.
+            // 3. On NVIDIA proprietary drivers (no native VA-API), VA-API fails
+            //    cleanly here and falls through to Vulkan Video.
+            {AV_HWDEVICE_TYPE_VAAPI,  AV_PIX_FMT_VAAPI},
+            {AV_HWDEVICE_TYPE_VULKAN, AV_PIX_FMT_VULKAN},
+            {AV_HWDEVICE_TYPE_CUDA,   AV_PIX_FMT_CUDA},
+            {AV_HWDEVICE_TYPE_VDPAU,  AV_PIX_FMT_VDPAU},
+#else
             // Prefer native D3D11VA on Windows (works on virtually all GPUs even without
-            // Vulkan Video); on Linux/other platforms D3D11VA is not compiled in and it
+            // Vulkan Video); on other platforms D3D11VA is not compiled in and it
             // falls through immediately to Vulkan Video / VA-API / CUDA / VDPAU.
             {AV_HWDEVICE_TYPE_D3D11VA, AV_PIX_FMT_D3D11},
-            {AV_HWDEVICE_TYPE_VULKAN, AV_PIX_FMT_VULKAN},
-            {AV_HWDEVICE_TYPE_VAAPI, AV_PIX_FMT_VAAPI},
-            {AV_HWDEVICE_TYPE_CUDA,  AV_PIX_FMT_CUDA},
-            {AV_HWDEVICE_TYPE_VDPAU, AV_PIX_FMT_VDPAU},
+            {AV_HWDEVICE_TYPE_VULKAN,  AV_PIX_FMT_VULKAN},
+            {AV_HWDEVICE_TYPE_VAAPI,   AV_PIX_FMT_VAAPI},
+            {AV_HWDEVICE_TYPE_CUDA,    AV_PIX_FMT_CUDA},
+            {AV_HWDEVICE_TYPE_VDPAU,   AV_PIX_FMT_VDPAU},
+#endif
         };
         for (const auto& cfg : kHwConfigs) {
+            if (!codecHasHwConfig(codec, cfg.devType, cfg.pixFmt)) continue;
             AVBufferRef* hwCtx = nullptr;
             int rc = av_hwdevice_ctx_create(&hwCtx, cfg.devType, nullptr, nullptr, 0);
             if (rc >= 0 && hwCtx) {
@@ -635,6 +664,8 @@ bool VideoDecoder::init(int threads, bool preferHw) {
                         av_hwdevice_get_type_name(cfg.devType));
                 break;
             }
+            XC_LOGD("h264 decoder: FFmpeg hwaccel (%s) unavailable: %s",
+                    av_hwdevice_get_type_name(cfg.devType), averr(rc).c_str());
         }
     }
 
@@ -653,6 +684,7 @@ bool VideoDecoder::init(int threads, bool preferHw) {
     if (rc < 0 && isHw_ && !hw_.ready()) {
         XC_LOGW("h264 decoder: avcodec_open2 with hwaccel failed (%s), retrying software", averr(rc).c_str());
         isHw_ = false;
+        hwPixFmt_ = -1;
         if (swFrame_) { av_frame_free(&swFrame_); swFrame_ = nullptr; }
         if (hwDeviceCtx_) {
             auto* ref = reinterpret_cast<AVBufferRef*>(hwDeviceCtx_);
