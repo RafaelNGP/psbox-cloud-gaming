@@ -334,6 +334,7 @@ public:
 
 private:
     void selectFirstItem();
+    int collectShownItems(int* out, int& selIdx) const;
 
     const Fonts& fonts_;
     UiCaps caps_;
