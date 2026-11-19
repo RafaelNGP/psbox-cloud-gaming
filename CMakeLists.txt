@@ -104,6 +104,11 @@ if(XC_TARGET_PS4)
     target_compile_definitions(datachannel-static PUBLIC HAVE_SCONN_LEN HAVE_SA_LEN __Userspace__)
     target_compile_definitions(usrsctp PUBLIC HAVE_SCONN_LEN HAVE_SA_LEN __Userspace__)
 endif()
+if(WIN32 AND NOT MSVC AND TARGET datachannel-static)
+    # Upstream libdatachannel/src/configuration.cpp uses std::transform without <algorithm>,
+    # which fails on newer llvm-mingw libc++ toolchains.
+    target_compile_options(datachannel-static PRIVATE $<$<COMPILE_LANGUAGE:CXX>:-include;algorithm>)
+endif()
 
 # --- WebRTC streaming: SDP/ICE, data channels, input reports ----------------
 add_library(xcloud_stream STATIC
