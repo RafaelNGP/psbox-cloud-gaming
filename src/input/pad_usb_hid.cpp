@@ -46,6 +46,10 @@ void putField(GenericHidContext& g, uint32_t usage, uint16_t page, const HidGlob
         slot = &g.axis[AX_X + (u - 0x30)];
     } else if (pg == 0x01 && u == 0x39) {
         slot = &g.axis[AX_HAT];
+    } else if (pg == 0x01 && u >= 0x90 && u <= 0x93) {
+        slot = &g.dpad[u - 0x90];
+    } else if (pg == 0x01 && u == 0x85) {
+        slot = &g.home;
     } else if (pg == 0x02 && u == 0xC5) {
         slot = &g.axis[AX_BRAKE];
     } else if (pg == 0x02 && u == 0xC4) {
@@ -110,8 +114,13 @@ void applyBuiltinMapping(GenericHidContext& g, uint16_t vid, uint16_t pid) {
         g.buttonMap[i] = (i < 14) ? kDefaultMap[i] : 0;
     }
 
-    g.role[ROLE_LX] = AX_X;
-    g.role[ROLE_LY] = AX_Y;
+    for (int i = 0; i < ROLE_N; ++i) {
+        g.role[i] = AX_NONE;
+        g.invert[i] = 0;
+    }
+
+    if (g.axis[AX_X].present) g.role[ROLE_LX] = AX_X;
+    if (g.axis[AX_Y].present) g.role[ROLE_LY] = AX_Y;
 
     if (g.axis[AX_RX].present && g.axis[AX_RY].present) {
         g.role[ROLE_RX] = AX_RX;
@@ -128,8 +137,6 @@ void applyBuiltinMapping(GenericHidContext& g, uint16_t vid, uint16_t pid) {
     if (g.axis[AX_BRAKE].present) g.role[ROLE_L2] = AX_BRAKE;
     if (g.axis[AX_ACCEL].present) g.role[ROLE_R2] = AX_ACCEL;
 
-    for (int i = 0; i < ROLE_N; ++i) g.invert[i] = 0;
-
     // Logitech DirectInput controllers (F310, F710, RumblePad 2 in D-mode)
     if (vid == 0x046D && (pid == 0xC216 || pid == 0xC219 || pid == 0xC218)) {
         g.buttonMap[0] = HID_BTN_SQUARE;
@@ -144,8 +151,8 @@ void applyBuiltinMapping(GenericHidContext& g, uint16_t vid, uint16_t pid) {
         g.buttonMap[9] = HID_BTN_OPTIONS;
         g.buttonMap[10] = HID_BTN_L3;
         g.buttonMap[11] = HID_BTN_R3;
-        g.role[ROLE_RX] = AX_Z;
-        g.role[ROLE_RY] = AX_RZ;
+        if (g.axis[AX_Z].present) g.role[ROLE_RX] = AX_Z;
+        if (g.axis[AX_RZ].present) g.role[ROLE_RY] = AX_RZ;
         return;
     }
 
@@ -163,29 +170,40 @@ void applyBuiltinMapping(GenericHidContext& g, uint16_t vid, uint16_t pid) {
         g.buttonMap[9] = HID_BTN_OPTIONS;
         g.buttonMap[10] = HID_BTN_L3;
         g.buttonMap[11] = HID_BTN_R3;
-        g.role[ROLE_RX] = AX_Z;
-        g.role[ROLE_RY] = AX_RZ;
+        if (g.axis[AX_Z].present) g.role[ROLE_RX] = AX_Z;
+        if (g.axis[AX_RZ].present) g.role[ROLE_RY] = AX_RZ;
         return;
     }
 
-    // 8BitDo DirectInput / Android controllers (SN30 Pro, Ultimate 2.4G, etc.)
-    if (vid == 0x2DC8 && (pid == 0x2100 || pid == 0x2101 || pid == 0x3012 || pid == 0x310B || pid == 0x310A || pid == 0x6012)) {
-        g.buttonMap[0] = HID_BTN_CROSS;
-        g.buttonMap[1] = HID_BTN_CIRCLE;
-        g.buttonMap[2] = 0;
-        g.buttonMap[3] = HID_BTN_SQUARE;
-        g.buttonMap[4] = HID_BTN_TRIANGLE;
-        g.buttonMap[5] = 0;
-        g.buttonMap[6] = HID_BTN_L1;
-        g.buttonMap[7] = HID_BTN_R1;
-        g.buttonMap[8] = HID_BTN_L2;
-        g.buttonMap[9] = HID_BTN_R2;
-        g.buttonMap[10] = HID_BTN_SHARE;
-        g.buttonMap[11] = HID_BTN_OPTIONS;
-        g.buttonMap[12] = HID_BTN_PS;
-        g.buttonMap[13] = HID_BTN_L3;
-        g.buttonMap[14] = HID_BTN_R3;
-        return;
+    // 8BitDo DirectInput / Android controllers (SN30 Pro, Pro 2, M30, Arcade Stick, Ultimate 2.4G, etc.)
+    if (vid == 0x2DC8) {
+        if (g.axis[AX_Z].present && g.axis[AX_RZ].present) {
+            g.role[ROLE_RX] = AX_Z;
+            g.role[ROLE_RY] = AX_RZ;
+            if (!g.axis[AX_BRAKE].present && g.axis[AX_RX].present) g.role[ROLE_L2] = AX_RX;
+            if (!g.axis[AX_ACCEL].present && g.axis[AX_RY].present) g.role[ROLE_R2] = AX_RY;
+        }
+        if (g.nbuttons >= 15 || pid == 0x2100 || pid == 0x2101 || pid == 0x3010 || pid == 0x3011 ||
+            pid == 0x3012 || pid == 0x3013 || pid == 0x3109 || pid == 0x310A || pid == 0x310B ||
+            pid == 0x6001 || pid == 0x6002 || pid == 0x6003 || pid == 0x6006 || pid == 0x6012 ||
+            pid == 0x6101 || pid == 0x9015 || pid == 0x9018) {
+            g.buttonMap[0] = HID_BTN_CROSS;
+            g.buttonMap[1] = HID_BTN_CIRCLE;
+            g.buttonMap[2] = 0;
+            g.buttonMap[3] = HID_BTN_SQUARE;
+            g.buttonMap[4] = HID_BTN_TRIANGLE;
+            g.buttonMap[5] = 0;
+            g.buttonMap[6] = HID_BTN_L1;
+            g.buttonMap[7] = HID_BTN_R1;
+            g.buttonMap[8] = HID_BTN_L2;
+            g.buttonMap[9] = HID_BTN_R2;
+            g.buttonMap[10] = HID_BTN_SHARE;
+            g.buttonMap[11] = HID_BTN_OPTIONS;
+            g.buttonMap[12] = HID_BTN_PS;
+            g.buttonMap[13] = HID_BTN_L3;
+            g.buttonMap[14] = HID_BTN_R3;
+            return;
+        }
     }
 
     // Generic Android layout (GameSir, Betop, Xiaomi, Razer Kishi, etc.)
@@ -243,16 +261,19 @@ bool parseHidDescriptor(GenericHidContext& g, const uint8_t* d, size_t n, uint16
                 case 8: {  // Input
                     uint16_t* off = &offset[gl.rid];
                     if (gl.rid) *off = std::max<uint16_t>(*off, 8);
+                    const bool isConst = (itemValue(v, size, false) & 0x01) != 0;
                     for (uint32_t k = 0; k < gl.count; ++k) {
-                        uint32_t u = 0;
-                        if (hasRange) {
-                            u = (umin + k <= umax) ? (umin + k) : umax;
-                        } else if (k < static_cast<uint32_t>(nusages)) {
-                            u = usages[k];
-                        } else if (nusages > 0) {
-                            u = usages[nusages - 1];
+                        if (!isConst) {
+                            uint32_t u = 0;
+                            if (hasRange) {
+                                u = (umin + k <= umax) ? (umin + k) : umax;
+                            } else if (k < static_cast<uint32_t>(nusages)) {
+                                u = usages[k];
+                            } else if (nusages > 0) {
+                                u = usages[nusages - 1];
+                            }
+                            putField(g, u, gl.page, gl, *off);
                         }
-                        putField(g, u, gl.page, gl, *off);
                         *off += static_cast<uint16_t>(gl.size);
                     }
                     nusages = 0;
@@ -320,7 +341,7 @@ bool parseHidDescriptor(GenericHidContext& g, const uint8_t* d, size_t n, uint16
 }
 
 bool parseGenericHidReport(const GenericHidContext& ctx, const uint8_t* rx, size_t len, ControllerState& s) {
-    if (!rx || len < 4) return false;
+    if (!rx || len < 1) return false;
 
     uint8_t rid = ctx.hasIds ? rx[0] : 0;
     const uint8_t* d = rx;
@@ -372,6 +393,25 @@ bool parseGenericHidReport(const GenericHidContext& ctx, const uint8_t* rx, size
         used = true;
     }
 
+    // Update discrete Generic Desktop D-Pad usages (0x90 Up, 0x91 Down, 0x92 Right, 0x93 Left)
+    bool hasDiscreteDpad = false;
+    for (int i = 0; i < 4; ++i) {
+        if (ctx.dpad[i].present && ctx.dpad[i].rid == rid) {
+            hasDiscreteDpad = true;
+            break;
+        }
+    }
+    if (hasDiscreteDpad) {
+        if (!ctx.axis[AX_HAT].present || ctx.axis[AX_HAT].rid != rid) {
+            s.dpadUp = s.dpadDown = s.dpadLeft = s.dpadRight = false;
+        }
+        if (ctx.dpad[0].present && ctx.dpad[0].rid == rid && getBits(d, static_cast<int>(len), &ctx.dpad[0])) s.dpadUp = true;
+        if (ctx.dpad[1].present && ctx.dpad[1].rid == rid && getBits(d, static_cast<int>(len), &ctx.dpad[1])) s.dpadDown = true;
+        if (ctx.dpad[2].present && ctx.dpad[2].rid == rid && getBits(d, static_cast<int>(len), &ctx.dpad[2])) s.dpadRight = true;
+        if (ctx.dpad[3].present && ctx.dpad[3].rid == rid && getBits(d, static_cast<int>(len), &ctx.dpad[3])) s.dpadLeft = true;
+        used = true;
+    }
+
     // Home / Back
     if (ctx.home.present && ctx.home.rid == rid) {
         if (getBits(d, static_cast<int>(len), &ctx.home)) b |= HID_BTN_PS;
@@ -391,8 +431,10 @@ bool parseGenericHidReport(const GenericHidContext& ctx, const uint8_t* rx, size
     s.rawRightX = s.rightStickX = (static_cast<float>(axes[ROLE_RX]) - 128.0f) / 127.5f;
     s.rawRightY = s.rightStickY = (static_cast<float>(axes[ROLE_RY]) - 128.0f) / 127.5f;
 
-    s.triggerL2 = trig[0] ? (static_cast<float>(axes[ROLE_L2]) / 255.0f) : ((b & HID_BTN_L2) ? 1.0f : 0.0f);
-    s.triggerR2 = trig[1] ? (static_cast<float>(axes[ROLE_R2]) / 255.0f) : ((b & HID_BTN_R2) ? 1.0f : 0.0f);
+    s.triggerL2 = trig[0] ? (static_cast<float>(axes[ROLE_L2]) / 255.0f) : 0.0f;
+    s.triggerR2 = trig[1] ? (static_cast<float>(axes[ROLE_R2]) / 255.0f) : 0.0f;
+    if (b & HID_BTN_L2) s.triggerL2 = std::max(s.triggerL2, 1.0f);
+    if (b & HID_BTN_R2) s.triggerR2 = std::max(s.triggerR2, 1.0f);
 
     s.btnX = (b & HID_BTN_SQUARE) != 0;
     s.btnA = (b & HID_BTN_CROSS) != 0;

@@ -49,8 +49,8 @@ constexpr uint16_t kMediaTekVid = 0x0e8d;  // the console's own Bluetooth radio:
 struct Link {
     UsbPadInterface iface;
     int inIndex = 0, outIndex = 1;
-    bool opened = false, hasOut = false;
-    uint8_t rx[64]{}, tx[64]{};
+    bool opened = false, hasOut = false, claimed = false;
+    uint8_t rx[128]{}, tx[64]{};
     void* frames[2]{};
     uint32_t lengths[2]{};
     bool inPending = false, inDone = false, outDone = false, clearStall = false;
@@ -59,6 +59,8 @@ struct Link {
     // The motors asked for (large << 8 | small) by any thread; the device's thread sends them.
     std::atomic<uint32_t> rumble{0};
     std::atomic<bool> rumbleAsked{false};
+    uint32_t lastSentRumble = 0;
+    uint64_t lastRumbleMs = 0;
     uint8_t rumbleSequence = 0;
     int lightPlayer = -1;
     UsbPadLinkReportState report;
@@ -96,7 +98,8 @@ const char* protocolName(UsbPadProtocol p) {
     return usbPadProtocolName(p);
 }
 
-int controlRequest(int fd, uint8_t type, uint8_t request, uint16_t value, uint16_t index, void* data, uint16_t len) {
+int controlRequest(int fd, uint8_t type, uint8_t request, uint16_t value, uint16_t index, void* data, uint16_t len,
+                   uint16_t* outActLen = nullptr) {
     usb_ctl_request r{};
     r.ucr_data = data;
     r.ucr_flags = kShortXferOk;
@@ -105,7 +108,26 @@ int controlRequest(int fd, uint8_t type, uint8_t request, uint16_t value, uint16
     USETW(r.ucr_request.wValue, value);
     USETW(r.ucr_request.wIndex, index);
     USETW(r.ucr_request.wLength, len);
-    return ioctl(fd, USB_DO_REQUEST, &r) == 0 ? 0 : errno;
+    const int err = ioctl(fd, USB_DO_REQUEST, &r) == 0 ? 0 : errno;
+    if (outActLen) *outActLen = (err == 0 && r.ucr_actlen > 0) ? std::min<uint16_t>(r.ucr_actlen, len) : (err == 0 ? len : 0);
+    return err;
+}
+
+bool readHidReportDescriptor(int fd, uint8_t ifaceNum, uint8_t* out, uint16_t want, uint16_t* outGot = nullptr) {
+    uint16_t got = 0;
+    if (controlRequest(fd, 0x81, 0x06, 0x2200, ifaceNum, out, want, &got) == 0 && got > 0) {
+        if (outGot) *outGot = got;
+        return true;
+    }
+    usb_gen_descriptor rgd{};
+    rgd.ugd_data = out;
+    rgd.ugd_maxlen = want;
+    rgd.ugd_iface_index = ifaceNum;
+    if (ioctl(fd, USB_GET_REPORT_DESC, &rgd) == 0 && rgd.ugd_actlen > 0) {
+        if (outGot) *outGot = std::min<uint16_t>(rgd.ugd_actlen, want);
+        return true;
+    }
+    return false;
 }
 
 // The product's name from its string descriptor (UTF-16, ASCII kept).
@@ -183,22 +205,33 @@ bool setupTransfers(Device& d) {
     for (size_t k = 0; k < d.links.size(); ++k) {
         Link& l = *d.links[k];
         l.inIndex = static_cast<int>(2 * k), l.outIndex = static_cast<int>(2 * k + 1);
+        int ifaceNum = static_cast<int>(l.iface.number);
+        if (!d.xrayOnly) {
+            ioctl(d.fd, USB_IFACE_DRIVER_DETACH, &ifaceNum);
+            l.claimed = ioctl(d.fd, USB_CLAIM_INTERFACE, &ifaceNum) == 0;
+        }
         usb_fs_open op{};
         op.max_bufsize = sizeof l.rx;
         op.max_frames = 1;
         op.ep_index = static_cast<uint8_t>(l.inIndex);
         op.ep_no = l.iface.epIn;
         if (ioctl(d.fd, USB_FS_OPEN, &op) != 0) {
-            int err = errno;
-            char driver[64] = {};
-            usb_gen_descriptor gd{};
-            gd.ugd_data = driver;
-            gd.ugd_maxlen = sizeof driver - 1;
-            gd.ugd_iface_index = l.iface.number;
-            bool claimed = ioctl(d.fd, USB_GET_IFACE_DRIVER, &gd) == 0;
-            XC_LOGW("usb pad: %s: opening IN 0x%02x: errno %d (%s)%s%s", d.path.c_str(), l.iface.epIn, err,
-                    std::strerror(err), claimed ? ", interface held by the driver " : "", claimed ? driver : "");
-            continue;
+            if (d.xrayOnly && l.iface.protocol == UsbPadProtocol::GenericHid) {
+                ioctl(d.fd, USB_IFACE_DRIVER_DETACH, &ifaceNum);
+                l.claimed = ioctl(d.fd, USB_CLAIM_INTERFACE, &ifaceNum) == 0;
+            }
+            if (!l.claimed || ioctl(d.fd, USB_FS_OPEN, &op) != 0) {
+                int err = errno;
+                char driver[64] = {};
+                usb_gen_descriptor gd{};
+                gd.ugd_data = driver;
+                gd.ugd_maxlen = sizeof driver - 1;
+                gd.ugd_iface_index = l.iface.number;
+                bool claimed = ioctl(d.fd, USB_GET_IFACE_DRIVER, &gd) == 0;
+                XC_LOGW("usb pad: %s: opening IN 0x%02x: errno %d (%s)%s%s", d.path.c_str(), l.iface.epIn, err,
+                        std::strerror(err), claimed ? ", interface held by the driver " : "", claimed ? driver : "");
+                continue;
+            }
         }
         if (l.iface.epOut) {
             op = {};
@@ -312,16 +345,19 @@ bool send(Device& d, Link& l, const uint8_t* data, size_t len, int timeoutMs = 8
 // What each kind of pad waits for before it reports.
 void wakeUp(Device& d, Link& l) {
     if (l.iface.protocol == UsbPadProtocol::Gip) {
-        // Power on, the "S" init and the Xbox button's light.
+        // Power on, the "S" init, Xbox button light, and third-party GIP init (PDP / Victrix / Hori).
         static const uint8_t powerOn[] = {0x05, 0x20, 0x00, 0x01, 0x00};
         static const uint8_t sInit[] = {0x05, 0x20, 0x00, 0x0f, 0x06, 0x00, 0x00, 0x00, 0x00, 0x00,
                                         0x00, 0x55, 0x53, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
         static const uint8_t ledOn[] = {0x0a, 0x20, 0x00, 0x03, 0x00, 0x01, 0x14};
+        static const uint8_t pdpInit[] = {0x06, 0x20, 0x00, 0x02, 0x01, 0x00};
         bool a = send(d, l, powerOn, sizeof powerOn);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         bool b = send(d, l, sInit, sizeof sInit);
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
         bool c = send(d, l, ledOn, sizeof ledOn);
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        send(d, l, pdpInit, sizeof pdpInit);
         XC_LOGI("usb pad %d: GIP power on %s, init %s, light %s", l.slot, a ? "ok" : "failed", b ? "ok" : "failed",
                 c ? "ok" : "failed");
     } else if (l.iface.wireless) {
@@ -336,16 +372,92 @@ void wakeUp(Device& d, Link& l) {
         static const uint8_t led[] = {0x01, 0x03, 0x02};
         bool ok = send(d, l, led, sizeof led);
         XC_LOGI("usb pad %d: XInput light %s", l.slot, ok ? "sent" : "not sent");
+    } else if (l.iface.protocol == UsbPadProtocol::DualShock4) {
+        // Interrogate feature report 0x02 / 0x12 (wakes DS4 USB Wireless Adaptor 054c:0ba0 and clones)
+        // and send an initial report 0x05 to light the PlayStation blue lightbar.
+        uint8_t feat[64] = {};
+        controlRequest(d.fd, 0xA1, 0x01, 0x0302, l.iface.number, feat, 37);
+        controlRequest(d.fd, 0xA1, 0x01, 0x0312, l.iface.number, feat, 16);
+        const auto initPkt = buildDs4UsbRumblePacket(0, 0, 0x00, 0x00, 0x40);
+        if (l.hasOut) {
+            send(d, l, initPkt.data(), initPkt.size(), 40);
+        } else {
+            uint8_t copy[32];
+            std::memcpy(copy, initPkt.data(), sizeof copy);
+            controlRequest(d.fd, 0x21, 0x09, 0x0205, l.iface.number, copy, sizeof copy);
+        }
+        XC_LOGI("usb pad %d: DualShock 4 USB handshake sent", l.slot);
+    } else if (l.iface.protocol == UsbPadProtocol::DualShock3) {
+        uint8_t magic[5] = {0xF4, 0x42, 0x03, 0x00, 0x00};
+        controlRequest(d.fd, 0x21, 0x09, 0x03F4, l.iface.number, magic, sizeof magic);
+        uint8_t dummy[64] = {};
+        controlRequest(d.fd, 0xA1, 0x01, 0x03F2, l.iface.number, dummy, 17);
+        controlRequest(d.fd, 0xA1, 0x01, 0x03F5, l.iface.number, dummy, 8);
+        XC_LOGI("usb pad %d: DualShock 3 operational handshake sent", l.slot);
+    } else if (l.iface.protocol == UsbPadProtocol::SwitchPro) {
+        if (l.hasOut) {
+            uint8_t pkt[64] = {};
+            pkt[0] = 0x80; pkt[1] = 0x02;
+            send(d, l, pkt, sizeof pkt, 50);
+            pkt[1] = 0x04;
+            send(d, l, pkt, sizeof pkt, 50);
+            std::memset(pkt, 0, sizeof pkt);
+            pkt[0] = 0x01; pkt[1] = 0x00; pkt[10] = 0x03; pkt[11] = 0x30;
+            send(d, l, pkt, sizeof pkt, 80);
+            pkt[10] = 0x30; pkt[11] = 0x01;
+            send(d, l, pkt, sizeof pkt, 80);
+        }
+        XC_LOGI("usb pad %d: Switch Pro wake-up sent", l.slot);
     }
 }
 
 // The motors, when another thread asked: from the device's own thread, as every transfer is.
 void sendRumble(Device& d, Link& l, uint8_t large, uint8_t small) {
-    uint8_t packet[32];
-    const size_t n =
-        usbPadRumblePacket(l.iface.protocol, large, small, l.rumbleSequence, packet, sizeof packet, l.iface.wireless);
-    if (!n) return;
-    const bool ok = send(d, l, packet, n, 40);
+    bool ok = false;
+    if (l.iface.protocol == UsbPadProtocol::DualShock4) {
+        const auto pkt = buildDs4UsbRumblePacket(large, small, 0x00, 0x00, 0x40);
+        if (l.hasOut) {
+            ok = send(d, l, pkt.data(), pkt.size(), 40);
+        } else {
+            uint8_t copy[32];
+            std::memcpy(copy, pkt.data(), sizeof copy);
+            ok = controlRequest(d.fd, 0x21, 0x09, 0x0205, l.iface.number, copy, sizeof copy) == 0;
+        }
+    } else if (l.iface.protocol == UsbPadProtocol::XInput && l.iface.wireless) {
+        const auto pkt = buildXbox360WirelessRumblePacket(large, small);
+        ok = send(d, l, pkt.data(), pkt.size(), 40);
+    } else if (l.iface.protocol == UsbPadProtocol::XInput) {
+        const auto pkt = buildXInputRumblePacket(large, small);
+        ok = send(d, l, pkt.data(), pkt.size(), 40);
+    } else if (l.iface.protocol == UsbPadProtocol::Gip) {
+        uint8_t packet[32];
+        const size_t n = usbPadRumblePacket(UsbPadProtocol::Gip, large, small, l.rumbleSequence, packet, sizeof packet);
+        ok = n && send(d, l, packet, n, 40);
+    } else if (l.iface.protocol == UsbPadProtocol::DualShock3) {
+        uint8_t pkt[49] = {};
+        pkt[0] = 0x01;
+        pkt[2] = small ? 0x01 : 0x00;
+        pkt[4] = large;
+        ok = controlRequest(d.fd, 0x21, 0x09, 0x0201, l.iface.number, pkt, sizeof pkt) == 0;
+    } else if (l.iface.protocol == UsbPadProtocol::SwitchPro) {
+        uint8_t pkt[49] = {};
+        pkt[0] = 0x10;
+        pkt[1] = (l.rumbleSequence++) & 0x0F;
+        if (large > 0 || small > 0) {
+            pkt[2] = 0x28; pkt[3] = 0x88; pkt[4] = 0x60; pkt[5] = 0x61;
+            pkt[6] = 0x28; pkt[7] = 0x88; pkt[8] = 0x60; pkt[9] = 0x61;
+        } else {
+            pkt[2] = 0x00; pkt[3] = 0x01; pkt[4] = 0x40; pkt[5] = 0x40;
+            pkt[6] = 0x00; pkt[7] = 0x01; pkt[8] = 0x40; pkt[9] = 0x40;
+        }
+        ok = send(d, l, pkt, sizeof pkt, 40);
+    } else {
+        uint8_t packet[32];
+        const size_t n =
+            usbPadRumblePacket(l.iface.protocol, large, small, l.rumbleSequence, packet, sizeof packet, l.iface.wireless);
+        if (!n) return;
+        ok = send(d, l, packet, n, 40);
+    }
     static std::atomic<int> logged{0};
     if (logged < 6 && ++logged) XC_LOGI("usb pad %d: motors %u / %u %s", l.slot, large, small, ok ? "sent" : "not sent");
 }
@@ -418,6 +530,7 @@ void handleReport(Device& d, Link& l, int channel, const uint8_t* buf, int n) {
     ctx.xrayOnly = d.xrayOnly;
     ctx.ps3 = d.ps3;
     ctx.hid = d.hidReady ? &d.hid : nullptr;
+    ctx.useGenericHidFallback = true;
     ctx.nowMs = msNow();
     ctx.subtype = &l.subtype;
     ctx.link = &l.report;
@@ -457,7 +570,7 @@ void readLoop(Device* d) {
     for (auto& l : d->links)
         if (l->opened) wakeUp(*d, *l);
 
-    uint8_t buf[64];
+    uint8_t buf[128];
     int errors = 0;
     while (!d->stop) {
         for (size_t k = 0; k < d->links.size(); ++k) {
@@ -475,9 +588,17 @@ void readLoop(Device* d) {
                 }
                 l.lightPlayer = player;
             }
-            if (l.rumbleAsked.exchange(false)) {
-                const uint32_t v = l.rumble;
-                sendRumble(*d, l, static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v));
+            if (l.rumbleAsked.load(std::memory_order_relaxed)) {
+                const uint32_t v = l.rumble.load(std::memory_order_relaxed);
+                const uint64_t now = msNow();
+                if (v == l.lastSentRumble) {
+                    l.rumbleAsked.store(false, std::memory_order_relaxed);
+                } else if (v == 0 || now - l.lastRumbleMs >= 20) {
+                    l.rumbleAsked.store(false, std::memory_order_relaxed);
+                    l.lastSentRumble = v;
+                    l.lastRumbleMs = now;
+                    sendRumble(*d, l, static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v));
+                }
             }
             if (!queueIn(*d, l)) ++errors;
         }
@@ -518,6 +639,11 @@ void closeDevice(Device& d) {
     d.stop = true;
     if (d.thread.joinable()) d.thread.join();
     for (auto& l : d.links) {
+        if (l->claimed && d.fd >= 0) {
+            int ifaceNum = static_cast<int>(l->iface.number);
+            ioctl(d.fd, USB_RELEASE_INTERFACE, &ifaceNum);
+            l->claimed = false;
+        }
         if (l->slot < 0) continue;
         usbPadDetached(l->slot);
         g_slots.release(l->slot);
@@ -525,6 +651,19 @@ void closeDevice(Device& d) {
     }
     if (d.fd >= 0) close(d.fd);
     d.fd = -1;
+}
+
+bool isKnownHidFallbackPad(uint16_t vid, uint16_t pid) {
+    if (isDualShock4VidPid(vid, pid)) return true;
+    if (isKnown8BitDoDInputVidPid(vid, pid)) return true;
+    if (vid == 0x054C && pid == 0x0268) return true; // DualShock 3
+    if (isSwitchProVidPid(vid, pid)) return true;
+    if (vid == 0x0E6F && pid == 0x0187) return true; // Switch Input-Only
+    if (vid == 0x18D1 && pid == 0x9400) return true; // Google Stadia
+    if (vid == 0x046D && (pid == 0xC216 || pid == 0xC218 || pid == 0xC219)) return true; // Logitech D-Input
+    if (vid == 0x2563 && (pid == 0x0119 || pid == 0x0523 || pid == 0x0575)) return true; // ShanWan 2.4G
+    if (vid == 0x0F0D && (pid == 0x0092 || pid == 0x00C1 || pid == 0x00F6)) return true; // Hori fightsticks
+    return false;
 }
 
 // A device seen for the first time: a pad gets a slot and its thread;
@@ -545,8 +684,8 @@ void probe(const std::string& path, ino_t ino) {
         return;
     }
     const uint16_t vid = UGETW(dd.idVendor), pid = UGETW(dd.idProduct);
-    // Explicitly skip DualSense USB (0x054C:0x0CE6) to ensure native PS5 libScePad retains exclusive ownership
-    if (vid == 0x054C && pid == 0x0CE6) {
+    // Explicitly skip DualSense / DualSense Edge USB (0x054C:0x0CE6 / 0x0DF2) so native PS5 libScePad retains exclusive ownership
+    if (vid == 0x054C && (pid == 0x0CE6 || pid == 0x0DF2)) {
         close(fd);
         g_ignored.insert(key);
         return;
@@ -575,7 +714,7 @@ void probe(const std::string& path, ino_t ino) {
             configLen = std::min<size_t>(gd.ugd_actlen, sizeof config);
             iface = probeUsbPadPs5(vid, pid, config, configLen);
             if (iface.protocol == UsbPadProtocol::DualShock4 || iface.protocol == UsbPadProtocol::GenericHid) {
-                uint8_t report[512] = {};
+                uint8_t report[1024] = {};
                 uint8_t curIf = 0xFF;
                 uint16_t want = sizeof(report);
                 for (size_t off = 0; off + 2 <= configLen; off += config[off]) {
@@ -588,11 +727,12 @@ void probe(const std::string& path, ino_t ino) {
                         break;
                     }
                 }
-                if (controlRequest(fd, 0x81, 0x06, 0x2200, iface.number, report, want) == 0) {
-                    iface = probeUsbPadPs5(vid, pid, config, configLen, report, want);
+                uint16_t got = 0;
+                if (readHidReportDescriptor(fd, iface.number, report, want, &got) && got > 0) {
+                    iface = probeUsbPadPs5(vid, pid, config, configLen, report, got);
                     if (iface.protocol == UsbPadProtocol::GenericHid)
-                        hidReady = parseHidDescriptor(hid, report, want, vid, pid);
-                } else if (!(vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC))) {
+                        hidReady = parseHidDescriptor(hid, report, got, vid, pid);
+                } else if (!isKnownHidFallbackPad(vid, pid)) {
                     // Reject unverified generic HID devices so USB keyboards/mice are never claimed
                     iface = UsbPadInterface{};
                 }
@@ -677,6 +817,12 @@ void probe(const std::string& path, ino_t ino) {
 
 void scan() {
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (!usbPadsEnabled()) {
+        for (auto& d : g_devices) closeDevice(*d);
+        g_devices.clear();
+        g_ignored.clear();
+        return;
+    }
     // Gone (unplugged, or its thread gave up): closed.
     for (auto it = g_devices.begin(); it != g_devices.end();) {
         Device& d = **it;
@@ -736,8 +882,12 @@ void setUsbPadSlotRumble(int slot, uint8_t large, uint8_t small) {
 }
 
 void usbPadsStart() {
+    if (!usbPadsEnabled()) {
+        XC_LOGI("usb pad: USB controllers driver disabled in settings");
+        return;
+    }
     if (g_running.exchange(true)) return;
-    XC_LOGI("usb pad: looking for Xbox / XInput pads on /dev/ugen*");
+    XC_LOGI("usb pad: looking for USB controllers on /dev/ugen*");
     g_scanner = std::thread(scanLoop);
 }
 

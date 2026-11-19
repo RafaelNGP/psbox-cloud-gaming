@@ -62,6 +62,82 @@ std::string usbPadReceiverDeviceName(int subtype) {
     }
 }
 
+bool isDualShock4VidPid(uint16_t vid, uint16_t pid) {
+    if (vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC || pid == 0x05C5 || pid == 0x0BA0)) return true;
+    if (vid == 0x146B && (pid == 0x0601 || pid == 0x0602 || pid == 0x0604 || pid == 0x0609)) return true; // Nacon
+    if (vid == 0x1532 && (pid == 0x0401 || pid == 0x1000 || pid == 0x1004 || pid == 0x1007 || pid == 0x1008)) return true; // Razer
+    if (vid == 0x0F0D && (pid == 0x0055 || pid == 0x0066 || pid == 0x0084 || pid == 0x00A0 || pid == 0x00EE)) return true; // Hori PS4
+    if (vid == 0x2C22 && (pid == 0x2000 || pid == 0x2300 || pid == 0x2500)) return true; // Qanba
+    if (vid == 0x0C12 && (pid == 0x0E10 || pid == 0x0CF2 || pid == 0x1CF2)) return true; // Brook / Zeroplus
+    return false;
+}
+
+bool isXbox360WirelessReceiverVidPid(uint16_t vid, uint16_t pid) {
+    return vid == 0x045E && (pid == 0x0719 || pid == 0x0291 || pid == 0x02A9);
+}
+
+bool isXboxGipVidPid(uint16_t vid, uint16_t pid) {
+    if (vid == 0x0E6F && pid == 0x024C) return true; // PDP Victrix Pro BFG Xbox
+    if (vid != 0x045E) return false;
+    static const uint16_t kGipPids[] = {
+        0x02D1, 0x02DD, 0x02E3, 0x02EA, 0x0B00, 0x0B0A, 0x0B12, 0x0B13,
+        0x02FE, 0x02E6, 0x02F9 // Xbox Wireless Adapter (GIP)
+    };
+    for (uint16_t p : kGipPids) {
+        if (p == pid) return true;
+    }
+    return false;
+}
+
+bool isSwitchProVidPid(uint16_t vid, uint16_t pid) {
+    if (vid != 0x057E) return false;
+    static const uint16_t kPids[] = {0x2009, 0x2006, 0x2007, 0x200E, 0x2017, 0x2019, 0x201E};
+    for (uint16_t p : kPids) {
+        if (p == pid) return true;
+    }
+    return false;
+}
+
+bool isKnown8BitDoDInputVidPid(uint16_t vid, uint16_t pid) {
+    if (vid != 0x2DC8) return false;
+    static const uint16_t kPids[] = {
+        0x2100, 0x2101, 0x3010, 0x3011, 0x3012, 0x3013, 0x3109, 0x310A, 0x310B,
+        0x6001, 0x6002, 0x6003, 0x6006, 0x6012, 0x6101, 0x9015, 0x9018
+    };
+    for (uint16_t p : kPids) {
+        if (p == pid) return true;
+    }
+    return false;
+}
+
+std::array<uint8_t, 32> buildDs4UsbRumblePacket(uint8_t leftStrong, uint8_t rightWeak,
+                                                uint8_t ledR, uint8_t ledG, uint8_t ledB) {
+    std::array<uint8_t, 32> pkt{};
+    pkt[0] = 0x05;
+    pkt[1] = 0x07;
+    pkt[2] = 0x00;
+    pkt[3] = 0x00;
+    pkt[4] = rightWeak;
+    pkt[5] = leftStrong;
+    pkt[6] = ledR;
+    pkt[7] = ledG;
+    pkt[8] = ledB;
+    return pkt;
+}
+
+std::array<uint8_t, 8> buildXInputRumblePacket(uint8_t leftStrong, uint8_t rightWeak) {
+    return {0x00, 0x08, 0x00, leftStrong, rightWeak, 0x00, 0x00, 0x00};
+}
+
+std::array<uint8_t, 12> buildXbox360WirelessRumblePacket(uint8_t leftStrong, uint8_t rightWeak) {
+    return {0x00, 0x01, 0x0F, 0xC0, 0x00, leftStrong, rightWeak, 0x00, 0x00, 0x00, 0x00, 0x00};
+}
+
+std::array<uint8_t, 13> buildGipRumblePacket(uint8_t leftStrong, uint8_t rightWeak, uint8_t seq) {
+    if (seq == 0) seq = 1;
+    return {0x09, 0x00, seq, 0x09, 0x00, 0x0F, 0x00, 0x00, leftStrong, rightWeak, 0xFF, 0x00, 0x00};
+}
+
 UsbPadInterface usbPadXrayInterface(const uint8_t* config, size_t configLen) {
     UsbPadInterface found;
     bool candidate = false;
@@ -124,6 +200,11 @@ void usbPadHandleReport(const UsbPadReportContext& ctx, const uint8_t* buf, int 
         for (const auto& ack : gipAcksFor(buf, static_cast<size_t>(n))) {
             ctx.sendAck(ack.data(), ack.size());
         }
+        // When a GIP controller or Xbox Wireless Adapter announces (0x02), send GIP Power On (Start).
+        if (n >= 4 && buf[0] == 0x02) {
+            static const uint8_t powerOn[] = {0x05, 0x20, 0x00, 0x01, 0x00};
+            ctx.sendAck(powerOn, sizeof powerOn);
+        }
     }
 
     if (ctx.wireless) {
@@ -133,7 +214,12 @@ void usbPadHandleReport(const UsbPadReportContext& ctx, const uint8_t* buf, int 
             XC_LOGI("usb pad: %.*s channel %d: device %s", static_cast<int>(ctx.where.size()), ctx.where.data(),
                     ctx.channel, linked ? "linked" : "gone");
             if (ctx.onPresent) ctx.onPresent(linked);
-            if (!linked && ctx.onDetach) ctx.onDetach();
+            if (linked) {
+                const int slot = ctx.getSlot ? ctx.getSlot() : -1;
+                if (slot < 0 && ctx.onAttach) ctx.onAttach();
+            } else if (ctx.onDetach) {
+                ctx.onDetach();
+            }
             return;
         }
         if (n >= 16 && buf[0] == 0x00 && buf[1] == 0x05 && buf[5] == 0x12) {

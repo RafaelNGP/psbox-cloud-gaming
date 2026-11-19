@@ -26,6 +26,7 @@
 #include "input/keyboard_nav.h"
 #include "input/pad_map.h"
 #include "input/pad_usb.h"
+#include "input/pad_usb_common.h"
 #include "input/pad_usb_hid.h"
 #include "input/sdl_mapping.h"
 #include "input/tuning.h"
@@ -82,6 +83,10 @@
 #include <set>
 #include <string>
 #include <vector>
+
+#ifdef near
+#undef near
+#endif
 
 using namespace xc;
 
@@ -3131,6 +3136,321 @@ static void testTouchDirtyFlagLifecycle() {
     CHECK(overlay.isDirty());
 }
 
+static void testPillar2Ps5UsbControllerExpansion() {
+    using namespace xc::input;
+    auto near = [](float a, float b) { return std::abs(a - b) < 0.01f; };
+
+    // 1. DualShock 4 USB (054c:05c4 v1, 054c:09cc v2, 054c:0ba0 USB Wireless Adaptor)
+    {
+        // Composite Audio (if 0..2) + HID (if 3, IN 0x84, OUT 0x03) descriptor as on real DS4 USB
+        const uint8_t ds4CompositeCfg[] = {
+            0x09, 0x02, 0x3B, 0x00, 0x04, 0x01, 0x00, 0xC0, 0xFA,
+            0x09, 0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00, // if 0: Audio Control
+            0x09, 0x04, 0x01, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, // if 1: Audio Streaming
+            0x09, 0x04, 0x02, 0x00, 0x00, 0x01, 0x02, 0x00, 0x00, // if 2: Audio Streaming
+            0x09, 0x04, 0x03, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, // if 3: HID Gamepad
+            0x07, 0x05, 0x84, 0x03, 0x40, 0x00, 0x05,             // IN 0x84
+            0x07, 0x05, 0x03, 0x03, 0x40, 0x00, 0x05              // OUT 0x03
+        };
+        const uint8_t ds4ReportDesc[] = {
+            0x05, 0x01, 0x09, 0x05, 0xA1, 0x01, 0x85, 0x01, 0x09, 0x30, 0x09, 0x31,
+            0x15, 0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95, 0x02, 0x81, 0x02, 0xC0
+        };
+        for (uint16_t pid : {uint16_t{0x05C4}, uint16_t{0x09CC}, uint16_t{0x0BA0}}) {
+            UsbPadInterface ifc = probeUsbPadPs5(0x054C, pid, ds4CompositeCfg, sizeof(ds4CompositeCfg),
+                                                 ds4ReportDesc, sizeof(ds4ReportDesc));
+            CHECK(ifc.protocol == UsbPadProtocol::DualShock4);
+            CHECK(ifc.number == 3 && ifc.epIn == 0x84 && ifc.epOut == 0x03);
+            CHECK(probeUsbPadPs4(0x054C, pid, ds4CompositeCfg, sizeof(ds4CompositeCfg),
+                                 ds4ReportDesc, sizeof(ds4ReportDesc)));
+        }
+
+        // Full 64-byte DS4 USB Report 0x01:
+        // Left/Right touchpad click coordinates, digital L2/R2 fallback, sticks, hat, and all buttons
+        uint8_t rep[64] = {};
+        rep[0] = 0x01;
+        rep[1] = 64;   // LX (~-0.5)
+        rep[2] = 192;  // LY (~+0.5)
+        rep[3] = 255;  // RX (+1.0)
+        rep[4] = 0;    // RY (-1.0)
+        rep[5] = 0xD3; // Hat 3 (Down+Right) + Square (0x10) + Circle (0x40) + Triangle (0x80)
+        rep[6] = 0xDF; // L1(0x01) + R1(0x02) + L2_bit(0x04) + R2_bit(0x08) + Share(0x10) + L3(0x40) + R3(0x80)
+        rep[7] = 0x02; // Touchpad click (0x02)
+        rep[8] = 0;    // L2 analog 0 -> falls back to 1.0f because L2_bit (0x04) is pressed
+        rep[9] = 64;   // R2 analog ~0.25f
+
+        // Finger 1 active on left side of touchpad: tx = 384 (0.20), ty = 470 (0.50)
+        rep[35] = 0x01; // active (bit 7 == 0), id = 1
+        rep[36] = 0x80; // tx low (0x180 = 384)
+        rep[37] = 0x61; // tx high (0x1), ty low (0x6) -> ty = 0x1D6 = 470
+        rep[38] = 0x1D; // ty high (0x1D)
+        rep[39] = 0x80; // finger 2 inactive
+
+        ControllerState s{};
+        CHECK(parseDualShock4Report(rep, sizeof(rep), s));
+        CHECK(s.connected && s.dpadDown && s.dpadRight && !s.dpadUp && !s.dpadLeft);
+        CHECK(s.btnX && s.btnB && s.btnY && !s.btnA);
+        CHECK(s.btnL1 && s.btnR1 && s.btnL3 && s.btnR3 && s.btnTouchpad && !s.btnOptions && !s.btnNexus);
+        CHECK(near(s.triggerL2, 1.0f) && near(s.triggerR2, 64.0f / 255.0f));
+        CHECK(s.touching && !s.touchSecond && s.touchX < 0.5f && near(s.touchX, 384.0f / 1919.0f));
+
+        // Finger 1 moves to right side of touchpad: tx = 1536 (0.80), ty = 470 (0.50), plus Finger 2 active
+        rep[36] = 0x00;
+        rep[37] = 0x66; // tx = 0x600 = 1536, ty = 0x1D6 = 470
+        rep[38] = 0x1D;
+        rep[39] = 0x02; // finger 2 active (bit 7 == 0, id = 2)
+        rep[40] = 0x00;
+        rep[41] = 0x04;
+        rep[42] = 0x10;
+        CHECK(parseDualShock4Report(rep, sizeof(rep), s));
+        CHECK(s.touching && s.touchSecond && s.touchX >= 0.5f && near(s.touchX, 1536.0f / 1919.0f));
+
+        // Finger 1 lifted while Finger 2 remains active on right side (tx = 0x400 = 1024 > 960 -> touchX >= 0.5f)
+        rep[35] = 0x81; // finger 1 inactive
+        CHECK(parseDualShock4Report(rep, sizeof(rep), s));
+        CHECK(s.touching && !s.touchSecond && s.touchX >= 0.5f && near(s.touchX, 1024.0f / 1919.0f));
+
+        // mergePads preserves DS4 USB touchpad coordinates when merged into a resting primary pad
+        ControllerState primary{};
+        primary.connected = true;
+        mergePads(primary, s);
+        CHECK(primary.touching && primary.touchX >= 0.5f && primary.btnTouchpad);
+    }
+
+    // 2. Xbox 360 Wireless Receiver (045e:0719 / 045e:0291) & Xbox Wireless Adapter / GIP (045e:02fe, 045e:02e6, 045e:0b12)
+    {
+        for (uint16_t pid : {uint16_t{0x0719}, uint16_t{0x0291}, uint16_t{0x02A9}}) {
+            UsbPadInterface rxIf = probeUsbPadPs5(0x045E, pid, nullptr, 0);
+            CHECK(rxIf.protocol == UsbPadProtocol::XInput && rxIf.wireless && rxIf.epIn == 0x81);
+            CHECK(probeUsbPadPs4(0x045E, pid, nullptr, 0));
+        }
+        for (uint16_t pid : {uint16_t{0x02FE}, uint16_t{0x02E6}, uint16_t{0x0B12}, uint16_t{0x0B13}}) {
+            UsbPadInterface gipIf = probeUsbPadPs5(0x045E, pid, nullptr, 0);
+            CHECK(gipIf.protocol == UsbPadProtocol::Gip && gipIf.epIn == 0x82 && gipIf.epOut == 0x02);
+            CHECK(probeUsbPadPs4(0x045E, pid, nullptr, 0));
+        }
+
+        // Presence query packet
+        const auto query = xinputWirelessPresenceQuery();
+        CHECK(query.size() == 12 && query[0] == 0x08 && query[1] == 0x00 && query[2] == 0x0F && query[3] == 0xC0);
+
+        // End-to-end usbPadHandleReport flow for Xbox 360 Wireless Receiver:
+        // presence 0x08 0x80 -> attach, 29-byte wireless input report -> state update, 0x08 0x00 -> detach
+        UsbPadLinkReportState linkState{};
+        int subtype = -1;
+        int slot = -1;
+        bool present = false;
+        bool attachedCalled = false;
+        bool detachedCalled = false;
+
+        UsbPadReportContext ctx{};
+        ctx.where = "/dev/ugen0.3";
+        ctx.channel = 0;
+        ctx.protocol = UsbPadProtocol::XInput;
+        ctx.wireless = true;
+        ctx.subtype = &subtype;
+        ctx.link = &linkState;
+        ctx.getSlot = [&]() { return slot; };
+        ctx.onPresent = [&](bool p) { present = p; };
+        ctx.onAttach = [&]() {
+            attachedCalled = true;
+            slot = 0;
+            usbPadAttached(slot, "Xbox 360 Wireless");
+        };
+        ctx.onDetach = [&]() {
+            detachedCalled = true;
+            if (slot >= 0) usbPadDetached(slot);
+            slot = -1;
+        };
+
+        const uint8_t pktConnect[2] = {0x08, 0x80};
+        usbPadHandleReport(ctx, pktConnect, sizeof(pktConnect));
+        CHECK(present && attachedCalled && slot == 0);
+
+        // 29-byte wireless input report (header 00 01 00 F0 + XInput report at byte 4)
+        uint8_t pktInput[29] = {0x00, 0x01, 0x00, 0xF0, 0x00, 0x13, 0x09 /* Up+Right */, 0x30 /* A+B */,
+                                128 /* LT */, 255 /* RT */};
+        pktInput[10] = 0xFF; pktInput[11] = 0x7F; // LX = +32767 (+1.0)
+        pktInput[12] = 0x00; pktInput[13] = 0x80; // LY = -32768 (+1.0 down after Y inversion)
+        usbPadHandleReport(ctx, pktInput, sizeof(pktInput));
+        CHECK(linkState.state.connected && linkState.state.btnA && linkState.state.btnB);
+        CHECK(linkState.state.dpadUp && linkState.state.dpadRight && !linkState.state.dpadDown);
+        CHECK(near(linkState.state.triggerL2, 128.0f / 255.0f) && near(linkState.state.triggerR2, 1.0f));
+        CHECK(near(linkState.state.rawLeftX, 1.0f) && near(linkState.state.rawLeftY, 1.0f));
+
+        // Also test 29-byte wireless packet where byte 5 is 0x00 but buttons are populated
+        uint8_t pktInputSynthetic[29] = {0x00, 0x01, 0x00, 0xF0, 0x00, 0x00, 0x02 /* Down */, 0x40 /* X */};
+        ControllerState synSt{};
+        CHECK(parseXInputReport(pktInputSynthetic, sizeof(pktInputSynthetic), synSt));
+        CHECK(synSt.connected && synSt.dpadDown && synSt.btnX && !synSt.btnA);
+
+        const uint8_t pktDisconnect[2] = {0x08, 0x00};
+        usbPadHandleReport(ctx, pktDisconnect, sizeof(pktDisconnect));
+        CHECK(!present && detachedCalled && slot == -1);
+        takeUsbPadEvents();
+
+        // GIP Announce (0x02 with ACK flag 0x10) triggers both ACK and GIP Power On (0x05 0x20 0x00 0x01 0x00)
+        std::vector<std::vector<uint8_t>> gipSent;
+        UsbPadReportContext gipCtx{};
+        gipCtx.where = "/dev/ugen0.4";
+        gipCtx.protocol = UsbPadProtocol::Gip;
+        gipCtx.subtype = &subtype;
+        gipCtx.link = &linkState;
+        gipCtx.sendAck = [&](const uint8_t* data, size_t len) {
+            gipSent.emplace_back(data, data + len);
+        };
+        const uint8_t gipAnnounce[10] = {0x02, 0x30, 0x01, 0x06, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+        usbPadHandleReport(gipCtx, gipAnnounce, sizeof(gipAnnounce));
+        CHECK(gipSent.size() == 2);
+        CHECK(gipSent[0].size() == 13 && gipSent[0][0] == 0x01); // GIP ACK
+        CHECK(gipSent[1].size() == 5 && gipSent[1][0] == 0x05 && gipSent[1][1] == 0x20 && gipSent[1][3] == 0x01); // GIP Power On
+    }
+
+    // 3. 8BitDo D-Input (2dc8:*), fightsticks (hat switch without analog axes) and Generic HID on PS5
+    {
+        const uint8_t hidCfg[] = {
+            0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0x80, 0xFA,
+            0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00,
+            0x07, 0x05, 0x81, 0x03, 0x40, 0x00, 0x05,
+            0x07, 0x05, 0x02, 0x03, 0x40, 0x00, 0x05
+        };
+        const uint8_t bitdoDesc[] = {
+            0x05, 0x01,        // Usage Page (Generic Desktop)
+            0x09, 0x05,        // Usage (Game Pad)
+            0xA1, 0x01,        // Collection (Application)
+            0x85, 0x01,        //   Report ID (1)
+            0x09, 0x39,        //   Usage (Hat switch)
+            0x15, 0x00,        //   Logical Minimum (0)
+            0x25, 0x07,        //   Logical Maximum (7)
+            0x75, 0x04,        //   Report Size (4)
+            0x95, 0x01,        //   Report Count (1)
+            0x81, 0x42,        //   Input (Data,Var,Abs,Null)
+            0x75, 0x04,        //   Report Size (4)
+            0x95, 0x01,        //   Report Count (1)
+            0x81, 0x01,        //   Input (Const) — padding nibble
+            0x09, 0x30,        //   Usage (X)
+            0x09, 0x31,        //   Usage (Y)
+            0x09, 0x32,        //   Usage (Z)
+            0x09, 0x35,        //   Usage (Rz)
+            0x15, 0x00,        //   Logical Minimum (0)
+            0x26, 0xFF, 0x00,  //   Logical Maximum (255)
+            0x75, 0x08,        //   Report Size (8)
+            0x95, 0x04,        //   Report Count (4)
+            0x81, 0x02,        //   Input (Data,Var,Abs)
+            0x05, 0x09,        //   Usage Page (Button)
+            0x19, 0x01,        //   Usage Minimum (1)
+            0x29, 0x0F,        //   Usage Maximum (15)
+            0x15, 0x00,        //   Logical Minimum (0)
+            0x25, 0x01,        //   Logical Maximum (1)
+            0x75, 0x01,        //   Report Size (1)
+            0x95, 0x0F,        //   Report Count (15)
+            0x81, 0x02,        //   Input (Data,Var,Abs)
+            0x75, 0x01,        //   Report Size (1)
+            0x95, 0x01,        //   Report Count (1)
+            0x81, 0x01,        //   Input (Const)
+            0xC0               // End Collection
+        };
+
+        // probeUsbPadPs5 classifies 8BitDo (2dc8:6001 / 2dc8:2100) as GenericHid (not DualShock4!)
+        UsbPadInterface bitdoIf = probeUsbPadPs5(0x2DC8, 0x6001, hidCfg, sizeof(hidCfg), bitdoDesc, sizeof(bitdoDesc));
+        CHECK(bitdoIf.protocol == UsbPadProtocol::GenericHid && bitdoIf.epIn == 0x81 && bitdoIf.epOut == 0x02);
+        CHECK(probeUsbPadPs5(0x054C, 0x0268, hidCfg, sizeof(hidCfg), bitdoDesc, sizeof(bitdoDesc)).protocol == UsbPadProtocol::DualShock3);
+        CHECK(probeUsbPadPs5(0x057E, 0x2009, hidCfg, sizeof(hidCfg), bitdoDesc, sizeof(bitdoDesc)).protocol == UsbPadProtocol::SwitchPro);
+        CHECK(probeUsbPadPs5(0x18D1, 0x9400, hidCfg, sizeof(hidCfg), bitdoDesc, sizeof(bitdoDesc)).protocol == UsbPadProtocol::Stadia);
+
+        HidGamepadLayout layout{};
+        CHECK(parseHidReportDescriptor(layout, bitdoDesc, sizeof(bitdoDesc), 0x2DC8, 0x6001));
+        CHECK(layout.role[ROLE_LX] == AX_X && layout.role[ROLE_LY] == AX_Y);
+        CHECK(layout.role[ROLE_RX] == AX_Z && layout.role[ROLE_RY] == AX_RZ);
+        // 4-axis controller without analog trigger axes must leave ROLE_L2/ROLE_R2 as AX_NONE
+        CHECK(layout.role[ROLE_L2] == AX_NONE && layout.role[ROLE_R2] == AX_NONE);
+
+        // 8BitDo D-Input report: ReportID=1, Hat=6 (Left), LX=128, LY=128, RX=255, RY=0,
+        // Buttons: bit 0 (A/Cross) + bit 4 (Y/Triangle) + bit 8 (L2 digital) + bit 11 (Start/Options)
+        const uint16_t btns = (1u << 0) | (1u << 4) | (1u << 8) | (1u << 11);
+        const uint8_t bitdoRep[8] = {
+            0x01, 0x06, 128, 128, 255, 0,
+            static_cast<uint8_t>(btns & 0xFF),
+            static_cast<uint8_t>((btns >> 8) & 0xFF)
+        };
+        ControllerState s{};
+        CHECK(decodeHidGamepadReport(layout, bitdoRep, sizeof(bitdoRep), s));
+        CHECK(s.connected && s.dpadLeft && !s.dpadRight && !s.dpadUp && !s.dpadDown);
+        CHECK(s.btnA && s.btnY && !s.btnB && !s.btnX && s.btnOptions);
+        CHECK(near(s.rawLeftX, 0.0f) && near(s.rawLeftY, 0.0f));
+        CHECK(near(s.rawRightX, 1.0f) && near(s.rawRightY, -1.0f));
+        CHECK(near(s.triggerL2, 1.0f) && near(s.triggerR2, 0.0f));
+
+        // Fightstick (arcade stick) HID descriptor: Hat switch + 12 buttons, NO analog stick axes (2-byte report)
+        const uint8_t fightstickDesc[] = {
+            0x05, 0x01,        // Usage Page (Generic Desktop)
+            0x09, 0x05,        // Usage (Game Pad)
+            0xA1, 0x01,        // Collection (Application)
+            0x09, 0x39,        //   Usage (Hat switch)
+            0x15, 0x00,        //   Logical Minimum (0)
+            0x25, 0x07,        //   Logical Maximum (7)
+            0x75, 0x04,        //   Report Size (4)
+            0x95, 0x01,        //   Report Count (1)
+            0x81, 0x42,        //   Input (Data,Var,Abs,Null)
+            0x05, 0x09,        //   Usage Page (Button)
+            0x19, 0x01,        //   Usage Minimum (1)
+            0x29, 0x0C,        //   Usage Maximum (12)
+            0x15, 0x00,        //   Logical Minimum (0)
+            0x25, 0x01,        //   Logical Maximum (1)
+            0x75, 0x01,        //   Report Size (1)
+            0x95, 0x0C,        //   Report Count (12)
+            0x81, 0x02,        //   Input (Data,Var,Abs)
+            0xC0               // End Collection
+        };
+        HidGamepadLayout stickLayout{};
+        CHECK(parseHidReportDescriptor(stickLayout, fightstickDesc, sizeof(fightstickDesc), 0x0F0D, 0x00C1));
+        CHECK(stickLayout.role[ROLE_LX] == AX_NONE && stickLayout.role[ROLE_LY] == AX_NONE);
+        CHECK(stickLayout.role[ROLE_RX] == AX_NONE && stickLayout.role[ROLE_RY] == AX_NONE);
+        CHECK(stickLayout.role[ROLE_L2] == AX_NONE && stickLayout.role[ROLE_R2] == AX_NONE);
+
+        // 2-byte fightstick report: Hat = 1 (Up+Right) in low nibble, Button 1 (Square/X) + Button 2 (Cross/A) + Button 6 (R1)
+        const uint16_t stickWord = 0x0001 | ((0x0001 | 0x0002 | 0x0020) << 4);
+        const uint8_t stickRep[2] = {
+            static_cast<uint8_t>(stickWord & 0xFF),
+            static_cast<uint8_t>((stickWord >> 8) & 0xFF)
+        };
+        s = {};
+        CHECK(decodeHidGamepadReport(stickLayout, stickRep, sizeof(stickRep), s));
+        CHECK(s.connected && s.dpadUp && s.dpadRight && !s.dpadDown && !s.dpadLeft);
+        CHECK(s.btnX && s.btnA && s.btnR1 && !s.btnB && !s.btnY);
+        CHECK(near(s.rawLeftX, 0.0f) && near(s.rawLeftY, 0.0f) && near(s.rawRightX, 0.0f) && near(s.rawRightY, 0.0f));
+        CHECK(near(s.triggerL2, 0.0f) && near(s.triggerR2, 0.0f));
+    }
+
+    // 4. Protocol-specific OUT rumble packet builders
+    {
+        // DualShock 4 USB report 0x05 (32 bytes: 0x05, 0x07, 0x00, 0x00, right_weak, left_strong, ...)
+        const auto ds4Pkt = buildDs4UsbRumblePacket(180, 90);
+        CHECK(ds4Pkt.size() == 32);
+        CHECK(ds4Pkt[0] == 0x05 && ds4Pkt[1] == 0x07 && ds4Pkt[2] == 0x00 && ds4Pkt[3] == 0x00);
+        CHECK(ds4Pkt[4] == 90 && ds4Pkt[5] == 180 && ds4Pkt[6] == 0x00);
+
+        // XInput Xbox 360 Wired (8 bytes: 0x00, 0x08, 0x00, left, right, 0x00, 0x00, 0x00)
+        const auto xinPkt = buildXInputRumblePacket(210, 75);
+        CHECK(xinPkt.size() == 8);
+        CHECK(xinPkt[0] == 0x00 && xinPkt[1] == 0x08 && xinPkt[2] == 0x00);
+        CHECK(xinPkt[3] == 210 && xinPkt[4] == 75 && xinPkt[5] == 0x00 && xinPkt[6] == 0x00 && xinPkt[7] == 0x00);
+
+        // Xbox 360 Wireless (12 bytes: 0x00, 0x01, 0x0f, 0xc0, 0x00, left, right, 0x00, ...)
+        const auto x360wPkt = buildXbox360WirelessRumblePacket(220, 110);
+        CHECK(x360wPkt.size() == 12);
+        CHECK(x360wPkt[0] == 0x00 && x360wPkt[1] == 0x01 && x360wPkt[2] == 0x0F && x360wPkt[3] == 0xC0 && x360wPkt[4] == 0x00);
+        CHECK(x360wPkt[5] == 220 && x360wPkt[6] == 110 && x360wPkt[7] == 0x00 && x360wPkt[11] == 0x00);
+
+        // Xbox One / Series GIP rumble (13 bytes: 0x09, 0x00, seq, 0x09, 0x00, 0x0f, 0x00, 0x00, left, right, 0xff, 0x00, 0x00)
+        const auto gipPkt = buildGipRumblePacket(100, 50, 7);
+        CHECK(gipPkt.size() == 13);
+        CHECK(gipPkt[0] == 0x09 && gipPkt[1] == 0x00 && gipPkt[2] == 7 && gipPkt[3] == 0x09 && gipPkt[4] == 0x00);
+        CHECK(gipPkt[5] == 0x0F && gipPkt[6] == 0x00 && gipPkt[7] == 0x00);
+        CHECK(gipPkt[8] == 100 && gipPkt[9] == 50 && gipPkt[10] == 0xFF && gipPkt[11] == 0x00 && gipPkt[12] == 0x00);
+    }
+}
+
 void runInputTests() {
     testControllerTuning();
     testUsbPadRumblePacket();
@@ -3160,4 +3480,5 @@ void runInputTests() {
     testTouchVirtualGamepadInjection();
     testTouchAutoHideLogic();
     testTouchDirtyFlagLifecycle();
+    testPillar2Ps5UsbControllerExpansion();
 }

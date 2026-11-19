@@ -74,6 +74,20 @@ std::string usbPadButtonNames(unsigned bits);
 // Human-readable name for a device linked to an Xbox 360 wireless receiver.
 std::string usbPadReceiverDeviceName(int subtype);
 
+// Controller family helpers shared between PS5 and PS4 USB pad backends.
+bool isDualShock4VidPid(uint16_t vid, uint16_t pid);
+bool isXbox360WirelessReceiverVidPid(uint16_t vid, uint16_t pid);
+bool isXboxGipVidPid(uint16_t vid, uint16_t pid);
+bool isSwitchProVidPid(uint16_t vid, uint16_t pid);
+bool isKnown8BitDoDInputVidPid(uint16_t vid, uint16_t pid);
+
+// Protocol-specific USB interrupt OUT rumble packet builders.
+std::array<uint8_t, 32> buildDs4UsbRumblePacket(uint8_t leftStrong, uint8_t rightWeak,
+                                                uint8_t ledR = 0, uint8_t ledG = 0, uint8_t ledB = 0);
+std::array<uint8_t, 8> buildXInputRumblePacket(uint8_t leftStrong, uint8_t rightWeak);
+std::array<uint8_t, 12> buildXbox360WirelessRumblePacket(uint8_t leftStrong, uint8_t rightWeak);
+std::array<uint8_t, 13> buildGipRumblePacket(uint8_t leftStrong, uint8_t rightWeak, uint8_t seq = 1);
+
 // First HID (non-boot keyboard/mouse) or vendor-class interface with an interrupt IN endpoint,
 // and its interrupt OUT endpoint if present, for unknown-controller X-ray capture.
 UsbPadInterface usbPadXrayInterface(const uint8_t* config, size_t configLen);

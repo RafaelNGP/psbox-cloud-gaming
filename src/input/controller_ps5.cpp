@@ -255,6 +255,7 @@ void setMotors(int slot, uint8_t large, uint8_t small, uint32_t) {
     int rc = scePadSetVibration(g_slots[slot].handle, &p);
     if (!g_rumbleLogged || rc != 0) XC_LOGI("scePadSetVibration(%u, %u): 0x%08x", p.largeMotor, p.smallMotor, rc);
     g_rumbleLogged = true;
+    setUsbPadRumble(slot, large, small);
 }
 
 TriggerStyle triggerStyle(int) { return TriggerStyle::Adaptive; }

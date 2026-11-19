@@ -68,11 +68,12 @@ struct GenericHidContext {
     int hasIds = 0;
     HidField axis[AX_N]{};
     HidField button[kMaxHidButtons]{};
+    HidField dpad[4]{};  // Generic Desktop D-pad usages 0x90 (Up), 0x91 (Down), 0x92 (Right), 0x93 (Left)
     HidField home{};
     HidField back{};
     int nbuttons = 0;
 
-    uint8_t role[ROLE_N]{};
+    uint8_t role[ROLE_N]{AX_NONE, AX_NONE, AX_NONE, AX_NONE, AX_NONE, AX_NONE};
     uint8_t invert[ROLE_N]{};
     uint32_t buttonMap[kMaxHidButtons]{};
 
@@ -84,11 +85,23 @@ struct GenericHidContext {
     uint8_t outFieldSize = 0;
 };
 
+using HidGamepadLayout = GenericHidContext;
+
 // Parses a raw USB HID Report Descriptor and configures the context with standard/builtin mappings.
-bool parseHidDescriptor(GenericHidContext& ctx, const uint8_t* desc, size_t len, uint16_t vid, uint16_t pid);
+bool parseHidDescriptor(GenericHidContext& ctx, const uint8_t* desc, size_t len, uint16_t vid = 0, uint16_t pid = 0);
+
+inline bool parseHidReportDescriptor(GenericHidContext& ctx, const uint8_t* desc, size_t len,
+                                     uint16_t vid = 0, uint16_t pid = 0) {
+    return parseHidDescriptor(ctx, desc, len, vid, pid);
+}
 
 // Decodes an incoming HID interrupt report into ControllerState.
 bool parseGenericHidReport(const GenericHidContext& ctx, const uint8_t* data, size_t len, ControllerState& state);
+
+inline bool decodeHidGamepadReport(const GenericHidContext& ctx, const uint8_t* data, size_t len,
+                                   ControllerState& state) {
+    return parseGenericHidReport(ctx, data, len, state);
+}
 
 // Fallback for unconfigured HID devices (interprets standard raw reports).
 bool parseGenericHidFallback(const uint8_t* data, size_t len, ControllerState& state);

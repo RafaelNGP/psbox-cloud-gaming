@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "input/pad_usb.h"
+#include "input/pad_usb_common.h"
 #include "input/pad_usb_hid.h"
 #include <initializer_list>
 
@@ -314,8 +315,9 @@ UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len, const uint8_t*
             if (d[off + 5] == 0x03 && hasBootKbdOrMouse && !hasVerifiedGamepadReport) {
                 proto = UsbPadProtocol::None;
             }
+            const bool sameIfaceAlt = (inPad && !pad.epIn && pad.number == d[off + 2] && proto == pad.protocol);
             pad = {proto, d[off + 2], 0, 0, proto == UsbPadProtocol::XInput && d[off + 7] == 0x81};
-            inPad = pad.protocol != UsbPadProtocol::None && d[off + 3] == 0;
+            inPad = pad.protocol != UsbPadProtocol::None && (d[off + 3] == 0 || sameIfaceAlt);
         } else if (d[off + 1] == 0x05 && l >= 7 && inPad && (d[off + 3] & 0x03) == 0x03) {  // an interrupt endpoint
             const uint8_t addr = d[off + 2];
             uint8_t& ep = (addr & 0x80) ? pad.epIn : pad.epOut;
@@ -336,7 +338,7 @@ UsbPadInterface findUsbPadInterface(const uint8_t* d, size_t len, const uint8_t*
 
 UsbPadInterface probeUsbPadPs5(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_t configLen,
                               const uint8_t* reportDesc, size_t reportLen) {
-    if (vid == 0x0e8d || (vid == 0x054C && pid == 0x0CE6)) {
+    if (vid == 0x0e8d || (vid == 0x054C && (pid == 0x0CE6 || pid == 0x0DF2))) {
         return UsbPadInterface{};
     }
 
@@ -359,18 +361,48 @@ UsbPadInterface probeUsbPadPs5(uint16_t vid, uint16_t pid, const uint8_t* config
 
     UsbPadInterface iface = findUsbPadInterface(configDesc, configLen, reportDesc, reportLen);
 
-    if (!hasBootKbdOrMouse && vid == 0x054C && (pid == 0x05C4 || pid == 0x09CC)) {
+    // Refine HID (class 0x03) protocol by VID/PID so DualShock 4, DualShock 3, Switch Pro, Stadia,
+    // 8BitDo D-Input, fightsticks, and generic HID gamepads each use their appropriate parser.
+    if (iface.protocol == UsbPadProtocol::DualShock4) {
+        if (isDualShock4VidPid(vid, pid)) {
+            iface.protocol = UsbPadProtocol::DualShock4;
+        } else if (vid == 0x054C && pid == 0x0268) {
+            iface.protocol = UsbPadProtocol::DualShock3;
+        } else if (isSwitchProVidPid(vid, pid)) {
+            iface.protocol = UsbPadProtocol::SwitchPro;
+        } else if (vid == 0x0E6F && pid == 0x0187) {
+            iface.protocol = UsbPadProtocol::SwitchInputOnly;
+        } else if (vid == 0x18D1 && pid == 0x9400) {
+            iface.protocol = UsbPadProtocol::Stadia;
+        } else {
+            iface.protocol = UsbPadProtocol::GenericHid;
+        }
+    }
+
+    if (!hasBootKbdOrMouse && isDualShock4VidPid(vid, pid)) {
         if (reportDesc && reportLen > 0 && isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) {
             return UsbPadInterface{};
         }
         iface.protocol = UsbPadProtocol::DualShock4;
-        iface.number = 0;
-        if (!iface.epIn) iface.epIn = 0x81;
-    } else if (!hasBootKbdOrMouse && vid == 0x045E && pid == 0x0719) {
+        if (!iface.epIn) {
+            iface.number = 0;
+            iface.epIn = 0x81;
+        }
+    } else if (!hasBootKbdOrMouse && isXbox360WirelessReceiverVidPid(vid, pid)) {
         iface.protocol = UsbPadProtocol::XInput;
-        iface.number = 0;
         iface.wireless = true;
-        if (!iface.epIn) iface.epIn = 0x81;
+        if (!iface.epIn) {
+            iface.number = 0;
+            iface.epIn = 0x81;
+        }
+    } else if (!hasBootKbdOrMouse && isXboxGipVidPid(vid, pid) && iface.protocol == UsbPadProtocol::None) {
+        UsbPadInterface xi = usbPadXrayInterface(configDesc, configLen);
+        if (xi.epIn) {
+            iface = xi;
+            iface.protocol = UsbPadProtocol::Gip;
+        } else if (!configDesc || configLen == 0) {
+            iface = {UsbPadProtocol::Gip, 0, 0x82, 0x02, false};
+        }
     }
 
     if (iface.protocol == UsbPadProtocol::DualShock4 || iface.protocol == UsbPadProtocol::GenericHid) {
@@ -403,23 +435,18 @@ bool probeUsbPadPs4(uint16_t vid, uint16_t pid, const uint8_t* configDesc, size_
         }
     }
 
-    if (!hasBootKbdOrMouse && vid == 0x045E) {
-        if (pid == 0x028E || pid == 0x02D1 || pid == 0x02DD || pid == 0x02E3 || pid == 0x02EA ||
-            pid == 0x0B00 || pid == 0x0B0A || pid == 0x0B12 || pid == 0x0719) {
-            return true;
-        }
-    }
+    if (!hasBootKbdOrMouse && (vid == 0x045E && pid == 0x028E)) return true;
+    if (!hasBootKbdOrMouse && (isXbox360WirelessReceiverVidPid(vid, pid) || isXboxGipVidPid(vid, pid))) return true;
 
     if (!hasBootKbdOrMouse && vid == 0x054C && (pid == 0x0268 || pid == 0x0CE6 || pid == 0x0DF2)) return true;
-    if (!hasBootKbdOrMouse && vid == 0x057E && (pid == 0x2009 || pid == 0x2006 || pid == 0x2007 || pid == 0x200E ||
-                          pid == 0x2017 || pid == 0x2019 || pid == 0x201E)) return true;
+    if (!hasBootKbdOrMouse && isSwitchProVidPid(vid, pid)) return true;
     if (!hasBootKbdOrMouse && vid == 0x18D1 && pid == 0x9400) return true;
 
     if (!hasBootKbdOrMouse && (vid == 0x054C || vid == 0x146B || vid == 0x1532 || vid == 0x0F0D || vid == 0x2C22 || vid == 0x0C12)) {
         if (reportDesc && reportLen > 0) {
             if (isGamepadReportDescriptor(reportDesc, reportLen)) return true;
             if (isKeyboardOrMouseReportDescriptor(reportDesc, reportLen)) return false;
-        } else if (pid == 0x05C4 || pid == 0x09CC) {
+        } else if (isDualShock4VidPid(vid, pid)) {
             return true;
         }
     }
@@ -486,7 +513,27 @@ bool parseXInputReport(const uint8_t* data, size_t len, ControllerState& s) {
     // Input from the receiver: 00 01 00 F0 then the wired report (00 13 ...). Its other messages
     // (00 0F announce, 00 05 / 00 00 status, 00 01 00 13 ...) are not input: read as a wired
     // report they pressed A B X Y and both triggers when a pad linked up.
-    if (len >= 18 && data[0] == 0x00 && data[1] == 0x01 && data[3] == 0xF0) return parseXInputReport(data + 4, len - 4, s);
+    if (len >= 18 && data[0] == 0x00 && data[1] == 0x01 && data[3] == 0xF0) {
+        if (data[4] == 0x00 && (data[5] == 0x13 || data[5] == 0x14)) {
+            return parseXInputReport(data + 4, len - 4, s);
+        }
+        if (len == 29 && data[4] == 0x00 && data[5] == 0x00) {
+            bool anyNonZero = false;
+            for (size_t i = 6; i < 18; ++i) {
+                if (data[i] != 0) {
+                    anyNonZero = true;
+                    break;
+                }
+            }
+            if (anyNonZero) {
+                uint8_t fixed[25];
+                std::copy(data + 4, data + 29, fixed);
+                fixed[1] = 0x13;
+                return parseXInputReport(fixed, sizeof fixed, s);
+            }
+        }
+        return false;
+    }
     // A wired report: 00, then its length (0x14; 0x13 behind the receiver's header).
     if (len < 14 || data[0] != 0x00 || (data[1] != 0x14 && data[1] != 0x13)) return false;
     const unsigned b = static_cast<unsigned>(data[2] | (data[3] << 8));
@@ -740,19 +787,31 @@ bool parseDualShock4Report(const uint8_t* data, size_t len, ControllerState& s) 
     if (effectiveLen >= 9) {
         s.triggerL2 = static_cast<float>(p[7]) / 255.0f;
         s.triggerR2 = static_cast<float>(p[8]) / 255.0f;
+        if (s.triggerL2 == 0.0f && (b1 & 0x04)) s.triggerL2 = 1.0f;
+        if (s.triggerR2 == 0.0f && (b1 & 0x08)) s.triggerR2 = 1.0f;
     } else {
         s.triggerL2 = (b1 & 0x04) ? 1.0f : 0.0f;
         s.triggerR2 = (b1 & 0x08) ? 1.0f : 0.0f;
     }
 
-    if (effectiveLen >= 39) {
-        if ((p[34] & 0x80) == 0) { // active touch 1
+    if (effectiveLen >= 38) {
+        const bool f1Active = (p[34] & 0x80) == 0;
+        const bool f2Active = (effectiveLen >= 42 && (p[38] & 0x80) == 0 &&
+                               (p[38] != 0 || p[39] != 0 || p[40] != 0 || p[41] != 0));
+        if (f1Active) {
             s.touching = true;
             uint16_t tx = static_cast<uint16_t>(p[35] | ((p[36] & 0x0F) << 8));
             uint16_t ty = static_cast<uint16_t>((p[36] >> 4) | (p[37] << 4));
             s.touchX = std::clamp(static_cast<float>(tx) / 1919.0f, 0.0f, 1.0f);
             s.touchY = std::clamp(static_cast<float>(ty) / 941.0f, 0.0f, 1.0f);
-            s.touchSecond = (effectiveLen >= 43 && (p[38] & 0x80) == 0);
+            s.touchSecond = f2Active;
+        } else if (f2Active) {
+            s.touching = true;
+            uint16_t tx = static_cast<uint16_t>(p[39] | ((p[40] & 0x0F) << 8));
+            uint16_t ty = static_cast<uint16_t>((p[40] >> 4) | (p[41] << 4));
+            s.touchX = std::clamp(static_cast<float>(tx) / 1919.0f, 0.0f, 1.0f);
+            s.touchY = std::clamp(static_cast<float>(ty) / 941.0f, 0.0f, 1.0f);
+            s.touchSecond = false;
         } else {
             s.touching = false;
             s.touchSecond = false;
@@ -1536,18 +1595,33 @@ size_t usbPadRumblePacket(UsbPadProtocol protocol, uint8_t large, uint8_t small,
 
 void setUsbPadRumble(int player, uint8_t large, uint8_t small) {
     if (player < 0 || player >= kMaxPads) return;
-    int slot = -1;
+    int slots[kMaxUsbPads];
+    int count = 0;
     {
         std::lock_guard<std::mutex> lock(g_mutex);
         for (int s = 0; s < kMaxUsbPads; ++s) {
             if (g_slots[s].attached && g_slots[s].player == player) {
-                slot = s;
-                break;
+                slots[count++] = s;
             }
         }
+        // On PS5, native DualSense takes player 0 at boot, placing a single wired USB pad on player 1.
+        // If player 0 rumble is requested and no USB pad is on player 0, forward to the most recently
+        // active USB pad when it was used more recently than the native pad 0.
+        if (count == 0 && player == 0) {
+            const uint64_t nativeAt = padActiveAt(0);
+            int bestSlot = -1;
+            uint64_t bestAt = 0;
+            for (int s = 0; s < kMaxUsbPads; ++s) {
+                if (g_slots[s].attached && g_slots[s].activeAt >= nativeAt && g_slots[s].activeAt >= bestAt) {
+                    bestAt = g_slots[s].activeAt;
+                    bestSlot = s;
+                }
+            }
+            if (bestSlot >= 0) slots[count++] = bestSlot;
+        }
     }
-    if (slot >= 0) {
-        setUsbPadSlotRumble(slot, large, small);
+    for (int i = 0; i < count; ++i) {
+        setUsbPadSlotRumble(slots[i], large, small);
     }
 }
 
