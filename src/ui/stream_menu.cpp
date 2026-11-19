@@ -97,6 +97,7 @@ bool StreamMenu::itemShown(int item) const {
 }
 
 void StreamMenu::selectFirstItem() {
+    scrollPixelOffset_ = 0.0f;
 #if defined(__ANDROID__)
     for (int i : kAndroidOrder) {
         if (itemShown(i)) {
@@ -151,6 +152,7 @@ void StreamMenu::open(int resolution, bool stats, int sharpness, int deband, int
     padSpeakerVolume_ = std::clamp(padSpeakerVolume, 0, 100);
     activeTab_ = usbOwnerGuitar_ && usbOwnerPlayer_ >= 0 ? MenuTab::Guitar : MenuTab::General;
     selected_ = XboxButton;
+    scrollPixelOffset_ = 0.0f;
     resolution_ = applied_ = resolution;
     resolutionAsked_ = false;
     statsCustomizing_ = false;
@@ -348,6 +350,27 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         do pos = (pos + (in.up ? n - 1 : 1)) % n; while (!itemShown(kAndroidOrder[pos]));
         selected_ = kAndroidOrder[pos];
         in.up = in.down = false;
+
+        // Keep the selected item visible inside the scrollable Android menu viewport
+        // (supports both step-by-step navigation and top/bottom wrap-around).
+        constexpr int kRowH = 50, kMaxVisible = 10;
+        int totalShown = 0;
+        int selIdx = 0;
+        for (int i : kAndroidOrder) {
+            if (!itemShown(i)) continue;
+            if (i == selected_) selIdx = totalShown;
+            ++totalShown;
+        }
+        if (totalShown <= kMaxVisible) {
+            scrollPixelOffset_ = 0.0f;
+        } else {
+            int startIdx = std::clamp(static_cast<int>(scrollPixelOffset_ / kRowH), 0, totalShown - kMaxVisible);
+            if (selIdx < startIdx) {
+                scrollPixelOffset_ = static_cast<float>(selIdx * kRowH);
+            } else if (selIdx >= startIdx + kMaxVisible) {
+                scrollPixelOffset_ = static_cast<float>((selIdx - kMaxVisible + 1) * kRowH);
+            }
+        }
     }
 #else
     if (in.up) do selected_ = (selected_ + ItemCount - 1) % ItemCount; while (!itemShown(selected_));

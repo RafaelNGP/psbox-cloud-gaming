@@ -47,6 +47,8 @@ struct AndroidCodecState {
     int cropBottom = 0;
     int colorFormat = 21; // 19 = Planar (I420), 21 = SemiPlanar (NV12), 0x7f420888 = Flexible
     bool hasImageData = false;
+    bool hasProducedFrame = false;
+    int consecutiveTimeouts = 0;
     AndroidMediaImage2 imageInfo{};
 };
 #endif
@@ -211,11 +213,14 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     }
 
     // 2. Drain output buffers in a loop to keep lowest latency.
-    // First call waits up to 3.5ms for real-time 1-in-1-out hardware decode;
-    // subsequent calls drain queued backlogs non-blockingly (waitUs = 0).
+    // Adaptive timeout: AMediaCodec_dequeueOutputBuffer wakes up immediately as soon as a
+    // frame is ready (zero extra latency on fast SoCs). Use 10 ms in steady-state 1-in-1-out
+    // mode so 4-9 ms decoders (Dimensity, Exynos, Tegra, Amlogic) don't time out early and
+    // drop frames on the next cycle; fall back to a short 2.5 ms wait during initial priming
+    // or consecutive timeouts so deeper-pipeline decoders never stall.
     ssize_t latestIdx = -1;
     AMediaCodecBufferInfo latestInfo{};
-    int64_t waitUs = 3500;
+    int64_t waitUs = (!s->hasProducedFrame || s->consecutiveTimeouts >= 2) ? 2500 : 10000;
 
     while (true) {
         AMediaCodecBufferInfo info{};
@@ -296,10 +301,13 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     }
 
     if (latestIdx < 0) {
+        ++s->consecutiveTimeouts;
         out.pending = true;
         out.error = false;
         return false;
     }
+    s->hasProducedFrame = true;
+    s->consecutiveTimeouts = 0;
 
     s->currentOutIdx = latestIdx;
     size_t bufSize = 0;
