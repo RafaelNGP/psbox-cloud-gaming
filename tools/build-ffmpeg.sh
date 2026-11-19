@@ -122,19 +122,26 @@ elif [[ $target == android-* ]]; then
     [[ -n "$ndk" && -d "$ndk" ]] || { echo "error: ANDROID_NDK_HOME not set or not found ($ndk)" >&2; exit 1; }
     tc=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin
     [[ -d "$tc" ]] || { echo "error: NDK toolchain not found at $tc" >&2; exit 1; }
-    api=29
+    api=26
     cflags=("-fPIC" "-D_GNU_SOURCE")
-    ldflags=("-Wl,-z,max-page-size=16384")
+    ldflags=()
     case $abi in
         arm64-v8a)
             arch="aarch64"
             triple="aarch64-linux-android"
             asm=(--enable-neon)
+            ldflags=("-Wl,-z,max-page-size=16384")
+            ;;
+        armeabi-v7a)
+            arch="arm"
+            triple="armv7a-linux-androideabi"
+            asm=(--cpu=armv7-a --enable-neon --enable-thumb)
             ;;
         x86_64)
             arch="x86_64"
             triple="x86_64-linux-android"
             asm=(--disable-x86asm)
+            ldflags=("-Wl,-z,max-page-size=16384")
             ;;
         *)
             echo "error: unsupported Android ABI $abi" >&2; exit 1

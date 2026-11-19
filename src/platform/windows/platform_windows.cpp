@@ -380,6 +380,7 @@ std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }
 std::string platformName() { return "Windows"; }
 bool isPS4() { return false; }
+bool hasTouchscreen() { return false; }
 bool isPS5() { return false; }
 size_t imageCacheBudget() { return 160u << 20; }
 

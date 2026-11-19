@@ -75,7 +75,14 @@ static void initJniHapticCache(JNIEnv* env) {
     std::lock_guard<std::mutex> lock(s_jniHapticMutex);
     if (s_jniHapticCache.inited) return;
 
-    jclass localCls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    jclass localCls = nullptr;
+    if (auto activity = static_cast<jobject>(SDL_GetAndroidActivity())) {
+        localCls = env->GetObjectClass(activity);
+        env->DeleteLocalRef(activity);
+    }
+    if (!localCls) {
+        localCls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    }
     if (!localCls) {
         if (env->ExceptionCheck()) env->ExceptionClear();
         return;

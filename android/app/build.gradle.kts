@@ -24,15 +24,14 @@ android {
         versionName = computedVersionName
 
         ndk {
-            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+            abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a", "x86_64"))
         }
         externalNativeBuild {
             cmake {
                 arguments.addAll(listOf(
                     "-DXCLOUD_DESKTOP_APP=ON",
                     "-DANDROID_STL=c++_shared",
-                    "-DCMAKE_BUILD_TYPE=Release",
-                    "-DCMAKE_SHARED_LINKER_FLAGS=-Wl,-z,max-page-size=16384"
+                    "-DCMAKE_BUILD_TYPE=Release"
                 ))
             }
         }

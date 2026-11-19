@@ -312,6 +312,17 @@ public class MainActivity extends SDLActivity {
         }
     }
 
+    public static boolean hasTouchscreen() {
+        Activity activity = (Activity) getContext();
+        if (activity == null) return false;
+        PackageManager pm = activity.getPackageManager();
+        if (pm == null) return false;
+        boolean isTv = pm.hasSystemFeature(PackageManager.FEATURE_TELEVISION)
+                    || pm.hasSystemFeature(PackageManager.FEATURE_LEANBACK);
+        if (isTv) return false;
+        return pm.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN);
+    }
+
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);

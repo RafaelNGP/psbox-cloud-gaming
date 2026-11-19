@@ -113,11 +113,15 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
     media_status_t cStatus = AMediaCodec_configure(s->codec, format, nullptr, nullptr, 0);
     if (cStatus != AMEDIA_OK) {
         XC_LOGW("hw_decoder_android: AMediaCodec_configure with 0x7f420888 failed (%d), retrying 21", cStatus);
-        AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, 21); // COLOR_FormatYUV420SemiPlanar
-        cStatus = AMediaCodec_configure(s->codec, format, nullptr, nullptr, 0);
+        AMediaCodec_delete(s->codec);
+        s->codec = AMediaCodec_createDecoderByType("video/avc");
+        if (s->codec) {
+            AMediaFormat_setInt32(format, AMEDIAFORMAT_KEY_COLOR_FORMAT, 21); // COLOR_FormatYUV420SemiPlanar
+            cStatus = AMediaCodec_configure(s->codec, format, nullptr, nullptr, 0);
+        }
         if (cStatus != AMEDIA_OK) {
             XC_LOGW("hw_decoder_android: retry with 21 failed (%d), retrying without COLOR_FORMAT", cStatus);
-            AMediaCodec_delete(s->codec);
+            if (s->codec) AMediaCodec_delete(s->codec);
             s->codec = AMediaCodec_createDecoderByType("video/avc");
             if (s->codec) {
                 AMediaFormat_delete(format);
@@ -172,6 +176,9 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
 #endif
 }
 
+bool HwDecoder::supportsQhd() { return true; }
+bool HwDecoder::ensureConfig(int, int, uint32_t, uint32_t) { return ready(); }
+
 bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& out) {
 #if defined(__ANDROID__)
     if (!decoder_ || !data || len == 0) return false;
@@ -215,16 +222,29 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
         ssize_t outIdx = AMediaCodec_dequeueOutputBuffer(s->codec, &info, waitUs);
         waitUs = 0;
         if (outIdx >= 0) {
+            if ((info.flags & AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG) || info.size <= 0) {
+                // Skip empty / codec-config output buffers (common on legacy OMX decoders)
+                AMediaCodec_releaseOutputBuffer(s->codec, static_cast<size_t>(outIdx), false);
+                continue;
+            }
             if (latestIdx >= 0) {
                 // Drop older queued frame immediately for lowest display latency
                 AMediaCodec_releaseOutputBuffer(s->codec, static_cast<size_t>(latestIdx), false);
             }
             latestIdx = outIdx;
             latestInfo = info;
+        } else if (outIdx == AMEDIACODEC_INFO_OUTPUT_BUFFERS_CHANGED) {
+            // Legacy OMX decoders (e.g. Tegra / Nvidia Shield) still emit this; keep draining.
+            continue;
         } else if (outIdx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
             AMediaFormat* fmt = AMediaCodec_getOutputFormat(s->codec);
             if (fmt) {
                 XC_LOGI("hw_decoder_android: output format changed: %s", AMediaFormat_toString(fmt));
+                s->hasImageData = false;
+                s->cropLeft = 0;
+                s->cropTop = 0;
+                s->cropRight = 0;
+                s->cropBottom = 0;
                 AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, &s->width);
                 AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, &s->height);
                 if (!AMediaFormat_getInt32(fmt, AMEDIAFORMAT_KEY_STRIDE, &s->stride) || s->stride <= 0) {
@@ -254,7 +274,9 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
                 size_t imgSize = 0;
                 if (AMediaFormat_getBuffer(fmt, "image-data", &imgData, &imgSize) && imgData && imgSize >= sizeof(AndroidMediaImage2)) {
                     const auto* m = reinterpret_cast<const AndroidMediaImage2*>(imgData);
-                    if (m->numPlanes == 3 && m->plane[0].rowInc > 0) {
+                    if (m->type == 1 && m->numPlanes == 3 &&
+                        m->plane[0].rowInc > 0 && m->plane[1].rowInc > 0 && m->plane[2].rowInc > 0 &&
+                        m->plane[0].colInc >= 1 && m->plane[1].colInc >= 1 && m->plane[2].colInc >= 1) {
                         s->hasImageData = true;
                         s->imageInfo = *m;
                         XC_LOGI("hw_decoder_android: image-data MediaImage2 parsed: type=%u planes=%u %ux%u bitDepth=%u/%u; "
@@ -282,21 +304,35 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     s->currentOutIdx = latestIdx;
     size_t bufSize = 0;
     uint8_t* buf = AMediaCodec_getOutputBuffer(s->codec, static_cast<size_t>(latestIdx), &bufSize);
-    if (!buf || bufSize == 0) {
-        XC_LOGE("hw_decoder_android: getOutputBuffer failed or size 0");
+    if (!buf || bufSize == 0 || latestInfo.offset < 0 || latestInfo.size <= 0 ||
+        static_cast<size_t>(latestInfo.offset) >= bufSize) {
+        XC_LOGE("hw_decoder_android: invalid output buffer (buf=%p bufSize=%zu offset=%d infoSize=%d)",
+                static_cast<void*>(buf), bufSize, latestInfo.offset, latestInfo.size);
         AMediaCodec_releaseOutputBuffer(s->codec, static_cast<size_t>(latestIdx), false);
         s->currentOutIdx = -1;
         out.error = true;
         return false;
     }
 
+    const size_t avail = bufSize - static_cast<size_t>(latestInfo.offset);
     uint8_t* frameBase = buf + latestInfo.offset;
-    int stride = s->stride > 0 ? s->stride : s->width;
-    int sliceH = s->sliceHeight > 0 ? s->sliceHeight : s->height;
-    int visW = (s->cropRight > s->cropLeft) ? (s->cropRight - s->cropLeft + 1) : s->width;
-    int visH = (s->cropBottom > s->cropTop) ? (s->cropBottom - s->cropTop + 1) : s->height;
-    visW = std::clamp(visW & ~1, 2, s->width);
-    visH = std::clamp(visH & ~1, 2, s->height);
+    const int stride = s->stride > 0 ? s->stride : s->width;
+    const int sliceH = s->sliceHeight > 0 ? s->sliceHeight : s->height;
+    const int cropL = std::max(0, s->cropLeft);
+    const int cropT = std::max(0, s->cropTop);
+    int visW = (s->cropRight > cropL) ? (s->cropRight - cropL + 1) : s->width;
+    int visH = (s->cropBottom > cropT) ? (s->cropBottom - cropT + 1) : s->height;
+    visW = std::clamp(visW & ~1, 2, std::max(2, s->width));
+    visH = std::clamp(visH & ~1, 2, std::max(2, s->height));
+    const size_t cw = static_cast<size_t>((visW + 1) / 2);
+    const size_t ch = static_cast<size_t>((visH + 1) / 2);
+
+    auto planeFits = [&](size_t off, size_t rowStride, size_t rowBytes, size_t rows) -> bool {
+        if (rowStride < rowBytes || rows == 0 || rowBytes == 0) return false;
+        if (off >= avail) return false;
+        const size_t needed = (rows - 1) * rowStride + rowBytes;
+        return needed <= avail - off;
+    };
 
     out.width = visW;
     out.height = visH;
@@ -305,73 +341,108 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     out.error = false;
     out.pending = false;
 
+    bool layoutValid = false;
     if (s->hasImageData) {
         const auto& p0 = s->imageInfo.plane[0];
         const auto& p1 = s->imageInfo.plane[1];
         const auto& p2 = s->imageInfo.plane[2];
 
-        uint8_t* yBase = frameBase + p0.offset + s->cropTop * p0.rowInc + s->cropLeft * p0.colInc;
-        out.data = yBase;
+        const size_t yOff = static_cast<size_t>(p0.offset) +
+                            static_cast<size_t>(cropT) * static_cast<size_t>(p0.rowInc) +
+                            static_cast<size_t>(cropL) * static_cast<size_t>(p0.colInc);
+        const bool yOk = planeFits(yOff, static_cast<size_t>(p0.rowInc), static_cast<size_t>(visW), static_cast<size_t>(visH));
+        out.data = frameBase + yOff;
         out.pitchBytes = p0.rowInc;
 
         if (p1.colInc == 1) {
             // Planar (I420 / YV12)
+            const size_t uOff = static_cast<size_t>(p1.offset) +
+                                static_cast<size_t>(cropT / 2) * static_cast<size_t>(p1.rowInc) +
+                                static_cast<size_t>(cropL / 2);
+            const size_t vOff = static_cast<size_t>(p2.offset) +
+                                static_cast<size_t>(cropT / 2) * static_cast<size_t>(p2.rowInc) +
+                                static_cast<size_t>(cropL / 2);
+            layoutValid = yOk &&
+                          planeFits(uOff, static_cast<size_t>(p1.rowInc), cw, ch) &&
+                          planeFits(vOff, static_cast<size_t>(p2.rowInc), cw, ch);
             out.isYuv420p = true;
             out.nv21 = false;
-            out.u = frameBase + p1.offset + (s->cropTop / 2) * p1.rowInc + (s->cropLeft / 2);
-            out.v = frameBase + p2.offset + (s->cropTop / 2) * p2.rowInc + (s->cropLeft / 2);
+            out.u = frameBase + uOff;
+            out.v = frameBase + vOff;
             out.strideU = p1.rowInc;
             out.strideV = p2.rowInc;
             out.uv = nullptr;
             out.uvPitchBytes = 0;
         } else {
             // SemiPlanar (NV12 / NV21)
+            const bool isNv21 = (p2.offset < p1.offset);
+            const auto& cp = isNv21 ? p2 : p1;
+            const size_t uvOff = static_cast<size_t>(cp.offset) +
+                                 static_cast<size_t>(cropT / 2) * static_cast<size_t>(cp.rowInc) +
+                                 static_cast<size_t>(cropL & ~1);
+            layoutValid = yOk && planeFits(uvOff, static_cast<size_t>(cp.rowInc), cw * 2, ch);
             out.isYuv420p = false;
             out.u = nullptr;
             out.v = nullptr;
             out.strideU = 0;
             out.strideV = 0;
-            if (p2.offset < p1.offset) {
-                // NV21: V precedes U
-                out.uv = frameBase + p2.offset + (s->cropTop / 2) * p2.rowInc + (s->cropLeft & ~1);
-                out.nv21 = true;
-            } else {
-                // NV12: U precedes V
-                out.uv = frameBase + p1.offset + (s->cropTop / 2) * p1.rowInc + (s->cropLeft & ~1);
-                out.nv21 = false;
-            }
-            out.uvPitchBytes = p1.rowInc;
+            out.uv = frameBase + uvOff;
+            out.nv21 = isNv21;
+            out.uvPitchBytes = cp.rowInc;
         }
     } else {
         // Fallback without image-data
-        uint8_t* yBase = frameBase + s->cropTop * stride + s->cropLeft;
-        uint8_t* chromaBase = frameBase + stride * sliceH;
-        out.data = yBase;
+        const size_t yOff = static_cast<size_t>(cropT) * static_cast<size_t>(stride) + static_cast<size_t>(cropL);
+        const size_t chromaOff = static_cast<size_t>(stride) * static_cast<size_t>(sliceH);
+        const bool yOk = planeFits(yOff, static_cast<size_t>(stride), static_cast<size_t>(visW), static_cast<size_t>(visH));
+        out.data = frameBase + yOff;
         out.pitchBytes = stride;
 
         if (s->colorFormat == 19) {
             // Planar I420
+            const int uStride = stride / 2;
+            const int vStride = stride / 2;
+            const size_t uOff = chromaOff + static_cast<size_t>(cropT / 2) * static_cast<size_t>(uStride) + static_cast<size_t>(cropL / 2);
+            const size_t vOff = chromaOff + static_cast<size_t>(uStride) * static_cast<size_t>(sliceH / 2) +
+                                static_cast<size_t>(cropT / 2) * static_cast<size_t>(vStride) + static_cast<size_t>(cropL / 2);
+            layoutValid = yOk &&
+                          planeFits(uOff, static_cast<size_t>(uStride), cw, ch) &&
+                          planeFits(vOff, static_cast<size_t>(vStride), cw, ch);
             out.isYuv420p = true;
             out.nv21 = false;
-            int uStride = stride / 2;
-            int vStride = stride / 2;
-            out.u = chromaBase + (s->cropTop / 2) * uStride + (s->cropLeft / 2);
-            out.v = chromaBase + uStride * (sliceH / 2) + (s->cropTop / 2) * vStride + (s->cropLeft / 2);
+            out.u = frameBase + uOff;
+            out.v = frameBase + vOff;
             out.strideU = uStride;
             out.strideV = vStride;
             out.uv = nullptr;
             out.uvPitchBytes = 0;
         } else {
             // SemiPlanar NV12
+            const size_t uvOff = chromaOff + static_cast<size_t>(cropT / 2) * static_cast<size_t>(stride) + static_cast<size_t>(cropL & ~1);
+            layoutValid = yOk && planeFits(uvOff, static_cast<size_t>(stride), cw * 2, ch);
             out.isYuv420p = false;
             out.nv21 = false;
             out.u = nullptr;
             out.v = nullptr;
             out.strideU = 0;
             out.strideV = 0;
-            out.uv = chromaBase + (s->cropTop / 2) * stride + (s->cropLeft & ~1);
+            out.uv = frameBase + uvOff;
             out.uvPitchBytes = stride;
         }
+    }
+
+    if (!layoutValid) {
+        XC_LOGE("hw_decoder_android: output buffer too small/incompatible for %dx%d "
+                "(avail=%zu infoSize=%d stride=%d sliceH=%d colorFmt=0x%x hasImgData=%d); failing frame for SW fallback",
+                visW, visH, avail, latestInfo.size, stride, sliceH, s->colorFormat, s->hasImageData ? 1 : 0);
+        AMediaCodec_releaseOutputBuffer(s->codec, static_cast<size_t>(latestIdx), false);
+        s->currentOutIdx = -1;
+        out.data = nullptr;
+        out.u = nullptr;
+        out.v = nullptr;
+        out.uv = nullptr;
+        out.error = true;
+        return false;
     }
 
     static bool s_firstLogged = false;

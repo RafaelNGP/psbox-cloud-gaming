@@ -118,6 +118,8 @@ std::string diagnostics();
 // Platform description ("PlayStation 4", "PlayStation 5", "Linux", etc.).
 std::string platformName();
 bool isPS4();
+// Whether this device has a touchscreen for on-screen touch controls (false on consoles, PCs, and Android TV).
+bool hasTouchscreen();
 bool isPS5();
 
 // Suggested image cache budget in bytes for this platform's RAM constraints.

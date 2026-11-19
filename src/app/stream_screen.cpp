@@ -89,12 +89,12 @@ void updateTextInput(app::StreamPlayer* player) {
 StreamScreen::StreamScreen(const ui::Fonts& fonts)
     : fonts_(fonts), menu_(fonts), touchOverlay_(fonts), touchCanvas_(display::kWidth, display::kHeight) {
     touchCanvas_.clearTransparent();
-#if defined(__ANDROID__)
-    std::lock_guard<std::mutex> lock(g_settingsMutex);
-    touchOverlay_.setSettings(g_settings);
-#else
-    touchOverlay_.setVisible(false);
-#endif
+    if (platform::hasTouchscreen()) {
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        touchOverlay_.setSettings(g_settings);
+    } else {
+        touchOverlay_.setVisible(false);
+    }
 }
 
 void StreamScreen::setPads(const ui::PadSlots& slots) {
@@ -1541,16 +1541,16 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             display::setOverlay(c.data(), ui::StreamMenu::kWarnRight - c.width(), ui::StreamMenu::kWarnY, c.width(),
                                 c.height(), 200);
         } else {
-#if defined(__ANDROID__)
-            // On Android, even when the virtual gamepad is idle or physical controller is attached,
-            // render a subtle translucent pull-tab handle docked flush at the top-left edge
-            static ui::Canvas s_pullTabCanvas(72, 84);
-            s_pullTabCanvas.clearTransparent();
-            touchOverlay_.drawPullTab(s_pullTabCanvas, 0.35f);
-            display::setOverlay(s_pullTabCanvas.data(), 0, 0, s_pullTabCanvas.width(), s_pullTabCanvas.height(), 255);
-#else
-            display::setOverlay(nullptr, 0, 0, 0, 0, 0);
-#endif
+            if (platform::hasTouchscreen()) {
+                // On touchscreen Android devices, render a subtle translucent pull-tab handle
+                // docked flush at the top-left edge even when the virtual gamepad is idle.
+                static ui::Canvas s_pullTabCanvas(72, 84);
+                s_pullTabCanvas.clearTransparent();
+                touchOverlay_.drawPullTab(s_pullTabCanvas, 0.35f);
+                display::setOverlay(s_pullTabCanvas.data(), 0, 0, s_pullTabCanvas.width(), s_pullTabCanvas.height(), 255);
+            } else {
+                display::setOverlay(nullptr, 0, 0, 0, 0, 0);
+            }
         }
         overlayShown_ = true;
     }

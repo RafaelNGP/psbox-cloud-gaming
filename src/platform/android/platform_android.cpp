@@ -175,6 +175,36 @@ std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }
 std::string platformName() { return "Android"; }
 bool isPS4() { return false; }
+
+bool hasTouchscreen() {
+#if defined(__ANDROID__)
+    static int s_cached = -1;
+    if (s_cached >= 0) return s_cached != 0;
+    typedef void* (*PFN_GetJNIEnv)();
+    typedef void* (*PFN_GetActivity)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    static auto pfnGetActivity = reinterpret_cast<PFN_GetActivity>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity"));
+    if (!pfnGetJNIEnv || !pfnGetActivity) return false;
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    auto activity = static_cast<jobject>(pfnGetActivity());
+    if (!env || !activity) return false;
+    bool result = false;
+    jclass cls = env->GetObjectClass(activity);
+    if (cls) {
+        jmethodID mid = env->GetStaticMethodID(cls, "hasTouchscreen", "()Z");
+        if (mid) {
+            result = (env->CallStaticBooleanMethod(cls, mid) == JNI_TRUE);
+            s_cached = result ? 1 : 0;
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+    }
+    env->DeleteLocalRef(activity);
+    return result;
+#else
+    return false;
+#endif
+}
 bool isPS5() { return false; }
 size_t imageCacheBudget() { return 96u << 20; }
 
@@ -254,13 +284,23 @@ void setThreadRealtimePriority() {
 void setLowLatencyNetwork(bool on) {
 #if defined(__ANDROID__)
     typedef void* (*PFN_GetJNIEnv)();
+    typedef void* (*PFN_GetActivity)();
     static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    static auto pfnGetActivity = reinterpret_cast<PFN_GetActivity>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity"));
     if (!pfnGetJNIEnv) return;
     auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
     if (!env) return;
-    jclass cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    jclass cls = nullptr;
+    jobject activity = pfnGetActivity ? static_cast<jobject>(pfnGetActivity()) : nullptr;
+    if (activity) {
+        cls = env->GetObjectClass(activity);
+        env->DeleteLocalRef(activity);
+    }
     if (!cls) {
-        env->ExceptionClear();
+        cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    }
+    if (!cls) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
         return;
     }
     jmethodID mid = env->GetStaticMethodID(cls, "setLowLatencyWifi", "(Z)V");

@@ -325,6 +325,7 @@ bool createDevice() {
         VkPhysicalDeviceProperties props{};
         vkGetPhysicalDeviceProperties(dev, &props);
         if (props.apiVersion < VK_API_VERSION_1_3) continue;
+        if (props.deviceType == VK_PHYSICAL_DEVICE_TYPE_CPU) continue;
         VkPhysicalDeviceFeatures supported{};
         vkGetPhysicalDeviceFeatures(dev, &supported);
         if (!supported.shaderStorageImageWriteWithoutFormat) continue;
@@ -635,7 +636,7 @@ bool createBuffer(Buffer& b, size_t size, VkBufferUsageFlags usage) {
         return false;
     vkBindBufferMemory(g.device, b.buffer, b.memory, 0);
     void* map = nullptr;
-    if (vkMapMemory(g.device, b.memory, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS) return false;
+    if (vkMapMemory(g.device, b.memory, 0, VK_WHOLE_SIZE, 0, &map) != VK_SUCCESS || !map) return false;
     b.map = static_cast<uint8_t*>(map);
     b.size = size;
     return true;

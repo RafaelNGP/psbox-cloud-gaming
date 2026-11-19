@@ -404,8 +404,9 @@ bool drawNv12(const uint8_t* y, const uint8_t* uv, int strideY, int strideUV,
 bool drawYuv420(const uint8_t* y, const uint8_t* u, const uint8_t* v, int strideY, int strideU, int strideV,
                 int width, int height, bool) {
     // Never waits for the screen: the mailbox keeps the newest frame.
-    if (width <= 0 || height <= 0) return false;
+    if (!y || !u || !v || width <= 0 || height <= 0) return false;
     const int cw = (width + 1) / 2, ch = (height + 1) / 2;
+    if (strideY < width || strideU < cw || strideV < cw) return false;
     g_back.kind = Kind::Video;
     g_back.nv12 = false;
     g_back.width = width, g_back.height = height;

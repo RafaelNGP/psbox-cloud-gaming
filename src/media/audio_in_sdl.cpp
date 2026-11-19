@@ -11,9 +11,37 @@
 
 #include <SDL3/SDL.h>
 
+#if defined(__ANDROID__)
+#include <jni.h>
+#endif
+
 #include <vector>
 
 namespace xc::media {
+
+#if defined(__ANDROID__)
+namespace {
+// Query MainActivity.hasRecordAudioPermission() via SDL_GetAndroidActivity() so it works
+// reliably from native worker threads (where FindClass() only sees BootClassLoader).
+bool androidHasRecordAudioPermission() {
+    auto* env = static_cast<JNIEnv*>(SDL_GetAndroidJNIEnv());
+    auto activity = static_cast<jobject>(SDL_GetAndroidActivity());
+    if (!env || !activity) return false;
+    bool granted = false;
+    jclass cls = env->GetObjectClass(activity);
+    if (cls) {
+        jmethodID mid = env->GetStaticMethodID(cls, "hasRecordAudioPermission", "()Z");
+        if (mid) {
+            granted = (env->CallStaticBooleanMethod(cls, mid) == JNI_TRUE);
+        }
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+    }
+    env->DeleteLocalRef(activity);
+    return granted;
+}
+}  // namespace
+#endif
 
 struct AudioIn::Impl {
     SDL_AudioStream* stream = nullptr;
@@ -31,6 +59,15 @@ AudioIn::~AudioIn() {
 
 bool AudioIn::open(AudioCallback cb) {
     if (running_) return true;
+#if defined(__ANDROID__)
+    // Never trigger SDL3's blocking permission dialog from the stream worker thread:
+    // on Android TV (e.g. Nvidia Shield), popping a runtime permission dialog mid-stream-load
+    // pauses the Activity (SDL_HINT_ANDROID_BLOCK_ON_PAUSE=1) and crashes/freezes startup.
+    if (!androidHasRecordAudioPermission()) {
+        XC_LOGW("audio in: RECORD_AUDIO permission not granted; skipping microphone capture");
+        return false;
+    }
+#endif
     callback_ = std::move(cb);
 
     if (!SDL_WasInit(SDL_INIT_AUDIO)) {

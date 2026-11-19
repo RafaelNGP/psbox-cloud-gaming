@@ -1196,6 +1196,7 @@ std::string platformName() {
     return "PlayStation 4";
 }
 bool isPS4() { return true; }
+bool hasTouchscreen() { return false; }
 bool isPS5() { return false; }
 
 size_t imageCacheBudget() {

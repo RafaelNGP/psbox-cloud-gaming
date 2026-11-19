@@ -16,7 +16,7 @@ option(XCLOUD_PS5 "Build for the PS5 (payload SDK)" OFF)
 option(XC_TARGET_PS4 "Build for the PS4 (OpenOrbis)" OFF)
 include(cmake/platform.cmake)
 
-if(ANDROID)
+if(ANDROID AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_link_options("-Wl,-z,max-page-size=16384")
 endif()
 
