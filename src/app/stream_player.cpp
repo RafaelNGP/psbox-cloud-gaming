@@ -767,7 +767,7 @@ struct StreamPlayer::Impl {
         static bool slotsAsked = false;
         if (!slotsAsked) {
             slotsAsked = true;
-            constexpr size_t kSlotBytes = size_t{4} << 20;  // a 1920x1088 NV12 picture, pitch 2048, and room
+            constexpr size_t kSlotBytes = size_t{8} << 20;  // up to 2560x1440 NV12 zero-copy with aligned pitch
             uint8_t* slots[2] = {nullptr, nullptr};
             if (display::videoSlots(kSlotBytes, slots)) {
                 media::HwDecoder::Output& o = media::HwDecoder::output();

@@ -35,6 +35,12 @@ public:
     ~HwDecoder();
     // Loads the module and makes a decoder for pictures up to the size.
     bool init(int maxWidth, int maxHeight);
+    // Ensures the decoder can handle the incoming SPS dimensions, H.264 level,
+    // and reference-frame count (recreating the decoder if the stream exceeds
+    // the current limits, e.g. 1440p / Level 5.1+ from xhome or xCloud 1440p).
+    bool ensureConfig(int width, int height, uint32_t levelIdc, uint32_t maxNumRefFrames);
+    // Whether this platform's hardware video path supports 1440p (2560x1440) streams.
+    static bool supportsQhd();
     bool ready() const { return decoder_ != nullptr; }
     // One access unit in; true with `out` when a picture came out.
     bool decode(const uint8_t* data, size_t len, uint64_t pts, Picture& out);
@@ -88,6 +94,10 @@ private:
     [[maybe_unused]] void* computeQueue_ = nullptr;
     [[maybe_unused]] uint8_t* frameBuffer_ = nullptr;
     [[maybe_unused]] size_t frameBufferSize_ = 0;
+    [[maybe_unused]] int32_t maxWidth_ = 0;
+    [[maybe_unused]] int32_t maxHeight_ = 0;
+    [[maybe_unused]] uint32_t maxLevel_ = 0;
+    [[maybe_unused]] int32_t maxDpbFrames_ = 0;
 };
 
 }  // namespace xc::media

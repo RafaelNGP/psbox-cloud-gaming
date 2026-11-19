@@ -47,6 +47,7 @@ void disableSimd();
 struct H264Sps {
     bool valid = false;
     uint32_t profileIdc = 0;
+    uint32_t levelIdc = 0;
     uint32_t spsId = 0;
     uint32_t chromaFormatIdc = 1;
     bool separateColourPlane = false;
@@ -54,6 +55,9 @@ struct H264Sps {
     uint32_t picOrderCntType = 0;
     uint32_t log2MaxPicOrderCntLsbMinus4 = 0;
     bool deltaPicOrderAlwaysZero = false;
+    uint32_t maxNumRefFrames = 0;
+    uint32_t codedWidth = 0;
+    uint32_t codedHeight = 0;
     bool frameMbsOnly = true;
 };
 
@@ -86,11 +90,13 @@ public:
     int parseSliceHeaderQp(const uint8_t* payload, size_t payloadLen, uint8_t nalUnitType, uint8_t nalRefIdc);
 
     const H264Sps* getSps(uint32_t id) const { return (id < 32 && spsMap_[id].valid) ? &spsMap_[id] : nullptr; }
+    const H264Sps* lastSps() const { return (lastSpsId_ < 32 && spsMap_[lastSpsId_].valid) ? &spsMap_[lastSpsId_] : nullptr; }
     const H264Pps* getPps(uint32_t id) const { return (id < 256 && ppsMap_[id].valid) ? &ppsMap_[id] : nullptr; }
 
 private:
     H264Sps spsMap_[32];
     H264Pps ppsMap_[256];
+    uint32_t lastSpsId_ = 32;
 };
 
 class VideoDecoder {

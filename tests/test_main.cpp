@@ -4888,8 +4888,26 @@ static void testVideoDecoder() {
     CHECK(sps != nullptr);
     CHECK(sps->valid);
     CHECK(sps->profileIdc == 66);
+    CHECK(sps->levelIdc == 31);
+    CHECK(sps->codedWidth == 1280 && sps->codedHeight == 720);
     CHECK(sps->picOrderCntType == 2);
     CHECK(sps->frameMbsOnly);
+
+    // Real Xbox Series X xhome 1440p60 Main Level 5.1 SPS (2560x1440, 1 ref frame)
+    {
+        media::H264BitstreamParser p1440;
+        const uint8_t sps1440[] = {
+            0x4d, 0x00, 0x33, 0x91, 0xa0, 0x0a, 0x00, 0x2d, 0x68, 0x40, 0x00,
+            0x00, 0xfa, 0x40, 0x00, 0x75, 0x30, 0x23, 0x68, 0x22, 0x11, 0xa8
+        };
+        CHECK(p1440.parseSps(sps1440, sizeof sps1440));
+        const auto* s1440 = p1440.lastSps();
+        CHECK(s1440 != nullptr && s1440->valid);
+        CHECK(s1440->profileIdc == 77);
+        CHECK(s1440->levelIdc == 51);
+        CHECK(s1440->maxNumRefFrames == 1);
+        CHECK(s1440->codedWidth == 2560 && s1440->codedHeight == 1440);
+    }
 
     const auto* pps = parser.getPps(0);
     CHECK(pps != nullptr);

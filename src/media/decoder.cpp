@@ -196,6 +196,7 @@ H264BitstreamParser::H264BitstreamParser() {
 void H264BitstreamParser::reset() {
     for (auto& s : spsMap_) s = H264Sps{};
     for (auto& p : ppsMap_) p = H264Pps{};
+    lastSpsId_ = 32;
 
     // Stream default fallback
     spsMap_[0].valid = true;
@@ -220,7 +221,7 @@ bool H264BitstreamParser::parseSps(const uint8_t* payload, size_t payloadLen) {
     H264Sps sps;
     sps.profileIdc = br.readBits(8);
     br.readBits(8); // constraint_set flags + reserved
-    br.readBits(8); // level_idc
+    sps.levelIdc = br.readBits(8); // level_idc
     sps.spsId = br.readUe();
     if (sps.spsId >= 32 || br.hasError()) return false;
 
@@ -267,15 +268,18 @@ bool H264BitstreamParser::parseSps(const uint8_t* payload, size_t payloadLen) {
         }
     }
 
-    br.readUe(); // max_num_ref_frames
+    sps.maxNumRefFrames = br.readUe(); // max_num_ref_frames
     br.readBit(); // gaps_in_frame_num_value_allowed_flag
-    br.readUe(); // pic_width_in_mbs_minus1
-    br.readUe(); // pic_height_in_map_units_minus1
+    uint32_t picWidthInMbsMinus1 = br.readUe(); // pic_width_in_mbs_minus1
+    uint32_t picHeightInMapUnitsMinus1 = br.readUe(); // pic_height_in_map_units_minus1
     sps.frameMbsOnly = br.readBit() != 0;
+    sps.codedWidth = (picWidthInMbsMinus1 + 1u) * 16u;
+    sps.codedHeight = (sps.frameMbsOnly ? 1u : 2u) * (picHeightInMapUnitsMinus1 + 1u) * 16u;
 
     if (!br.hasError()) {
         sps.valid = true;
         spsMap_[sps.spsId] = sps;
+        lastSpsId_ = sps.spsId;
         return true;
     }
     return false;
@@ -682,7 +686,7 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
              (data[2] == 0 && data[3] == 1 && ((data[4] & 0x1F) == 5 || (data[4] & 0x1F) == 7))));
 
         qpParseUs_ = -1;
-        if (lastQp_ < 0 || isKey || (++qpSampleCounter_ % 8 == 0)) {
+        if (lastQp_ < 0 || isKey || !profileLogged_ || (++qpSampleCounter_ % 8 == 0)) {
             const auto qp0 = std::chrono::steady_clock::now();
             double parsedQp = h264Parser_.parseAccessUnitQp(data, len);
             qpParseUs_ = static_cast<int64_t>(
@@ -691,7 +695,18 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
                 lastQp_ = parsedQp;
             }
         }
+        if (const H264Sps* sps = h264Parser_.lastSps();
+            sps && sps->codedWidth > 0 && sps->codedHeight > 0 && (isKey || !profileLogged_)) {
+            if (!hw_.ensureConfig(static_cast<int>(sps->codedWidth), static_cast<int>(sps->codedHeight),
+                                  sps->levelIdc, sps->maxNumRefFrames)) {
+                XC_LOGW("hwdec: could not reconfigure for %ux%u level %u refs %u; falling back to CPU",
+                        sps->codedWidth, sps->codedHeight, sps->levelIdc, sps->maxNumRefFrames);
+                isHw_ = false;
+                if (ctx_) avcodec_flush_buffers(ctx_);
+            }
+        }
 
+        if (isHw_ && hw_.ready()) {
         HwDecoder::Picture hp;
         bool ok = hw_.decode(data, len, tag, hp);
         if (ok && !hp.error) {
@@ -764,11 +779,16 @@ bool VideoDecoder::decode(const uint8_t* data, size_t len, Picture& out, uint32_
         // stream to FFmpeg for good: one CPU thread does not keep up with
         // 1080p60, so that fallback is a last resort. Until then, this frame
         // is lost.
-        if (consecutiveHwErrors_ < 120) return false;
-        if (consecutiveHwErrors_ == 120) {
+        // Before the first picture ever came out (!profileLogged_), fail over
+        // quickly so an incompatible bitstream never freezes "Starting the stream".
+        // Once running, keep the 120-frame (~2 s) tolerance for packet loss.
+        const int maxHwErrors = profileLogged_ ? 120 : 8;
+        if (consecutiveHwErrors_ < maxHwErrors) return false;
+        if (consecutiveHwErrors_ == maxHwErrors) {
             XC_LOGE("hwdec: %d decode errors in a row, falling back to the CPU software decoder", consecutiveHwErrors_);
             isHw_ = false;
             if (ctx_) avcodec_flush_buffers(ctx_);
+        }
         }
         // Fall back to CPU FFmpeg decode for this packet
     }

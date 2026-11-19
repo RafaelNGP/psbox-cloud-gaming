@@ -747,4 +747,7 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
     return true;
 }
 
+bool HwDecoder::supportsQhd() { return false; }
+bool HwDecoder::ensureConfig(int, int, uint32_t, uint32_t) { return ready(); }
+
 } // namespace xc::media

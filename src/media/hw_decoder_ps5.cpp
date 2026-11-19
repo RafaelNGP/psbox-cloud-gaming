@@ -82,6 +82,7 @@ int sceVideodec2CreateDecoder(const Vdec2DecoderConfig* config, const Vdec2Decod
 int sceVideodec2DeleteDecoder(void* decoder);
 int sceVideodec2Decode(void* decoder, Vdec2Input* input, Vdec2Frame* frame, Vdec2Output* output);
 int sceVideodec2Flush(void* decoder, Vdec2Frame* frame, Vdec2Output* output);
+int sceVideodec2Reset(void* decoder);
 }
 
 namespace xc::media {
@@ -270,8 +271,111 @@ bool HwDecoder::init(int maxWidth, int maxHeight) {
         XC_LOGW("hwdec: another decoder holds the kept memory: this one maps its own");
     rc = sceVideodec2CreateDecoder(&config, &memory, &decoder_);
     XC_LOGI("hwdec: create decoder 0x%08x", static_cast<unsigned>(rc));
-    if (rc != 0) decoder_ = nullptr;
-    return decoder_ != nullptr;
+    if (rc != 0) {
+        decoder_ = nullptr;
+        return false;
+    }
+    maxWidth_ = config.maxWidth;
+    maxHeight_ = config.maxHeight;
+    maxLevel_ = config.maxLevel;
+    maxDpbFrames_ = config.maxDpbFrames;
+    return true;
+}
+
+bool HwDecoder::supportsQhd() { return true; }
+
+bool HwDecoder::ensureConfig(int width, int height, uint32_t levelIdc, uint32_t maxNumRefFrames) {
+    if (!decoder_ || !computeQueue_) return false;
+    if (width <= 0 || height <= 0) return true;
+    const int32_t wantW = std::max<int32_t>(maxWidth_, (width + 15) & ~15);
+    const int32_t wantH = std::max<int32_t>(maxHeight_, (height + 15) & ~15);
+    // Clamp level into [42, 52] (Level 4.2 = 1080p60, 5.1 = 1440p60, 5.2 = 1440p120 / 4K60).
+    const uint32_t wantLevel = std::clamp<uint32_t>(std::max<uint32_t>(maxLevel_, levelIdc), 42u, 52u);
+    const int32_t wantDpb = std::clamp<int32_t>(
+        std::max<int32_t>(maxDpbFrames_, static_cast<int32_t>(maxNumRefFrames) + 1), 2, 16);
+
+    if (wantW <= maxWidth_ && wantH <= maxHeight_ && wantLevel <= maxLevel_ && wantDpb <= maxDpbFrames_) {
+        return true;
+    }
+
+    XC_LOGI("hwdec: SPS requires %dx%d level %u dpb %d (current %dx%d level %u dpb %d); reconfiguring",
+            wantW, wantH, wantLevel, wantDpb, maxWidth_, maxHeight_, maxLevel_, maxDpbFrames_);
+
+    const Tuning tune = tuning();
+    const uint32_t levelCandidates[] = {wantLevel, 52u, 51u};
+    Vdec2DecoderConfig config{};
+    Vdec2DecoderMemory memory{};
+    int rc = -1;
+    for (uint32_t lvl : levelCandidates) {
+        if (lvl < wantLevel && lvl != 51u) continue;
+        config = Vdec2DecoderConfig{};
+        config.size = sizeof config;
+        config.resourceType = static_cast<uint32_t>(tune.resourceType);
+        config.codecType = 1;
+        config.profile = 100;  // High profile (superset of Main/Baseline)
+        config.maxLevel = lvl;
+        config.maxWidth = wantW;
+        config.maxHeight = wantH;
+        config.maxDpbFrames = wantDpb;
+        config.pipelineDepth = 1;
+        config.computeQueue = reinterpret_cast<uint64_t>(computeQueue_);
+        config.cpuPriority = tune.cpuPriority;
+        config.cpuAffinity = tune.cpuAffinity;
+        config.optimizeProgressive = static_cast<uint32_t>(tune.optimizeProgressive);
+        memory = Vdec2DecoderMemory{};
+        memory.size = sizeof memory;
+        rc = sceVideodec2QueryDecoderMemoryInfo(&config, &memory);
+        XC_LOGI("hwdec: reconfig query %dx%d level=%u dpb=%d -> 0x%08x: cpu %llu, gpu %llu, cpu+gpu %llu, frame %llu",
+                wantW, wantH, lvl, wantDpb, static_cast<unsigned>(rc),
+                static_cast<unsigned long long>(memory.cpuSize),
+                static_cast<unsigned long long>(memory.gpuSize),
+                static_cast<unsigned long long>(memory.cpuGpuSize),
+                static_cast<unsigned long long>(memory.maxFrameSize));
+        if (rc == 0) break;
+    }
+    if (rc != 0) return false;
+
+    bool reused = true;
+    auto direct = [&](Kept& k, size_t size, int protection) {
+        return ownsPool_ ? keptDirect(k, size, protection, reused) : directMemory(size, protection);
+    };
+    size_t cpuSize = align16k(memory.cpuSize);
+    if (ownsPool_) {
+        memory.cpu = keptFlexible(g_pool.cpu, cpuSize, reused);
+        if (!memory.cpu) return false;
+    } else {
+        rc = sceKernelMapNamedFlexibleMemory(&memory.cpu, cpuSize, 0x03, 0, "PSBoxVdecCpu");
+        if (rc != 0) return false;
+    }
+    memory.gpuSize = align16k(memory.gpuSize);
+    memory.gpu = direct(g_pool.gpu, memory.gpuSize, kGpuRwCpuWrite);
+    if (memory.cpuGpuSize) {
+        memory.cpuGpuSize = align16k(memory.cpuGpuSize);
+        memory.cpuGpu = direct(g_pool.cpuGpu, memory.cpuGpuSize, kCpuGpuRw);
+    }
+    size_t newFrameSize = align16k(memory.maxFrameSize);
+    uint8_t* newFrameBuf = static_cast<uint8_t*>(direct(g_pool.frame, newFrameSize, kCpuGpuRw));
+    if (!memory.gpu || (memory.cpuGpuSize && !memory.cpuGpu) || !newFrameBuf) return false;
+
+    // Delete old decoder before creating the new one on the same computeQueue_ / memory pool.
+    sceVideodec2DeleteDecoder(decoder_);
+    decoder_ = nullptr;
+    rc = sceVideodec2CreateDecoder(&config, &memory, &decoder_);
+    XC_LOGI("hwdec: recreated decoder 0x%08x (%dx%d level %u dpb %d, frame %zu bytes)",
+            static_cast<unsigned>(rc), config.maxWidth, config.maxHeight, config.maxLevel,
+            config.maxDpbFrames, newFrameSize);
+    if (rc != 0 || !decoder_) {
+        decoder_ = nullptr;
+        return false;
+    }
+    frameBufferSize_ = newFrameSize;
+    frameAlignment_ = memory.frameAlignment;
+    frameBuffer_ = newFrameBuf;
+    maxWidth_ = config.maxWidth;
+    maxHeight_ = config.maxHeight;
+    maxLevel_ = config.maxLevel;
+    maxDpbFrames_ = config.maxDpbFrames;
+    return true;
 }
 
 bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& out) {
@@ -333,7 +437,17 @@ bool HwDecoder::decode(const uint8_t* data, size_t len, uint64_t pts, Picture& o
                 static_cast<unsigned long long>(info.bufferSize),
                 info.buffer == outBuf ? "our buffer" : "another address");
     }
-    if (rc != 0 || !info.valid) return false;
+    if (rc != 0) {
+        int resetRc = sceVideodec2Reset(decoder_);
+        static int resetsLogged = 0;
+        if (resetsLogged++ < 20) {
+            XC_LOGW("hwdec: decode 0x%08x; sceVideodec2Reset -> 0x%08x (waiting for IDR)",
+                    static_cast<unsigned>(rc), static_cast<unsigned>(resetRc));
+        }
+        out.error = true;
+        return false;
+    }
+    if (!info.valid) return false;
     if (slots) nextOutput_ ^= 1;  // the next picture into the other slot
     out.data = static_cast<const uint8_t*>(info.buffer);
     out.size = info.bufferSize;

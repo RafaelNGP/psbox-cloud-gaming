@@ -9,6 +9,8 @@ namespace xc::media {
 
 HwDecoder::~HwDecoder() = default;
 bool HwDecoder::init(int, int) { return false; }
+bool HwDecoder::supportsQhd() { return true; }
+bool HwDecoder::ensureConfig(int, int, uint32_t, uint32_t) { return false; }
 bool HwDecoder::decode(const uint8_t*, size_t, uint64_t, Picture&) { return false; }
 
 }  // namespace xc::media

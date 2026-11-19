@@ -847,7 +847,7 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
         else if (res == "720p")
             tier = xcloud::Resolution::P720;
         else if (home)
-            tier = xcloud::Resolution::P1440;
+            tier = media::HwDecoder::supportsQhd() ? xcloud::Resolution::P1440 : xcloud::Resolution::P1080HQ;
         else if (res == "1440p" || (isBest && allow1440Locked()))
             tier = xcloud::Resolution::P1440;
         else
