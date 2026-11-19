@@ -165,9 +165,8 @@ jobs:
 
       - name: Tools and Wine
         run: |
-          sudo dpkg --add-architecture i386
           sudo apt-get update -q
-          sudo apt-get install -y -q cmake ninja-build wine64 wine nasm
+          sudo apt-get install -y -q --no-install-recommends cmake ninja-build wine64 nasm
 
       - name: Toolchain cache (llvm-mingw)
         id: toolchain-cache
@@ -211,10 +210,9 @@ jobs:
       - name: Self-test (Wine headless)
         run: |
           mkdir -p "${{ runner.temp }}/psbox-selftest" "${{ runner.temp }}/psbox-data"
-          target_dir=$(WINEDEBUG=-all winepath -w "${{ runner.temp }}/psbox-selftest")
           WINEDEBUG=-all SDL_VIDEO_DRIVER=offscreen SDL_AUDIO_DRIVER=dummy \
             XCLOUD_DATA_DIR="${{ runner.temp }}/psbox-data" \
-            wine build-win/psbox.exe --selftest "$target_dir"
+            wine64 build-win/psbox.exe --selftest "Z:${{ runner.temp }}/psbox-selftest"
 
       - name: Package (portable zip and sha256)
         run: bash tools/desktop/package-windows.sh build-win build-win/pkg
