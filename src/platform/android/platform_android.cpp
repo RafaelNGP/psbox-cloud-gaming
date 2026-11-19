@@ -169,7 +169,75 @@ bool systemKeyboardAvailable() { return false; }
 bool openSystemKeyboard(const std::string&, const std::string&, size_t, KeyboardKind) { return false; }
 KeyboardStatus pollSystemKeyboard(std::string&) { return KeyboardStatus::Closed; }
 
-bool restartApp() { return false; }
+#if defined(__ANDROID__)
+bool installAndroidApk(const std::string& apkPath, std::string& err) {
+    struct stat st{};
+    if (::stat(apkPath.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        err = "APK file not found: " + apkPath;
+        return false;
+    }
+    typedef void* (*PFN_GetJNIEnv)();
+    typedef void* (*PFN_GetActivity)();
+    static auto pfnGetJNIEnv = reinterpret_cast<PFN_GetJNIEnv>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidJNIEnv"));
+    static auto pfnGetActivity = reinterpret_cast<PFN_GetActivity>(dlsym(RTLD_DEFAULT, "SDL_GetAndroidActivity"));
+    if (!pfnGetJNIEnv) {
+        err = "JNI environment unavailable";
+        return false;
+    }
+    auto* env = static_cast<JNIEnv*>(pfnGetJNIEnv());
+    if (!env) {
+        err = "JNIEnv is null";
+        return false;
+    }
+    jclass cls = nullptr;
+    jobject activity = pfnGetActivity ? static_cast<jobject>(pfnGetActivity()) : nullptr;
+    if (activity) {
+        cls = env->GetObjectClass(activity);
+        env->DeleteLocalRef(activity);
+    }
+    if (!cls) {
+        cls = env->FindClass("com/rafaelngp/psbox/MainActivity");
+    }
+    if (!cls) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        err = "MainActivity class not found via JNI";
+        return false;
+    }
+    jmethodID mid = env->GetStaticMethodID(cls, "installUpdateApk", "(Ljava/lang/String;)Z");
+    if (!mid) {
+        if (env->ExceptionCheck()) env->ExceptionClear();
+        env->DeleteLocalRef(cls);
+        err = "MainActivity.installUpdateApk method not found";
+        return false;
+    }
+    jstring jpath = env->NewStringUTF(apkPath.c_str());
+    jboolean ok = JNI_FALSE;
+    if (jpath) {
+        ok = env->CallStaticBooleanMethod(cls, mid, jpath);
+        env->DeleteLocalRef(jpath);
+    }
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        ok = JNI_FALSE;
+    }
+    env->DeleteLocalRef(cls);
+    if (ok != JNI_TRUE) {
+        err = "MainActivity.installUpdateApk returned false for " + apkPath;
+        return false;
+    }
+    return true;
+}
+#endif
+
+bool restartApp() {
+    std::string apkPath = dataDir() + "/updates/update.apk";
+    struct stat st{};
+    if (::stat(apkPath.c_str(), &st) == 0 && S_ISREG(st.st_mode)) {
+        std::string err;
+        return installAndroidApk(apkPath, err);
+    }
+    return false;
+}
 
 std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }

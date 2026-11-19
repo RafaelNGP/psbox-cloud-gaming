@@ -3,13 +3,16 @@ package com.rafaelngp.psbox;
 import android.Manifest;
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
+import android.provider.Settings;
 import android.util.Log;
 import android.view.Display;
 import android.view.DisplayCutout;
@@ -22,6 +25,7 @@ import android.view.WindowManager;
 
 import org.libsdl.app.SDLActivity;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -33,6 +37,7 @@ public class MainActivity extends SDLActivity {
     private static volatile boolean sStreamingActive = false;
     private static volatile boolean sIsForeground = false;
     private static WifiManager.WifiLock sWifiLock = null;
+    private static volatile String sPendingUpdateApkPath = null;
 
     @Override
     protected String[] getLibraries() {
@@ -69,6 +74,16 @@ public class MainActivity extends SDLActivity {
         setImmersiveFullscreen();
         disableDefaultFocusHighlight();
         setDisplayRefreshRate(60.0f);
+        if (sPendingUpdateApkPath != null) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PackageManager pm = getPackageManager();
+                if (pm != null && pm.canRequestPackageInstalls()) {
+                    String pending = sPendingUpdateApkPath;
+                    sPendingUpdateApkPath = null;
+                    installUpdateApk(pending);
+                }
+            }
+        }
     }
 
     @Override
@@ -417,6 +432,44 @@ public class MainActivity extends SDLActivity {
                 decor.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY);
             }
         } catch (Exception ignored) {
+        }
+    }
+
+    // --- 6. In-App Update APK Installation ---
+    public static boolean installUpdateApk(String apkPath) {
+        try {
+            Context ctx = getContext();
+            if (ctx == null || apkPath == null || apkPath.isEmpty()) return false;
+            File apkFile = new File(apkPath);
+            if (!apkFile.exists() || !apkFile.isFile()) {
+                Log.e(TAG, "installUpdateApk: file not found: " + apkPath);
+                return false;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                PackageManager pm = ctx.getPackageManager();
+                if (pm != null && !pm.canRequestPackageInstalls()) {
+                    sPendingUpdateApkPath = apkPath;
+                    Log.i(TAG, "installUpdateApk: requesting MANAGE_UNKNOWN_APP_SOURCES permission");
+                    Intent settingsIntent = new Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + ctx.getPackageName())
+                    );
+                    settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    ctx.startActivity(settingsIntent);
+                    return true;
+                }
+            }
+            sPendingUpdateApkPath = null;
+            Uri apkUri = UpdateApkProvider.getUriForFile(apkFile);
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_ACTIVITY_NEW_TASK);
+            ctx.startActivity(installIntent);
+            Log.i(TAG, "installUpdateApk: launched package installer for " + apkUri);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "installUpdateApk error: " + e.getMessage());
+            return false;
         }
     }
 }

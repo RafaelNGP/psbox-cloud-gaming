@@ -568,6 +568,323 @@ static void testUpdater() {
     CHECK(!xc::platform::readFile(dir + "/update.journal", text) && !xc::platform::readFile(dir + "/update.old/eboot.bin", text));
     CHECK(!recoverUpdate(dir));  // nothing left to do
     xc::fs::removeTree(dir);
+
+    // --- Multi-platform asset selection (bracketed and GitHub-sanitized dotted names) ---
+    const std::string releaseBracketed = R"({
+        "tag_name": "v1.8.0",
+        "body": "Release notes v1.8.0",
+        "assets": [
+            {"name": "PPSA99810.zip", "size": 1001, "browser_download_url": "https://example.invalid/PPSA99810.zip"},
+            {"name": "PPSA99810.zip.sig", "size": 70, "browser_download_url": "https://example.invalid/PPSA99810.zip.sig"},
+            {"name": "PPSA99810.zip.sha256", "size": 80, "browser_download_url": "https://example.invalid/PPSA99810.zip.sha256"},
+            {"name": "PSBoxCloudGaming[PS5]-v1.8.0.zip", "size": 1001, "browser_download_url": "https://example.invalid/ps5-named.zip"},
+            {"name": "PSBoxCloudGaming[PS5]-v1.8.0.zip.sig", "size": 70, "browser_download_url": "https://example.invalid/ps5-named.zip.sig"},
+            {"name": "PSBoxCloudGaming[PS5]-v1.8.0.zip.sha256", "size": 80, "browser_download_url": "https://example.invalid/ps5-named.zip.sha256"},
+            {"name": "PSBoxCloudGaming[PS4]-v1.8.0.pkg", "size": 2002, "browser_download_url": "https://example.invalid/ps4.pkg"},
+            {"name": "PSBoxCloudGaming[PS4]-v1.8.0.pkg.sha256", "size": 80, "browser_download_url": "https://example.invalid/ps4.pkg.sha256"},
+            {"name": "PSBoxCloudGaming[Linux]-v1.8.0.AppImage", "size": 3003, "browser_download_url": "https://example.invalid/linux.AppImage"},
+            {"name": "PSBoxCloudGaming[Linux]-v1.8.0.AppImage.sha256", "size": 80, "browser_download_url": "https://example.invalid/linux.AppImage.sha256"},
+            {"name": "PSBoxCloudGaming[Windows]-v1.8.0.zip", "size": 4004, "browser_download_url": "https://example.invalid/win.zip"},
+            {"name": "PSBoxCloudGaming[Windows]-v1.8.0.zip.sha256", "size": 80, "browser_download_url": "https://example.invalid/win.zip.sha256"},
+            {"name": "PSBoxCloudGaming[Android]-v1.8.0.apk", "size": 5005, "browser_download_url": "https://example.invalid/android.apk"},
+            {"name": "PSBoxCloudGaming[Android]-v1.8.0.apk.sha256", "size": 80, "browser_download_url": "https://example.invalid/android.apk.sha256"}
+        ]
+    })";
+
+    Release rel;
+    CHECK(selectReleaseAsset(releaseBracketed, UpdatePlatform::PS5, rel, err));
+    CHECK(rel.tag == "v1.8.0" && rel.platform == UpdatePlatform::PS5);
+    CHECK(rel.assetName == "PPSA99810.zip" && rel.zipSize == 1001);
+    CHECK(rel.zipUrl == "https://example.invalid/PPSA99810.zip");
+    CHECK(rel.sigUrl == "https://example.invalid/PPSA99810.zip.sig");
+    CHECK(rel.sha256Url == "https://example.invalid/PPSA99810.zip.sha256");
+    CHECK(rel.hasVerifiablePackage());
+
+    CHECK(selectReleaseAsset(releaseBracketed, UpdatePlatform::PS4, rel, err));
+    CHECK(rel.platform == UpdatePlatform::PS4 && rel.assetName == "PSBoxCloudGaming[PS4]-v1.8.0.pkg" && rel.zipSize == 2002);
+    CHECK(rel.zipUrl == "https://example.invalid/ps4.pkg" && rel.sha256Url == "https://example.invalid/ps4.pkg.sha256");
+    CHECK(rel.hasVerifiablePackage());
+
+    CHECK(selectReleaseAsset(releaseBracketed, UpdatePlatform::Linux, rel, err));
+    CHECK(rel.platform == UpdatePlatform::Linux && rel.assetName == "PSBoxCloudGaming[Linux]-v1.8.0.AppImage" && rel.zipSize == 3003);
+    CHECK(rel.zipUrl == "https://example.invalid/linux.AppImage" && rel.sha256Url == "https://example.invalid/linux.AppImage.sha256");
+    CHECK(rel.hasVerifiablePackage());
+
+    CHECK(selectReleaseAsset(releaseBracketed, UpdatePlatform::Windows, rel, err));
+    CHECK(rel.platform == UpdatePlatform::Windows && rel.assetName == "PSBoxCloudGaming[Windows]-v1.8.0.zip" && rel.zipSize == 4004);
+    CHECK(rel.zipUrl == "https://example.invalid/win.zip" && rel.sha256Url == "https://example.invalid/win.zip.sha256");
+    CHECK(rel.hasVerifiablePackage());
+
+    CHECK(selectReleaseAsset(releaseBracketed, UpdatePlatform::Android, rel, err));
+    CHECK(rel.platform == UpdatePlatform::Android && rel.assetName == "PSBoxCloudGaming[Android]-v1.8.0.apk" && rel.zipSize == 5005);
+    CHECK(rel.zipUrl == "https://example.invalid/android.apk" && rel.sha256Url == "https://example.invalid/android.apk.sha256");
+    CHECK(rel.hasVerifiablePackage());
+
+    // GitHub-sanitized dotted asset names (.PS5., .PS4., .Linux., .Windows., .Android.)
+    const std::string releaseSanitized = R"({
+        "tag_name": "v1.8.0",
+        "body": "Sanitized assets",
+        "assets": [
+            {"name": "PSBoxCloudGaming.PS5.-v1.8.0.zip", "size": 1100, "browser_download_url": "https://example.invalid/s-ps5.zip"},
+            {"name": "PSBoxCloudGaming.PS5.-v1.8.0.zip.sig", "size": 70, "browser_download_url": "https://example.invalid/s-ps5.zip.sig"},
+            {"name": "PSBoxCloudGaming.PS5.-v1.8.0.zip.sha256", "size": 80, "browser_download_url": "https://example.invalid/s-ps5.zip.sha256"},
+            {"name": "PSBoxCloudGaming.PS4.-v1.8.0.pkg", "size": 2100, "browser_download_url": "https://example.invalid/s-ps4.pkg"},
+            {"name": "PSBoxCloudGaming.PS4.-v1.8.0.pkg.sha256", "size": 80, "browser_download_url": "https://example.invalid/s-ps4.pkg.sha256"},
+            {"name": "PSBoxCloudGaming.Linux.-v1.8.0.AppImage", "size": 3100, "browser_download_url": "https://example.invalid/s-linux.AppImage"},
+            {"name": "PSBoxCloudGaming.Linux.-v1.8.0.AppImage.sha256", "size": 80, "browser_download_url": "https://example.invalid/s-linux.AppImage.sha256"},
+            {"name": "PSBoxCloudGaming.Windows.-v1.8.0.zip", "size": 4100, "browser_download_url": "https://example.invalid/s-win.zip"},
+            {"name": "PSBoxCloudGaming.Windows.-v1.8.0.zip.sha256", "size": 80, "browser_download_url": "https://example.invalid/s-win.zip.sha256"},
+            {"name": "PSBoxCloudGaming.Android.-v1.8.0.apk", "size": 5100, "browser_download_url": "https://example.invalid/s-android.apk"},
+            {"name": "PSBoxCloudGaming.Android.-v1.8.0.apk.sha256", "size": 80, "browser_download_url": "https://example.invalid/s-android.apk.sha256"}
+        ]
+    })";
+
+    CHECK(selectReleaseAsset(releaseSanitized, UpdatePlatform::PS5, rel, err));
+    CHECK(rel.zipUrl == "https://example.invalid/s-ps5.zip" && rel.sigUrl == "https://example.invalid/s-ps5.zip.sig" &&
+          rel.sha256Url == "https://example.invalid/s-ps5.zip.sha256");
+    CHECK(selectReleaseAsset(releaseSanitized, UpdatePlatform::PS4, rel, err));
+    CHECK(rel.zipUrl == "https://example.invalid/s-ps4.pkg" && rel.sha256Url == "https://example.invalid/s-ps4.pkg.sha256");
+    CHECK(selectReleaseAsset(releaseSanitized, UpdatePlatform::Linux, rel, err));
+    CHECK(rel.zipUrl == "https://example.invalid/s-linux.AppImage" && rel.sha256Url == "https://example.invalid/s-linux.AppImage.sha256");
+    CHECK(selectReleaseAsset(releaseSanitized, UpdatePlatform::Windows, rel, err));
+    CHECK(rel.zipUrl == "https://example.invalid/s-win.zip" && rel.sha256Url == "https://example.invalid/s-win.zip.sha256");
+    CHECK(selectReleaseAsset(releaseSanitized, UpdatePlatform::Android, rel, err));
+    CHECK(rel.zipUrl == "https://example.invalid/s-android.apk" && rel.sha256Url == "https://example.invalid/s-android.apk.sha256");
+
+    // --- SHA-256 computation, manifest parsing, and positive/negative validation ---
+    const std::string samplePayload = "PSBox multi-platform update payload v1.8.0";
+    const std::string sampleHash = sha256Hex(samplePayload);
+    CHECK(sampleHash.size() == 64);
+    std::string upperHash = sampleHash;
+    for (char& c : upperHash) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+
+    CHECK(parseSha256Manifest(sampleHash + "  PSBoxCloudGaming[PS4]-v1.8.0.pkg\n") == sampleHash);
+    CHECK(parseSha256Manifest(upperHash + " *PSBoxCloudGaming.PS4.-v1.8.0.pkg\r\n") == sampleHash);
+    CHECK(parseSha256Manifest("SHA256 (PSBoxCloudGaming[Linux]-v1.8.0.AppImage) = " + upperHash + "\n") == sampleHash);
+    CHECK(parseSha256Manifest("  " + sampleHash + "  \n") == sampleHash);
+    CHECK(parseSha256Manifest("not-a-valid-sha256-hash  file.pkg\n").empty());
+    CHECK(parseSha256Manifest("1234567890abcdef  file.pkg\n").empty());
+    CHECK(parseSha256Manifest("").empty());
+
+    CHECK(verifySha256(samplePayload, sampleHash + "  PSBoxCloudGaming[PS4]-v1.8.0.pkg\n", err));
+    CHECK(!verifySha256(samplePayload + "!", sampleHash + "  PSBoxCloudGaming[PS4]-v1.8.0.pkg\n", err));
+    CHECK(err.find("sha256 mismatch") != std::string::npos);
+    CHECK(!verifySha256(samplePayload, "corrupted manifest", err));
+    CHECK(err.find("invalid sha256 manifest") != std::string::npos);
+
+    // --- Platform payload and script generation ---
+    CHECK(buildPs4GoldHenInstallPayload("/data/pkg/PSBoxCloudGaming[PS4]-v1.8.0.pkg") ==
+          R"({"type":"direct","packages":["/data/pkg/PSBoxCloudGaming[PS4]-v1.8.0.pkg"]})");
+    auto rpiJson = json::parse(buildPs4GoldHenInstallPayload("/data/pkg/PSBoxCloudGaming.PS4.-v1.8.0.pkg"));
+    CHECK(rpiJson && (*rpiJson)["type"].str() == "direct" && (*rpiJson)["packages"].size() == 1 &&
+          (*rpiJson)["packages"][0].str() == "/data/pkg/PSBoxCloudGaming.PS4.-v1.8.0.pkg");
+
+    std::string winScript = buildWindowsUpdateBatchScript("C:/Games/PSBox", "C:/Games/PSBox/update_staging", 4242);
+    CHECK(winScript.find("set \"APP_DIR=C:\\Games\\PSBox\"") != std::string::npos);
+    CHECK(winScript.find("set \"STAGE_DIR=C:\\Games\\PSBox\\update_staging\"") != std::string::npos);
+    CHECK(winScript.find("set \"PID=4242\"") != std::string::npos);
+    CHECK(winScript.find("xcopy /E /Y /I \"%STAGE_DIR%\\*\" \"%APP_DIR%\\\"") != std::string::npos);
+    CHECK(winScript.find("start \"\" \"%APP_DIR%\\psbox.exe\"") != std::string::npos);
+
+    CHECK(resolveLinuxAppImagePath("", "/home/deck/Applications/PSBox.AppImage") == "/home/deck/Applications/PSBox.AppImage");
+    CHECK(resolveLinuxAppImagePath("/opt/psbox/PSBoxCloudGaming[Linux]-v1.8.0.AppImage", nullptr) ==
+          "/opt/psbox/PSBoxCloudGaming[Linux]-v1.8.0.AppImage");
+    CHECK(buildLinuxUpdateTempPath("/home/deck/PSBox.AppImage") == "/home/deck/PSBox.AppImage.new.tmp");
+
+    // --- End-to-end multi-platform installRelease tests with mocked HTTP transport ---
+    std::string testRoot = "/tmp/xcloud-multi-updater-test";
+    xc::fs::removeTree(testRoot);
+
+    // 1. PS4: valid SHA-256 + GoldHEN RPI success, GoldHEN RPI offline fallback, and invalid SHA-256 rejection
+    {
+        std::string ps4Dir = testRoot + "/ps4_pkg";
+        std::string pkgBytes = "ORBIS_PKG_BINARY_CONTENT_V180";
+        std::string pkgSha = sha256Hex(pkgBytes) + "  PSBoxCloudGaming[PS4]-v1.8.0.pkg\n";
+        bool rpiAvailable = true;
+        std::string lastRpiBody;
+
+        net::setTestTransport([&](const net::Request& req) {
+            net::Response r;
+            if (req.url == "https://example.invalid/ps4.pkg.sha256") {
+                r.status = 200;
+                r.body = pkgSha;
+            } else if (req.url == "https://example.invalid/ps4.pkg") {
+                r.status = 200;
+                r.body = pkgBytes;
+                if (req.onBody) req.onBody(r.body.data(), r.body.size());
+            } else if (req.url == "http://127.0.0.1:12800/api/install") {
+                lastRpiBody = req.body;
+                if (rpiAvailable) {
+                    r.status = 200;
+                    r.body = R"({"status":"success","task_id":1})";
+                } else {
+                    r.status = 0;
+                    r.error = "Connection refused";
+                }
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+
+        Release ps4Rel;
+        ps4Rel.tag = "v1.8.0";
+        ps4Rel.platform = UpdatePlatform::PS4;
+        ps4Rel.assetName = "PSBoxCloudGaming[PS4]-v1.8.0.pkg";
+        ps4Rel.zipUrl = "https://example.invalid/ps4.pkg";
+        ps4Rel.sha256Url = "https://example.invalid/ps4.pkg.sha256";
+        ps4Rel.zipSize = static_cast<long>(pkgBytes.size());
+
+        // 1a. GoldHEN RPI active on port 12800
+        CHECK(installRelease(ps4Rel, ps4Dir, "1.7.7", nullptr, err));
+        CHECK(err.empty());
+        CHECK(lastRpiBody == buildPs4GoldHenInstallPayload(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg"));
+        std::string savedPkg;
+        CHECK(xc::platform::readFile(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg", savedPkg) && savedPkg == pkgBytes);
+
+        // 1b. GoldHEN RPI offline on port 12800 -> friendly fallback keeps validated .pkg
+        xc::fs::removeFile(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg");
+        rpiAvailable = false;
+        CHECK(installRelease(ps4Rel, ps4Dir, "1.7.7", nullptr, err));
+        CHECK(err.find("GoldHEN Package Installer") != std::string::npos);
+        CHECK(xc::platform::readFile(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg", savedPkg) && savedPkg == pkgBytes);
+
+        // 1c. Invalid SHA-256 -> fails and deletes corrupted .pkg
+        xc::fs::removeFile(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg");
+        pkgSha = "0000000000000000000000000000000000000000000000000000000000000000  PSBoxCloudGaming[PS4]-v1.8.0.pkg\n";
+        CHECK(!installRelease(ps4Rel, ps4Dir, "1.7.7", nullptr, err));
+        CHECK(err.find("sha256 mismatch") != std::string::npos);
+        CHECK(!xc::fs::exists(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg"));
+        CHECK(!xc::fs::exists(ps4Dir + "/PSBoxCloudGaming[PS4]-v1.8.0.pkg.part"));
+    }
+
+    // 2. Linux AppImage: download to .new.tmp, SHA-256 verification, chmod +x, atomic rename
+    {
+        std::string linuxDir = testRoot + "/linux";
+        xc::fs::makeDirs(linuxDir);
+        std::string appImageFile = linuxDir + "/PSBox.AppImage";
+        xc::platform::writeFileAtomic(appImageFile, "OLD_APPIMAGE_V177");
+
+        std::string newAppImageBytes = "#!/bin/sh\necho PSBox v1.8.0 AppImage\n";
+        std::string newAppImageSha = sha256Hex(newAppImageBytes) + "  PSBoxCloudGaming[Linux]-v1.8.0.AppImage\n";
+
+        net::setTestTransport([&](const net::Request& req) {
+            net::Response r;
+            if (req.url == "https://example.invalid/linux.AppImage.sha256") {
+                r.status = 200;
+                r.body = newAppImageSha;
+            } else if (req.url == "https://example.invalid/linux.AppImage") {
+                r.status = 200;
+                r.body = newAppImageBytes;
+                if (req.onBody) req.onBody(r.body.data(), r.body.size());
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+
+        Release linuxRel;
+        linuxRel.tag = "v1.8.0";
+        linuxRel.platform = UpdatePlatform::Linux;
+        linuxRel.assetName = "PSBoxCloudGaming[Linux]-v1.8.0.AppImage";
+        linuxRel.zipUrl = "https://example.invalid/linux.AppImage";
+        linuxRel.sha256Url = "https://example.invalid/linux.AppImage.sha256";
+        linuxRel.zipSize = static_cast<long>(newAppImageBytes.size());
+
+        CHECK(installRelease(linuxRel, appImageFile, "1.7.7", nullptr, err));
+        std::string updatedBytes;
+        CHECK(xc::platform::readFile(appImageFile, updatedBytes) && updatedBytes == newAppImageBytes);
+        CHECK(!xc::fs::exists(appImageFile + ".new.tmp"));
+
+        // Corrupted SHA-256 leaves existing AppImage intact
+        newAppImageSha = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  PSBoxCloudGaming[Linux]-v1.8.0.AppImage\n";
+        CHECK(!installRelease(linuxRel, appImageFile, "1.7.7", nullptr, err));
+        CHECK(xc::platform::readFile(appImageFile, updatedBytes) && updatedBytes == newAppImageBytes);
+        CHECK(!xc::fs::exists(appImageFile + ".new.tmp"));
+    }
+
+    // 3. Windows Portable ZIP: download, SHA-256 verification, staging extraction & batch updater script
+    {
+        std::string winDir = testRoot + "/windows";
+        xc::fs::makeDirs(winDir);
+        std::string winZipBytes = storedZip({
+            {"PSBox/psbox.exe", "MZ_PE_PSBOX_V180"},
+            {"PSBox/SDL3.dll", "MZ_SDL3_DLL"},
+            {"PSBox/assets/cacert.pem", "PEM_CERT"}
+        });
+        std::string winZipSha = sha256Hex(winZipBytes) + "  PSBoxCloudGaming[Windows]-v1.8.0.zip\n";
+
+        net::setTestTransport([&](const net::Request& req) {
+            net::Response r;
+            if (req.url == "https://example.invalid/win.zip.sha256") {
+                r.status = 200;
+                r.body = winZipSha;
+            } else if (req.url == "https://example.invalid/win.zip") {
+                r.status = 200;
+                r.body = winZipBytes;
+                if (req.onBody) req.onBody(r.body.data(), r.body.size());
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+
+        Release winRel;
+        winRel.tag = "v1.8.0";
+        winRel.platform = UpdatePlatform::Windows;
+        winRel.assetName = "PSBoxCloudGaming[Windows]-v1.8.0.zip";
+        winRel.zipUrl = "https://example.invalid/win.zip";
+        winRel.sha256Url = "https://example.invalid/win.zip.sha256";
+        winRel.zipSize = static_cast<long>(winZipBytes.size());
+
+        CHECK(installRelease(winRel, winDir, "1.7.7", nullptr, err));
+        std::string stagedExe, stagedBat;
+        CHECK(xc::platform::readFile(winDir + "/update_staging/psbox.exe", stagedExe) && stagedExe == "MZ_PE_PSBOX_V180");
+        CHECK(xc::platform::readFile(winDir + "/update_staging/SDL3.dll", stagedExe) && stagedExe == "MZ_SDL3_DLL");
+        CHECK(xc::platform::readFile(winDir + "/update_apply.bat", stagedBat) && stagedBat.find("psbox.exe") != std::string::npos);
+    }
+
+    // 4. Android APK: download, SHA-256 verification, staging to <dir>/updates/update.apk
+    {
+        std::string androidDir = testRoot + "/android";
+        std::string apkBytes = "PK_ANDROID_APK_V180";
+        std::string apkSha = sha256Hex(apkBytes) + "  PSBoxCloudGaming[Android]-v1.8.0.apk\n";
+
+        net::setTestTransport([&](const net::Request& req) {
+            net::Response r;
+            if (req.url == "https://example.invalid/android.apk.sha256") {
+                r.status = 200;
+                r.body = apkSha;
+            } else if (req.url == "https://example.invalid/android.apk") {
+                r.status = 200;
+                r.body = apkBytes;
+                if (req.onBody) req.onBody(r.body.data(), r.body.size());
+            } else {
+                r.status = 404;
+            }
+            return r;
+        });
+
+        Release androidRel;
+        androidRel.tag = "v1.8.0";
+        androidRel.platform = UpdatePlatform::Android;
+        androidRel.assetName = "PSBoxCloudGaming[Android]-v1.8.0.apk";
+        androidRel.zipUrl = "https://example.invalid/android.apk";
+        androidRel.sha256Url = "https://example.invalid/android.apk.sha256";
+        androidRel.zipSize = static_cast<long>(apkBytes.size());
+
+        CHECK(installRelease(androidRel, androidDir, "1.7.7", nullptr, err));
+        std::string savedApk;
+        CHECK(xc::platform::readFile(androidDir + "/updates/update.apk", savedApk) && savedApk == apkBytes);
+
+        // Negative SHA-256 check removes update.apk
+        apkSha = "1111111111111111111111111111111111111111111111111111111111111111  PSBoxCloudGaming[Android]-v1.8.0.apk\n";
+        CHECK(!installRelease(androidRel, androidDir, "1.7.7", nullptr, err));
+        CHECK(!xc::fs::exists(androidDir + "/updates/update.apk"));
+    }
+
+    net::setTestTransport({});
+    xc::fs::removeTree(testRoot);
 }
 
 static void testPrivacyAndRobustness() {

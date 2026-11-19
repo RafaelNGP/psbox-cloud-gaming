@@ -108,6 +108,15 @@ KeyboardStatus pollSystemKeyboard(std::string& text);
 // when it can't (false; the host never can).
 bool restartApp();
 
+// Path to the running Linux AppImage ($APPIMAGE or /proc/self/exe ending in .AppImage); empty elsewhere.
+std::string appImagePath();
+// Marks a file executable (chmod 0755 on POSIX; no-op returning true on Windows).
+bool makeExecutable(const std::string& path);
+// Current OS process ID (getpid() on POSIX, GetCurrentProcessId() on Windows).
+uint32_t currentProcessId();
+// Triggers the Android package installer intent for a verified APK (via JNI MainActivity.installUpdateApk).
+bool installAndroidApk(const std::string& apkPath, std::string& err);
+
 // The console's system software ("13.00"); empty where unknown.
 std::string firmwareVersion();
 

@@ -7,12 +7,14 @@
 #include <arpa/inet.h>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ifaddrs.h>
 #include <net/if.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -141,5 +143,42 @@ std::string localIPv4() {
     }
     return candidate.empty() ? "127.0.0.1" : candidate;
 }
+
+std::string appImagePath() {
+#if defined(__linux__) && !defined(__ANDROID__)
+    if (const char* env = std::getenv("APPIMAGE"); env && *env) {
+        return env;
+    }
+    char buf[4096];
+    ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+    if (n > 0) {
+        std::string exe(buf, static_cast<size_t>(n));
+        if ((exe.size() >= 9 && exe.rfind(".AppImage") == exe.size() - 9) ||
+            (exe.size() >= 9 && exe.rfind(".appimage") == exe.size() - 9)) {
+            return exe;
+        }
+    }
+#endif
+    return {};
+}
+
+bool makeExecutable(const std::string& path) {
+    return ::chmod(path.c_str(), 0755) == 0;
+}
+
+uint32_t currentProcessId() {
+    return static_cast<uint32_t>(::getpid());
+}
+
+#if !defined(__ANDROID__)
+bool installAndroidApk(const std::string& apkPath, std::string& err) {
+    struct stat st{};
+    if (::stat(apkPath.c_str(), &st) != 0 || !S_ISREG(st.st_mode)) {
+        err = "APK file not found: " + apkPath;
+        return false;
+    }
+    return true;
+}
+#endif
 
 }  // namespace xc::platform

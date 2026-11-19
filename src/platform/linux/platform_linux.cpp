@@ -195,7 +195,50 @@ bool systemKeyboardAvailable() { return false; }
 bool openSystemKeyboard(const std::string&, const std::string&, size_t, KeyboardKind) { return false; }
 KeyboardStatus pollSystemKeyboard(std::string&) { return KeyboardStatus::Closed; }
 
-bool restartApp() { return false; }
+bool restartApp() {
+    std::string target = appImagePath();
+    if (target.empty()) {
+        char buf[4096];
+        ssize_t n = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
+        if (n > 0) target.assign(buf, static_cast<size_t>(n));
+    }
+    if (target.empty()) {
+        XC_LOGE("restart: could not determine executable or AppImage path");
+        return false;
+    }
+
+    std::vector<std::string> args;
+    std::string cmdline;
+    if (readFile("/proc/self/cmdline", cmdline) && !cmdline.empty()) {
+        size_t pos = 0;
+        while (pos < cmdline.size()) {
+            size_t nul = cmdline.find('\0', pos);
+            if (nul == std::string::npos) nul = cmdline.size();
+            if (nul > pos || args.empty()) {
+                args.push_back(cmdline.substr(pos, nul - pos));
+            }
+            pos = nul + 1;
+        }
+    }
+    if (args.empty()) {
+        args.push_back(target);
+    } else {
+        args[0] = target;
+    }
+
+    std::vector<char*> argv;
+    argv.reserve(args.size() + 1);
+    for (auto& a : args) {
+        argv.push_back(a.data());
+    }
+    argv.push_back(nullptr);
+
+    XC_LOGI("restart: execv(%s)", target.c_str());
+    std::fflush(nullptr);
+    ::execv(target.c_str(), argv.data());
+    XC_LOGE("restart: execv(%s) failed: %s", target.c_str(), std::strerror(errno));
+    return false;
+}
 
 std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }

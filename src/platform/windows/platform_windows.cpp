@@ -375,7 +375,68 @@ bool systemKeyboardAvailable() { return false; }
 bool openSystemKeyboard(const std::string&, const std::string&, size_t, KeyboardKind) { return false; }
 KeyboardStatus pollSystemKeyboard(std::string&) { return KeyboardStatus::Closed; }
 
-bool restartApp() { return false; }
+std::string appImagePath() { return {}; }
+bool makeExecutable(const std::string&) { return true; }
+
+uint32_t currentProcessId() {
+#if defined(_WIN32) || defined(__CYGWIN__)
+    return static_cast<uint32_t>(GetCurrentProcessId());
+#else
+    return 0;
+#endif
+}
+
+bool installAndroidApk(const std::string&, std::string& err) {
+    err = "APK install is only supported on Android";
+    return false;
+}
+
+bool restartApp() {
+#if defined(_WIN32) || defined(__CYGWIN__)
+    std::string dir = appDir();
+    std::string batPath = dir + "\\update_apply.bat";
+    DWORD batAttr = GetFileAttributesA(batPath.c_str());
+    if (batAttr != INVALID_FILE_ATTRIBUTES && !(batAttr & FILE_ATTRIBUTE_DIRECTORY)) {
+        std::string cmdLine = "cmd.exe /C \"\"" + batPath + "\"\"";
+        int wlen = MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, nullptr, 0);
+        if (wlen > 0) {
+            std::vector<wchar_t> wcmd(static_cast<size_t>(wlen));
+            MultiByteToWideChar(CP_UTF8, 0, cmdLine.c_str(), -1, wcmd.data(), wlen);
+            STARTUPINFOW si{};
+            si.cb = sizeof(si);
+            PROCESS_INFORMATION pi{};
+            if (CreateProcessW(nullptr, wcmd.data(), nullptr, nullptr, FALSE,
+                               DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+                               nullptr, nullptr, &si, &pi)) {
+                CloseHandle(pi.hThread);
+                CloseHandle(pi.hProcess);
+                XC_LOGI("restart: launched detached update script %s", batPath.c_str());
+                std::fflush(nullptr);
+                std::_Exit(0);
+            }
+            XC_LOGE("restart: CreateProcessW for %s failed (err=%lu)", batPath.c_str(), GetLastError());
+        }
+        return false;
+    }
+
+    wchar_t exePath[MAX_PATH];
+    DWORD len = GetModuleFileNameW(nullptr, exePath, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) return false;
+    STARTUPINFOW si{};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi{};
+    if (CreateProcessW(exePath, nullptr, nullptr, nullptr, FALSE,
+                       DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                       nullptr, nullptr, &si, &pi)) {
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+        std::fflush(nullptr);
+        std::_Exit(0);
+    }
+    XC_LOGE("restart: CreateProcessW failed (err=%lu)", GetLastError());
+#endif
+    return false;
+}
 std::string firmwareVersion() { return {}; }
 std::string diagnostics() { return {}; }
 std::string platformName() { return "Windows"; }

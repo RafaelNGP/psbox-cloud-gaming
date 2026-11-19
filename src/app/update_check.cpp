@@ -3,8 +3,10 @@
 #include "app/update_check.h"
 
 #include "net/http.h"
+#include "platform/platform.h"
 #include "util/json.h"
 
+#include <cctype>
 #include <cstdio>
 #include <vector>
 
@@ -28,7 +30,79 @@ std::vector<int> parts(const std::string& v) {
     return out;
 }
 
+bool endsWith(const std::string& s, const std::string& suffix) {
+    return s.size() >= suffix.size() && s.compare(s.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool containsPlatformTag(const std::string& name, const char* bracketed, const char* dotted,
+                         const char* plainUpper, const char* plainLower) {
+    if (bracketed && name.find(bracketed) != std::string::npos) return true;
+    if (dotted && name.find(dotted) != std::string::npos) return true;
+    if (plainUpper && name.find(plainUpper) != std::string::npos) return true;
+    if (plainLower && name.find(plainLower) != std::string::npos) return true;
+    return false;
+}
+
+bool isNamedPlatformAsset(const std::string& name, const char* bracketed, const char* dotted) {
+    return (bracketed && name.find(bracketed) != std::string::npos) ||
+           (dotted && name.find(dotted) != std::string::npos);
+}
+
+int scorePrimaryAsset(const std::string& name, UpdatePlatform platform) {
+    switch (platform) {
+    case UpdatePlatform::PS5:
+        if (name == "PPSA99810.zip") return 3;
+        if (isNamedPlatformAsset(name, "[PS5]", ".PS5.") && endsWith(name, ".zip")) return 2;
+        if (containsPlatformTag(name, "[PS5]", ".PS5.", "PS5", "ps5") && endsWith(name, ".zip")) return 1;
+        return 0;
+    case UpdatePlatform::PS4:
+        if (isNamedPlatformAsset(name, "[PS4]", ".PS4.") && endsWith(name, ".pkg")) return 2;
+        if (containsPlatformTag(name, "[PS4]", ".PS4.", "PS4", "ps4") && endsWith(name, ".pkg")) return 1;
+        return 0;
+    case UpdatePlatform::Linux:
+        if (isNamedPlatformAsset(name, "[Linux]", ".Linux.") && endsWith(name, ".AppImage")) return 2;
+        if (endsWith(name, ".AppImage")) return 1;
+        return 0;
+    case UpdatePlatform::Windows:
+        if (isNamedPlatformAsset(name, "[Windows]", ".Windows.") && endsWith(name, ".zip")) return 2;
+        if (containsPlatformTag(name, "[Windows]", ".Windows.", "Windows", "windows") && endsWith(name, ".zip"))
+            return 1;
+        return 0;
+    case UpdatePlatform::Android:
+        if (isNamedPlatformAsset(name, "[Android]", ".Android.") && endsWith(name, ".apk")) return 2;
+        if (containsPlatformTag(name, "[Android]", ".Android.", "Android", "android") && endsWith(name, ".apk"))
+            return 1;
+        if (endsWith(name, ".apk")) return 1;
+        return 0;
+    }
+    return 0;
+}
+
+int scoreSha256Asset(const std::string& name, UpdatePlatform platform) {
+    if (!endsWith(name, ".sha256")) return 0;
+    std::string base = name.substr(0, name.size() - 7);
+    return scorePrimaryAsset(base, platform);
+}
+
+int scoreSigAsset(const std::string& name, UpdatePlatform platform) {
+    if (!endsWith(name, ".sig")) return 0;
+    std::string base = name.substr(0, name.size() - 4);
+    return scorePrimaryAsset(base, platform);
+}
+
 }  // namespace
+
+UpdatePlatform currentUpdatePlatform() {
+    if (platform::isPS5()) return UpdatePlatform::PS5;
+    if (platform::isPS4()) return UpdatePlatform::PS4;
+#if defined(__ANDROID__)
+    return UpdatePlatform::Android;
+#elif defined(_WIN32)
+    return UpdatePlatform::Windows;
+#else
+    return UpdatePlatform::Linux;
+#endif
+}
 
 bool isNewerVersion(const std::string& tag, const std::string& current) {
     auto a = parts(tag), b = parts(current);
@@ -43,7 +117,59 @@ std::string contentVersionOf(const std::string& version) {
     return out;
 }
 
-bool findLatestRelease(Release& out, std::string& err, const std::string& feedUrl) {
+bool selectReleaseAsset(const std::string& releaseJson, UpdatePlatform platform, Release& out, std::string& err) {
+    auto j = json::parse(releaseJson);
+    if (!j || (*j)["tag_name"].str().empty()) {
+        err = "no release in the answer";
+        return false;
+    }
+    out = {};
+    out.tag = (*j)["tag_name"].str();
+    out.notes = (*j)["body"].str();
+    out.platform = platform;
+
+    int bestPrimaryScore = 0;
+    int bestShaScore = 0;
+    int bestSigScore = 0;
+
+    const auto& assets = (*j)["assets"];
+    for (size_t i = 0; i < assets.size(); ++i) {
+        const auto& a = assets[i];
+        std::string name = a["name"].str();
+        std::string label = a["label"].str();
+        std::string url = a["browser_download_url"].str();
+        if (name.empty() && label.empty()) continue;
+
+        int pScore = scorePrimaryAsset(name, platform);
+        if (pScore == 0 && !label.empty()) pScore = scorePrimaryAsset(label, platform);
+        if (pScore > bestPrimaryScore) {
+            bestPrimaryScore = pScore;
+            out.zipUrl = url;
+            out.zipSize = static_cast<long>(a["size"].asInt(-1));
+            out.assetName = !name.empty() ? name : label;
+            continue;
+        }
+
+        int shaScore = scoreSha256Asset(name, platform);
+        if (shaScore == 0 && !label.empty()) shaScore = scoreSha256Asset(label, platform);
+        if (shaScore > bestShaScore) {
+            bestShaScore = shaScore;
+            out.sha256Url = url;
+            continue;
+        }
+
+        int sigScore = scoreSigAsset(name, platform);
+        if (sigScore == 0 && !label.empty()) sigScore = scoreSigAsset(label, platform);
+        if (sigScore > bestSigScore) {
+            bestSigScore = sigScore;
+            out.sigUrl = url;
+            continue;
+        }
+    }
+    return true;
+}
+
+bool findLatestRelease(Release& out, std::string& err, const std::string& feedUrl, UpdatePlatform platform) {
     net::Request req;
     req.url = feedUrl.empty() ? kLatestRelease : feedUrl;
     // A renamed repository answers 301: v1.6.3 and older never followed it and
@@ -56,27 +182,16 @@ bool findLatestRelease(Release& out, std::string& err, const std::string& feedUr
         err = r.status ? "HTTP " + std::to_string(r.status) : r.error;
         return false;
     }
-    auto j = json::parse(r.body);
-    if (!j || (*j)["tag_name"].str().empty()) {
-        err = "no release in the answer";
+    if (!selectReleaseAsset(r.body, platform, out, err)) {
         return false;
     }
-    out = {};
-    out.tag = (*j)["tag_name"].str();
-    out.notes = (*j)["body"].str();
-    const auto& assets = (*j)["assets"];
-    for (size_t i = 0; i < assets.size(); ++i) {
-        const auto& a = assets[i];
-        std::string name = a["name"].str();
-        if (name == "PPSA99810.zip" || (name.find("PS5") != std::string::npos && name.size() >= 4 && name.rfind(".zip") == name.size() - 4)) {
-            if (out.zipUrl.empty() || name == "PPSA99810.zip") {
-                out.zipUrl = a["browser_download_url"].str();
-                out.zipSize = static_cast<long>(a["size"].asInt(-1));
-            }
-        } else if (name == "PPSA99810.zip.sig" || (name.find("PS5") != std::string::npos && name.size() >= 8 && name.rfind(".zip.sig") == name.size() - 8)) {
-            if (out.sigUrl.empty() || name == "PPSA99810.zip.sig") {
-                out.sigUrl = a["browser_download_url"].str();
-            }
+    // If a custom test feed only provides PS5 assets (e.g. xcloud-cli self-update on a desktop host),
+    // fall back to PS5 asset selection when no asset matched the host platform.
+    if (!feedUrl.empty() && out.zipUrl.empty() && platform != UpdatePlatform::PS5) {
+        Release ps5Out;
+        std::string ps5Err;
+        if (selectReleaseAsset(r.body, UpdatePlatform::PS5, ps5Out, ps5Err) && !ps5Out.zipUrl.empty()) {
+            out = std::move(ps5Out);
         }
     }
     return true;

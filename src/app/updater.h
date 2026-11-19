@@ -2,20 +2,19 @@
 // Copyright (C) 2026 RafaelNGP
 // Updates the app in place from a release (update_check.h).
 //
-// The release's PPSA99810.zip must carry a signature (PPSA99810.zip.sig,
+// On PS5, the release's PPSA99810.zip must carry a signature (PPSA99810.zip.sig,
 // ECDSA P-256 over SHA-256) by the project's own key, which tools/release.sh
 // makes and only the maintainer holds: kReleaseKey here is its public half.
-// Nothing is changed without it, nor for a version that isn't newer.
+// On PS4, Linux, Windows and Android, the platform package is verified against
+// its .sha256 manifest (and ECDSA .sig when present) before applying.
+// Nothing is changed without verification, nor for a version that isn't newer.
 //
-// The files are unpacked into <dir>/update.new, then each one in place is
-// moved to <dir>/update.old and the new one put there (eboot.bin last); the
-// running app keeps its old eboot.bin until it restarts. <dir>/update.journal
-// is there while files move: a start that finds it puts the old ones back.
 // The user's files (sign-in, settings, caches, log) are never touched.
 #pragma once
 
 #include "app/update_check.h"
 
+#include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
@@ -52,6 +51,34 @@ bool importStoreLeftovers(const std::string& dir, const std::string& previousDir
 
 // True when `sigDer` is a valid signature of `data` by `publicKeyPem`.
 bool verifySignature(const std::string& data, const std::string& sigDer, const char* publicKeyPem, std::string& err);
+
+// Lowercase 64-character hex SHA-256 digest of `data`.
+std::string sha256Hex(const std::string& data);
+
+// Extracts the 64-character lowercase hex SHA-256 hash from a .sha256 manifest
+// (GNU/BSD sha256sum output or raw hex). Empty when malformed.
+std::string parseSha256Manifest(const std::string& manifestText, const std::string& expectedFilename = {});
+
+// True when `data`'s SHA-256 matches the expected digest in `manifestOrHex`.
+bool verifySha256(const std::string& data, const std::string& manifestOrHex, std::string& err,
+                  const std::string& expectedFilename = {});
+
+// True when the file at `filePath` exists and its SHA-256 matches `manifestOrHex`.
+bool verifyFileSha256(const std::string& filePath, const std::string& manifestOrHex, std::string& err,
+                      const std::string& expectedFilename = {});
+
+// Builds the JSON payload for PS4 GoldHEN Remote Package Installer (http://127.0.0.1:12800/api/install).
+std::string buildPs4GoldHenInstallPayload(const std::string& pkgPath);
+
+// Builds the detached Windows batch script that waits for `pid` to exit, copies
+// files from `stagingDir` into `appDir`, cleans up `stagingDir`, and relaunches psbox.exe.
+std::string buildWindowsUpdateBatchScript(const std::string& appDir, const std::string& stagingDir, uint32_t pid = 0);
+
+// Resolves the target AppImage path on Linux ($APPIMAGE, explicit path, or /proc/self/exe).
+std::string resolveLinuxAppImagePath(const std::string& explicitPathOrDir = {}, const char* envAppImage = nullptr);
+
+// Temporary path in the same filesystem/directory for atomic AppImage replacement.
+std::string buildLinuxUpdateTempPath(const std::string& appImagePath);
 
 struct ZipEntry {
     std::string path;  // inside the archive, without `prefix`
