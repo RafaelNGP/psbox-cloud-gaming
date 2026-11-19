@@ -4,6 +4,8 @@
 import json
 import os
 import unittest
+from unittest import mock
+import urllib.error
 
 import triage
 
@@ -138,7 +140,32 @@ class Triage(unittest.TestCase):
         )
         self.assertIn("area: network", labels)
         self.assertIn("NanoDNS", comment)
+        self.assertIn("127.0.0.1", comment)
+        self.assertIn("45.56.67.85", comment)
+        self.assertIn("62.210.38.117", comment)
         self.assertIn("please update to v1.3.2", comment)
+
+        # Issue title from app toast on blocked Sony updates
+        labels_err, comment_err = self.run_triage(
+            form("DNS lookup failed for Microsoft servers. If you are blocking Sony upda", "1.7.6", "13.60", LOG),
+            title="DNS lookup failed for Microsoft servers. If you are blocking Sony upda"
+        )
+        self.assertIn("area: network", labels_err)
+        self.assertIn("45.56.67.85", comment_err)
+        self.assertIn("62.210.38.117", comment_err)
+        self.assertIn("127.0.0.1", comment_err)
+        self.assertIn("NanoDNS", comment_err)
+
+        # Portuguese issue report
+        labels_pt, comment_pt = self.run_triage(
+            form("Falha de conexão DNS com os servidores da Microsoft", "1.7.6", "13.60", LOG),
+            title="DNS bloqueado no PS4"
+        )
+        self.assertIn("area: network", labels_pt)
+        self.assertIn("45.56.67.85", comment_pt)
+        self.assertIn("62.210.38.117", comment_pt)
+        self.assertIn("127.0.0.1", comment_pt)
+        self.assertIn("NanoDNS", comment_pt)
 
         labels, comment = self.run_triage(
             form("sign in failed", "1.3.0", "13.60",
@@ -387,6 +414,62 @@ class Triage(unittest.TestCase):
                 re.compile(pattern)
             for where in rule.get("where", []):
                 self.assertIn(where, ("title", "what", "log"))
+
+    @staticmethod
+    def _http_error(code, msg="HTTP Error"):
+        return urllib.error.HTTPError("https://api.github.com/test", code, msg, {}, None)
+
+    @staticmethod
+    def _ok_response(payload):
+        resp = mock.MagicMock()
+        resp.__enter__.return_value.read.return_value = json.dumps(payload).encode()
+        return resp
+
+    def test_api_retries_transient_502_and_recovers_on_second_attempt(self):
+        with mock.patch("urllib.request.urlopen") as m_open, mock.patch("time.sleep") as m_sleep:
+            m_open.side_effect = [
+                self._http_error(502, "Bad Gateway"),
+                self._ok_response({"tag_name": "v1.7.7"}),
+            ]
+            res = triage.api("GET", "/repos/o/r/releases/latest", "tok")
+            self.assertEqual(res, {"tag_name": "v1.7.7"})
+            self.assertEqual(m_open.call_count, 2)
+            m_sleep.assert_called_once_with(2)
+
+    def test_api_fails_after_three_transient_attempts(self):
+        with mock.patch("urllib.request.urlopen") as m_open, mock.patch("time.sleep") as m_sleep:
+            m_open.side_effect = [
+                self._http_error(502, "Bad Gateway"),
+                self._http_error(503, "Service Unavailable"),
+                self._http_error(504, "Gateway Timeout"),
+            ]
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                triage.api("GET", "/repos/o/r/releases/latest", "tok")
+            self.assertEqual(ctx.exception.code, 504)
+            ctx.exception.close()
+            self.assertEqual(m_open.call_count, 3)
+            self.assertEqual(m_sleep.call_args_list, [mock.call(2), mock.call(4)])
+
+    def test_api_does_not_retry_non_transient_404(self):
+        with mock.patch("urllib.request.urlopen") as m_open, mock.patch("time.sleep") as m_sleep:
+            m_open.side_effect = [self._http_error(404, "Not Found")]
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                triage.api("GET", "/repos/o/r/issues/999", "tok")
+            self.assertEqual(ctx.exception.code, 404)
+            ctx.exception.close()
+            self.assertEqual(m_open.call_count, 1)
+            m_sleep.assert_not_called()
+
+    def test_api_retries_network_timeout_and_recovers(self):
+        with mock.patch("urllib.request.urlopen") as m_open, mock.patch("time.sleep") as m_sleep:
+            m_open.side_effect = [
+                urllib.error.URLError("timed out"),
+                self._ok_response({"ok": True}),
+            ]
+            res = triage.api("GET", "/repos/o/r/issues/1", "tok")
+            self.assertEqual(res, {"ok": True})
+            self.assertEqual(m_open.call_count, 2)
+            m_sleep.assert_called_once_with(2)
 
 
 if __name__ == "__main__":

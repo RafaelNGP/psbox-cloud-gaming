@@ -26,7 +26,9 @@ import datetime
 import json
 import os
 import re
+import socket
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -35,6 +37,8 @@ MARKER = "<!-- psbox-triage -->"
 HERE = os.path.dirname(os.path.abspath(__file__))
 MAX_TEXT = 200_000  # characters of an issue looked at
 DUPLICATE_WINDOW_MIN = 60  # the same person, the same text, this long after the first: a repeat
+RETRY_DELAYS = (2, 4, 5)
+TRANSIENT_HTTP_CODES = (500, 502, 503, 504)
 # What the app writes by itself when the report has no text of the person's: it says nothing about the problem.
 PLACEHOLDER_WHAT = re.compile(r"^(reported from settings|problem report)?$", re.I)
 PLACEHOLDER_TITLE = re.compile(r"^(problem report|bug|\[bug\]:?|ps[45])?$", re.I)
@@ -408,15 +412,37 @@ def triage(issue, rules, latest):
 # --- GitHub ---------------------------------------------------------------------
 
 def api(method, path, token, data=None):
-    req = urllib.request.Request(
-        "https://api.github.com" + path,
-        method=method,
-        data=None if data is None else json.dumps(data).encode(),
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/vnd.github+json",
-                 "X-GitHub-Api-Version": "2022-11-28", "User-Agent": "psbox-triage"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        text = r.read().decode()
-        return json.loads(text) if text else None
+    payload = None if data is None else json.dumps(data).encode()
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "psbox-triage",
+    }
+    for attempt, delay in enumerate(RETRY_DELAYS, 1):
+        req = urllib.request.Request(
+            "https://api.github.com" + path,
+            method=method,
+            data=payload,
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=30) as r:
+                text = r.read().decode()
+                return json.loads(text) if text else None
+        except urllib.error.HTTPError as e:
+            if e.code not in TRANSIENT_HTTP_CODES or attempt == len(RETRY_DELAYS):
+                raise
+            e.close()
+            print(f"Warning: GitHub API {method} {path} returned HTTP {e.code} "
+                  f"(attempt {attempt}/{len(RETRY_DELAYS)}); retrying in {delay}s...")
+            time.sleep(delay)
+        except (urllib.error.URLError, TimeoutError, socket.timeout) as e:
+            if attempt == len(RETRY_DELAYS):
+                raise
+            print(f"Warning: GitHub API {method} {path} failed with {e} "
+                  f"(attempt {attempt}/{len(RETRY_DELAYS)}); retrying in {delay}s...")
+            time.sleep(delay)
 
 
 def label_colour(name):
