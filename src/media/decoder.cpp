@@ -611,10 +611,11 @@ bool VideoDecoder::init(int threads, bool preferHw) {
             enum AVHWDeviceType devType;
             enum AVPixelFormat pixFmt;
         } kHwConfigs[] = {
-            // Vulkan Video first: the desktop build's FFmpeg has it (libvulkan
-            // opened at run time); the others only where a build adds them.
-            {AV_HWDEVICE_TYPE_VULKAN, AV_PIX_FMT_VULKAN},
+            // Prefer native D3D11VA on Windows (works on virtually all GPUs even without
+            // Vulkan Video); on Linux/other platforms D3D11VA is not compiled in and it
+            // falls through immediately to Vulkan Video / VA-API / CUDA / VDPAU.
             {AV_HWDEVICE_TYPE_D3D11VA, AV_PIX_FMT_D3D11},
+            {AV_HWDEVICE_TYPE_VULKAN, AV_PIX_FMT_VULKAN},
             {AV_HWDEVICE_TYPE_VAAPI, AV_PIX_FMT_VAAPI},
             {AV_HWDEVICE_TYPE_CUDA,  AV_PIX_FMT_CUDA},
             {AV_HWDEVICE_TYPE_VDPAU, AV_PIX_FMT_VDPAU},
