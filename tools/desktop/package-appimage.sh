@@ -71,6 +71,9 @@ ok "app, SDL3, assets, desktop entry, icon, README and licenses in place"
 exe=$pkg/psbox
 readelf -d "$exe" | grep -E 'RUNPATH|RPATH' | grep -qF '[$ORIGIN/lib]' || fail "psbox's RUNPATH is not \$ORIGIN/lib"
 readelf -d "$exe" | grep -qF '[libSDL3.so.0]' || fail "psbox doesn't ask for libSDL3.so.0"
+if readelf -d "$exe" | grep -qE 'NEEDED.*\[libva(-drm)?\.so'; then
+    fail "psbox links libva directly (must use runtime dlopen shim for AppImage portability)"
+fi
 if readelf -S "$exe" | grep -qE '\.debug_(info|line)'; then fail "psbox still carries its debug info"; fi
 [[ -s $root/symbols/$version/psbox.debug ]] || fail "symbols/$version/psbox.debug was not saved"
 grep -q "version $version" "$pkg/README-linux.txt" || fail "README-linux.txt is not at $version"

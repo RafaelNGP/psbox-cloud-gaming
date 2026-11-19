@@ -238,6 +238,7 @@ static void testVideoDecoder() {
     media::VideoDecoder dec;
     CHECK(dec.init(1, false));
     CHECK(!dec.isHardware());
+    CHECK(dec.hwPixFmt() == -1);
     CHECK(dec.needsKeyframe());
 
     media::Picture pic;
@@ -248,9 +249,15 @@ static void testVideoDecoder() {
     CHECK(!dec.decode(garbage, sizeof garbage, pic));
     CHECK(dec.needsKeyframe());
 
-    // Hardware init preference test (on non-PS5 desktop without HW device it gracefully stays/falls back to software)
+    // Hardware init preference test (probes VA-API / Vulkan Video / D3D11VA and
+    // gracefully falls back to software when unavailable or unsupported).
     media::VideoDecoder hwDec;
     CHECK(hwDec.init(1, true));
+    if (!hwDec.isHardware()) {
+        CHECK(hwDec.hwPixFmt() == -1);
+    } else {
+        CHECK(hwDec.hwPixFmt() >= 0);
+    }
 
     // splitAccessUnits tests
     std::vector<uint8_t> stream = {0, 0, 0, 1, 9, 0x10, 0, 0, 0, 1, 7, 0x42, 0, 0, 0, 1, 8, 0xCE, 0, 0, 0, 1, 5, 0x88};
