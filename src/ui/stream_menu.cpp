@@ -2,6 +2,8 @@
 // Copyright (C) 2026 RafaelNGP
 #include <cstdint>
 #include "ui/stream_menu.h"
+#include "ui/session_choices.h"
+#include "ui/image_cache.h"
 #include "input/pad_usb.h"
 #include "app/shell.h"
 
@@ -85,8 +87,8 @@ int effectiveMaxVisible(const Fonts& fonts) {
     return std::max(6, availH / rowH);
 }
 
-int computeStartIndex(int totalShown, int selIdx, float scrollPixelOffset, const Fonts& fonts) {
-    const int maxVis = effectiveMaxVisible(fonts);
+int computeStartIndex(int totalShown, int selIdx, float scrollPixelOffset, const Fonts& fonts, int reserved = 0) {
+    const int maxVis = effectiveMaxVisible(fonts) - reserved;
     const int rowH = effectiveRowHeight(fonts);
     if (totalShown <= maxVis) return 0;
     const int maxStart = totalShown - maxVis;
@@ -111,7 +113,7 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
         return false;
     }
     if (tab == MenuTab::General) {
-        return item == XboxButton || item == TouchOverlayItem || item == TouchInvertSticksItem ||
+        return item == SessionItem || item == XboxButton || item == TouchOverlayItem || item == TouchInvertSticksItem ||
                item == TouchLayoutStudioItem || item == MicMuteItem ||
                item == Stats || item == Upscaler || item == Sharpness || item == Deband ||
                item == Resolution || item == VideoDecoderItem || item == FpsLimiterItem ||
@@ -125,6 +127,7 @@ bool StreamMenu::itemInTab(int item, MenuTab tab) const {
 }
 
 bool StreamMenu::itemShown(int item) const {
+    if (item == SessionItem && homeConsole_) return false;
     if (item == Profile) return false;
     if (item >= GuitarLane0 && item <= GuitarReset) return activeTab_ == MenuTab::Guitar;
     if (!itemInTab(item, activeTab_)) return false;
@@ -185,6 +188,7 @@ int StreamMenu::collectShownItems(int* out, int& selIdx) const {
 
 void StreamMenu::setCapabilities(const UiCaps& caps) {
     caps_ = caps;
+    if (onSessionTab()) return;
     while (!itemShown(selected_)) selectFirstItem();
 }
 
@@ -248,6 +252,22 @@ void StreamMenu::update(uint64_t nowMs) {
 MenuAction StreamMenu::handle(const NavInput& navIn) {
     NavInput in = navIn;
     if (!open_) return MenuAction::None;
+    if (onSessionTab()) {
+        if (in.l1 || in.r1) { stepTab(in.l1 ? -1 : 1); return MenuAction::None; }
+        if (in.back || in.options) { setTab(MenuTab::General); selected_ = SessionItem; return MenuAction::None; }
+        const int rows = sessionRows();
+        if (in.up || in.down) sessionRow_ = (sessionRow_ + (in.up ? -1 : 1) + rows) % rows;
+        if (in.left || in.right || in.accept) {
+            const int option = sessionOption(sessionRow_);
+            if (option == app::SessionChoiceCount) {
+                skipOnce = !skipOnce;
+                return MenuAction::SkipOnce;
+            }
+            cycleOverride(sessionOverrides, option, in.left ? -1 : 1);
+            return MenuAction::SessionOptions;
+        }
+        return MenuAction::None;
+    }
 
     if (gyroDialog_.isOpen()) {
         gyroDialog_.handleInput(in);
@@ -384,14 +404,8 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
 
     // Shoulder tabs switching (L1 / R1); a guitar's menu has one tab (its orange fret is LB).
     if (!kPolicy.showTabBar || activeTab_ == MenuTab::Guitar) in.l1 = in.r1 = false;
-    if (in.l1) {
-        activeTab_ = (activeTab_ == MenuTab::Controls) ? MenuTab::General : MenuTab::Controls;
-        selectFirstItem();
-        return MenuAction::None;
-    }
-    if (in.r1) {
-        activeTab_ = (activeTab_ == MenuTab::General) ? MenuTab::Controls : MenuTab::General;
-        selectFirstItem();
+    if (in.l1 || in.r1) {
+        stepTab(in.l1 ? -1 : 1);
         return MenuAction::None;
     }
 
@@ -610,6 +624,7 @@ MenuAction StreamMenu::handle(const NavInput& navIn) {
         touchpadCustomIndex_ = 0;
         return MenuAction::TouchpadShortcuts;
     }
+    if (selected_ == SessionItem && in.accept) { setTab(MenuTab::Timer); return MenuAction::None; }
     if (selected_ == Stats && (in.left || in.right)) {
         stats_ = !stats_;
         return MenuAction::Stats;
@@ -767,6 +782,7 @@ const char* StreamMenu::itemDescription(int item) const {
         case TouchLayoutStudioItem: return tr(Str::SettingDescTouchLayoutStudio);
         case VibrationItem: return tr(Str::SettingDescVibration);
         case MicMuteItem: return tr(Str::MenuDescMicrophone);
+        case SessionItem: return tr(Str::ClockHelp);
         case Stats: return tr(Str::MenuDescStats);
         case Upscaler: return tr(Str::MenuDescUpscaler);
         case Sharpness: return tr(Str::MenuDescSharpness);
@@ -796,7 +812,176 @@ const char* StreamMenu::itemDescription(int item) const {
     }
 }
 
+static std::string clockText(int64_t seconds) {
+    if (seconds < 0) return tr(Str::UnknownTime);
+    return std::to_string(seconds / 60) + ":" + (seconds % 60 < 10 ? "0" : "") + std::to_string(seconds % 60);
+}
+
+static Color digitColor(int index) {
+    constexpr Color colors[] = {rgba(255,255,255), rgba(255,226,79), rgba(117,240,126), rgba(87,231,242),
+                                rgba(119,177,255), rgba(255,177,88), rgba(255,150,209), rgba(255,116,113)};
+    static_assert(sizeof(colors)/sizeof(colors[0]) == app::sessionChoiceCounts[app::ClockColor]);
+    return colors[index];
+}
+
+Canvas StreamMenu::renderTimer(const app::SessionChoices& style, int64_t seconds) const {
+    const int px = 22 + 6 * style[app::ClockSize];
+    const auto text = clockText(seconds);
+    const int textWidth = fonts_.semibold.measure(text, px);
+    const int height = std::max(px + 16, fonts_.semibold.scaledPx(px) + 12);
+    const int skin = style[app::ClockSkin];
+    const int width = skin ? std::max(textWidth + 30, height * 3) : textWidth + 24;
+    Canvas c(width,height);
+    bool hasArt = false;
+    if (skin > 0) {
+        constexpr const char* names[] = {"crystal.png","scoreboard.png","minimal.png","aurora.png","radar.png",
+                                         "ember.png","ocean.png","orbit.png","sakura.png"};
+        static_assert(std::size(names) == app::sessionChoiceCounts[app::ClockSkin]-1);
+        auto& art = timerArt_[skin-1];
+        if (!art.loaded) {
+            std::string data;
+            if (platform::readFile(platform::assetDir()+"/timers/"+names[skin-1], data))
+                decodeImage(data,art.original);
+            art.loaded = true;
+        }
+        if (!art.original.px.empty()) {
+            if (art.scaled.w != width || art.scaled.h != height)
+                art.scaled = coverResize(art.original,width,height);
+            if (!art.scaled.px.empty()) {
+                c.drawImage(art.scaled,0,0);
+                hasArt = true;
+            }
+        }
+    }
+    if (!hasArt) {
+        constexpr Color fills[] = {rgba(10,14,18), rgba(14,32,56), rgba(48,23,58), rgba(17,49,39), rgba(60,22,35)};
+        c.fillRect({0,0,width,height},withAlpha(fills[style[app::BasicFill]],style[app::BasicAlpha]*255/4),8);
+    }
+    fonts_.semibold.draw(c,text,(width-textWidth)/2,fonts_.semibold.centeredY(0,height,px),px,digitColor(style[app::ClockColor]));
+    return c;
+}
+
+std::vector<StreamMenu::TabEntry> StreamMenu::visibleTabs() const {
+    std::vector<TabEntry> tabs{{MenuTab::General, Str::MenuTabGeneral}, {MenuTab::Controls, Str::Controllers}};
+    if (!homeConsole_) {
+        tabs.push_back({MenuTab::Reconnect, Str::ReconnectTab});
+        tabs.push_back({MenuTab::Timer, Str::TimerTab});
+    }
+    return tabs;
+}
+
+void StreamMenu::stepTab(int direction) {
+    const auto tabs = visibleTabs();
+    auto current = std::find_if(tabs.begin(), tabs.end(), [&](const TabEntry& entry) { return entry.tab == activeTab_; });
+    const int count = static_cast<int>(tabs.size());
+    setTab(tabs[(int(current-tabs.begin()) + direction + count) % count].tab);
+}
+
+void StreamMenu::drawTabs(Canvas& c) const {
+    constexpr int kPad = 40;
+    if (kPolicy.showTabBar) {
+        int tabY = 66, tabH = 34;
+        if (activeTab_ == MenuTab::Guitar) {
+            const char* tabGuitar = tr(Str::MenuTabGuitar);
+            const int gw = fonts_.semibold.measure(tabGuitar, 18) + 24;
+            const Rect r{kPad, tabY, gw, tabH};
+            c.fillRect(r, rgba(255, 255, 255, 24), 6);
+            c.fillRect({r.x + 6, r.y + r.h - 3, r.w - 12, 3}, kGreen, 2);
+            fonts_.semibold.draw(c, tabGuitar, r.x + 12, fonts_.semibold.centeredY(r.y, r.h, 18), 18, kWhite);
+        } else {
+            int bx = kPad;
+            constexpr int badgeW = 36, badgeH = 24;
+            const int badgeY = tabY + (tabH - badgeH) / 2;
+
+            auto drawBadge = [&](const char* text, int x) {
+                Rect r{x, badgeY, badgeW, badgeH};
+                c.fillRect(r, rgba(255, 255, 255, 30), 4);
+                int tw = fonts_.bold.measure(text, 14);
+                int tx = r.x + (r.w - tw) / 2;
+                int ty = fonts_.bold.centeredY(r.y, r.h, 14);
+                fonts_.bold.draw(c, text, tx, ty, 14, kWhite);
+            };
+
+            // L1 badge
+            drawBadge("L1", bx);
+            bx += badgeW + 8;
+
+            const auto tabs = visibleTabs();
+            int idealWidth = 0;
+            for (auto entry : tabs) idealWidth += fonts_.semibold.measure(tr(entry.label),16)+12;
+            const int available = std::max(1, kMenuW - bx - kPad - badgeW - 15*int(tabs.size()) + 10);
+            for (size_t i = 0; i < tabs.size(); ++i) {
+                if (i) {
+                    fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, kDim);
+                    bx += 10;
+                }
+                const char* label = tr(tabs[i].label);
+                const int ideal = fonts_.semibold.measure(label,16)+12;
+                const int width = idealWidth <= available ? ideal : ideal*available/idealWidth;
+                Rect r{bx, tabY, width, tabH};
+                tabRects_[static_cast<size_t>(tabs[i].tab)] = r;
+                const bool active = activeTab_ == tabs[i].tab;
+                if (active) {
+                    c.fillRect(r, rgba(255,255,255,24), 6);
+                    c.fillRect({r.x+6,r.y+r.h-3,r.w-12,3},kGreen,2);
+                }
+                fonts_.semibold.drawTruncated(c,label,r.x+6,fonts_.semibold.centeredY(r.y,r.h,16),16,
+                                               std::max(1,r.w-12),active?kWhite:kDim);
+                bx += r.w+5;
+            }
+
+            // R1 badge
+            drawBadge("R1", bx);
+        }
+    }
+
+}
+
+Canvas StreamMenu::renderSessionPanel(const StreamInfo& info) const {
+    const int panelW = 810;
+    Canvas c(panelW,kMenuH);
+    c.fillRect({0,0,panelW,kMenuH}, kPanel);
+    c.fillRect({0,0,panelW,6}, kGreen);
+    fonts_.bold.draw(c,tr(Str::MenuTitle),40,30,28,kWhite);
+    drawTabs(c);
+    if (activeTab_ == MenuTab::Timer) {
+        fonts_.bold.draw(c,std::string(tr(Str::SessionPlayed))+"   "+clockText(info.sessionElapsed),32,110,23,kWhite);
+        fonts_.bold.draw(c,std::string(tr(Str::SessionLeft))+"   "+clockText(info.sessionLeft),32,150,23,kWhite);
+    }
+    auto style = sessionGeneral;
+    for (int row=0; row<sessionRows(); ++row) {
+        const int i = sessionOption(row);
+        const bool once = i == app::SessionChoiceCount;
+        const int y = sessionTop() + 43*row;
+        if (!once && sessionOverrides[i] >= 0) style[i] = sessionOverrides[i];
+        auto value = once ? std::string(tr(skipOnce ? Str::Activated : Str::Deactivated))
+                                : sessionChoiceLabel(i,sessionOverrides[i]);
+        if (i == app::ClockSkin && sessionOverrides[i] < 0)
+            value += " (" + sessionChoiceLabel(i, sessionGeneral[i]) + ")";
+        const bool selected = sessionRow_ == row;
+        c.fillRect({20,y,panelW-40,41},selected ? kWhite : rgba(39,40,42),6);
+        const int textY = fonts_.semibold.centeredY(y,44,19);
+        fonts_.semibold.drawTruncated(c,tr(once ? Str::SkipRestart : sessionLabels[i]),36,textY,19,
+                                      panelW/2+30,selected?kDark:kWhite);
+        fonts_.regular.drawTruncated(c,value,panelW/2+84,textY,19,panelW/2-115,selected?kDark:kDim);
+    }
+    if (activeTab_ == MenuTab::Reconnect) return c;
+    fonts_.regular.draw(c,tr(Str::SessionPreview),32,678,21,kDim);
+    Rect screen{32,720,544,306};
+    c.fillRect(screen,rgba(50,59,68),6);
+    if (style[app::ShowClock]) {
+        auto preview = renderTimer(style,299);
+        const int w=preview.width(), h=preview.height(), pos=style[app::ClockPosition];
+        const int x = pos%3 == 0 ? 10 : pos%3 == 1 ? (screen.w-w)/2 : screen.w-w-10;
+        const int y = pos<3 ? 10 : screen.h-h-10;
+        Image img{w,h,false,std::vector<uint32_t>(preview.data(),preview.data()+w*h)};
+        c.drawImage(img,screen.x+x,screen.y+y,(style[app::ClockOpacity]+1)*255/4);
+    }
+    return c;
+}
+
 Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
+    if (onSessionTab()) return renderSessionPanel(info);
     const int canvasW = (!statsCustomizing_ && !touchpadCustomizing_) ? kCombinedW : kMenuW;
     Canvas c(canvasW, kMenuH);
     std::fill(c.data(), c.data() + static_cast<size_t>(canvasW) * kMenuH, 0u);
@@ -957,79 +1142,20 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         }
     }
 
-    // Tabs Header: [L1]  Geral  |  Controles  [R1]; a guitar's menu: its one tab, no badges.
-    if (kPolicy.showTabBar) {
-        int tabY = 66, tabH = 34;
-        if (activeTab_ == MenuTab::Guitar) {
-            const char* tabGuitar = tr(Str::MenuTabGuitar);
-            const int gw = fonts_.semibold.measure(tabGuitar, 18) + 24;
-            const Rect r{kPad, tabY, gw, tabH};
-            c.fillRect(r, rgba(255, 255, 255, 24), 6);
-            c.fillRect({r.x + 6, r.y + r.h - 3, r.w - 12, 3}, kGreen, 2);
-            fonts_.semibold.draw(c, tabGuitar, r.x + 12, fonts_.semibold.centeredY(r.y, r.h, 18), 18, kWhite);
-        } else {
-            int bx = kPad;
-            constexpr int badgeW = 36, badgeH = 24;
-            const int badgeY = tabY + (tabH - badgeH) / 2;
-
-            auto drawBadge = [&](const char* text, int x) {
-                Rect r{x, badgeY, badgeW, badgeH};
-                c.fillRect(r, rgba(255, 255, 255, 30), 4);
-                int tw = fonts_.bold.measure(text, 14);
-                int tx = r.x + (r.w - tw) / 2;
-                int ty = fonts_.bold.centeredY(r.y, r.h, 14);
-                fonts_.bold.draw(c, text, tx, ty, 14, kWhite);
-            };
-
-            // L1 badge
-            drawBadge("L1", bx);
-            bx += badgeW + 8;
-
-            // General Tab
-            bool genActive = (activeTab_ == MenuTab::General);
-            const char* tabGen = tr(Str::MenuTabGeneral);
-            int gw = fonts_.semibold.measure(tabGen, 18) + 24;
-            Rect genRect{bx, tabY, gw, tabH};
-            if (genActive) {
-                c.fillRect(genRect, rgba(255, 255, 255, 24), 6);
-                c.fillRect({genRect.x + 6, genRect.y + genRect.h - 3, genRect.w - 12, 3}, kGreen, 2);
-            }
-            fonts_.semibold.draw(c, tabGen, genRect.x + 12, fonts_.semibold.centeredY(genRect.y, genRect.h, 18), 18,
-                                 genActive ? kWhite : kDim);
-            bx += gw + 10;
-
-            // Separator
-            fonts_.regular.draw(c, "|", bx, fonts_.regular.centeredY(tabY, tabH, 16), 16, rgba(80, 80, 80));
-            bx += 16;
-
-            // Controls Tab
-            bool ctrlActive = (activeTab_ == MenuTab::Controls);
-            const char* tabCtrl = tr(Str::Controllers);
-            int cw = fonts_.semibold.measure(tabCtrl, 18) + 24;
-            Rect ctrlRect{bx, tabY, cw, tabH};
-            if (ctrlActive) {
-                c.fillRect(ctrlRect, rgba(255, 255, 255, 24), 6);
-                c.fillRect({ctrlRect.x + 6, ctrlRect.y + ctrlRect.h - 3, ctrlRect.w - 12, 3}, kGreen, 2);
-            }
-            fonts_.semibold.draw(c, tabCtrl, ctrlRect.x + 12, fonts_.semibold.centeredY(ctrlRect.y, ctrlRect.h, 18), 18,
-                                 ctrlActive ? kWhite : kDim);
-            bx += cw + 10;
-
-            // R1 badge
-            drawBadge("R1", bx);
-        }
-    }
+    drawTabs(c);
 
     // The Items List
     const int kRowH = effectiveRowHeight(fonts_);
     const int kTop = kPolicy.listTop;
     const int kPx = kPolicy.fontPx;
-    const int kMaxVisible = effectiveMaxVisible(fonts_);
+    const bool showClockSummary = !kPolicy.unifiedMenu && !homeConsole_ && activeTab_ == MenuTab::General;
+    const int kMaxVisible = effectiveMaxVisible(fonts_) - int(showClockSummary);
     int shownList[ItemCount];
     int selIdx = 0;
     int totalShown = collectShownItems(shownList, selIdx);
-    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
+    int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_, int(showClockSummary));
     int visibleCount = std::min(totalShown, kMaxVisible);
+    int summaryOffset = 0;
 
     for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {  // the guitar's: drawGuitarTab
         int i = shownList[startIdx + v];
@@ -1037,15 +1163,25 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
         constexpr int kLeaveMarginBottom = 18;
         const int kLeaveTargetY = kStatsSepY - kLeaveMarginBottom - (kRowH - 4); // 704 - 18 - 34 = 652
         int rowY = (kPolicy.pinLeaveRowToBottom && activeTab_ != MenuTab::Controls && i == Leave)
-            ? std::max(kTop + v * kRowH + 16, kLeaveTargetY)
-            : (kTop + v * kRowH);
+            ? std::max(kTop + v * kRowH + summaryOffset + 16, kLeaveTargetY)
+            : (kTop + v * kRowH + summaryOffset);
         Rect row{kPad - 16, rowY, kMenuW - 2 * (kPad - 16), kRowH - 4};
+        if (showClockSummary && i == ReloadStreamItem) {
+            const int split = row.w / 2;
+            const int y = fonts_.bold.centeredY(rowY+kRowH, kRowH, 16);
+            fonts_.bold.drawTruncated(c, std::string(tr(Str::SessionPlayed))+"  "+clockText(info.sessionElapsed),
+                                      row.x+16,y,16,split-20,kWhite);
+            fonts_.bold.drawTruncated(c, std::string(tr(Str::SessionLeft))+"  "+clockText(info.sessionLeft),
+                                      row.x+split,y,16,split-16,kWhite);
+            summaryOffset = kRowH;
+        }
         bool sel = i == selected_;
         if (sel) c.fillRect(row, kWhite, 8);
         Color fg = sel ? kDark : kWhite;
         int ty = fonts_.semibold.centeredY(row.y, row.h, kPx);
 
         const char* label = i == XboxButton            ? tr(Str::MenuXboxButton)
+                            : i == SessionItem           ? tr(Str::TimerTab)
                             : i == TouchOverlayItem      ? tr(Str::TouchOverlay)
                             : i == TouchOpacityItem      ? tr(Str::TouchOpacity)
                             : i == TouchInvertSticksItem ? tr(Str::TouchInvertSticks)
@@ -1152,7 +1288,7 @@ Canvas StreamMenu::renderMenu(const StreamInfo& info) const {
             if (sel) value = "< " + value + " >";
         }
         if (i == ConfirmItem) {
-            value = circleConfirms_ ? "○" : "×";
+            value = circleConfirms_ ? "â—‹" : "Ã—";
             if (sel) value = "< " + value + " >";
         }
         if (i == Triggers) {
@@ -1589,7 +1725,7 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
 
         // Tap detected!
         // Tapping outside closes the menu
-        if (mx < 0 || mx > kMenuW || my < 0 || my > kMenuH) {
+        if (mx < 0 || mx > (onSessionTab() ? 810 : kMenuW) || my < 0 || my > kMenuH) {
             outNav.back = true;
             return true;
         }
@@ -1616,18 +1752,19 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
             return false;
         }
 
-        // Tabs header (General / Controls)
-        if (kPolicy.showTabBar && my >= 56 && my <= 108 && activeTab_ != MenuTab::Guitar) {
-            if (mx < kMenuW / 2.0f) {
-                if (activeTab_ != MenuTab::General) {
-                    activeTab_ = MenuTab::General;
-                    selectFirstItem();
+        if (kPolicy.showTabBar && activeTab_ != MenuTab::Guitar) {
+            for (auto entry : visibleTabs()) {
+                const Rect& r = tabRects_[static_cast<size_t>(entry.tab)];
+                if (mx >= r.x && mx < r.x+r.w && my >= r.y && my < r.y+r.h) {
+                    setTab(entry.tab);
+                    return true;
                 }
-            } else {
-                if (activeTab_ != MenuTab::Controls) {
-                    activeTab_ = MenuTab::Controls;
-                    selectFirstItem();
-                }
+            }
+        }
+        if (onSessionTab()) {
+            if (my >= sessionTop() && my < sessionTop() + 43*sessionRows()) {
+                sessionRow_ = static_cast<int>((my-sessionTop())/43);
+                outNav.accept = true;
             }
             return true;
         }
@@ -1635,16 +1772,21 @@ bool StreamMenu::onTouch(const app::shell::TouchEvent& ev, NavInput& outNav) {
         // Items List tap
         const int kRowH = effectiveRowHeight(fonts_);
         const int kTop = kPolicy.listTop;
-        const int kMaxVisible = effectiveMaxVisible(fonts_);
+        const bool showClockSummary = !kPolicy.unifiedMenu && !homeConsole_ && activeTab_ == MenuTab::General;
+        const int kMaxVisible = effectiveMaxVisible(fonts_) - int(showClockSummary);
         int shownList[ItemCount];
         int selIdx = 0;
         int totalShown = collectShownItems(shownList, selIdx);
-        int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_);
+        int startIdx = computeStartIndex(totalShown, selIdx, scrollPixelOffset_, fonts_, int(showClockSummary));
         int visibleCount = std::min(totalShown, kMaxVisible);
+        int summaryOffset = 0;
 
         for (int v = 0; v < visibleCount && activeTab_ != MenuTab::Guitar; ++v) {
             int i = shownList[startIdx + v];
-            int rowY = kTop + v * kRowH;
+            int rowY = kTop + v * kRowH + summaryOffset;
+            if (kPolicy.pinLeaveRowToBottom && activeTab_ != MenuTab::Controls && i == Leave)
+                rowY = std::max(rowY + 16, 704 - 18 - (kRowH - 4));
+            if (showClockSummary && i == ReloadStreamItem) summaryOffset = kRowH;
             if (my >= rowY && my < rowY + kRowH && mx >= 16 && mx <= kMenuW - 16) {
                 selected_ = i;
                 // Value cycling items advance with right

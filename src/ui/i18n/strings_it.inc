@@ -594,4 +594,61 @@ constexpr Column kItalian = {
     "Grande (115%)",                                                                  // UiScaleLarge
     "Molto grande (130%)",                                                            // UiScaleExtraLarge
     "Ingrandisce menu, testi e righe per facilitare la lettura su TV, console portatili e smartphone.", // SettingDescUiScale
+    "Riconnessione automatica", // AutoReconnect
+    "Al termine della sessione, torna in coda per lo stesso gioco.", // SettingDescAutoReconnect
+    "Sessione e timer", // SessionPanel
+    "Impostazioni aggiuntive", // MySettings
+    "Riconn. auto.", // ReconnectTab
+    "Timer", // TimerTab
+    "Mostra timer", // ShowSessionClock
+    "Dimensione del timer", // ClockTextSize
+    "Posizione del timer", // ClockPlacement
+    "Opacità del timer", // ClockTransparency
+    "Usa impostazione generale", // InheritSession
+    "Disattiva riconnessione solo stavolta", // SkipRestart
+    "Tempo giocato", // SessionPlayed
+    "Tempo rimasto", // SessionLeft
+    "Sconosciuto", // UnknownTime
+    "Piccolo", // ClockSmall
+    "Medio", // ClockMedium
+    "Grande", // ClockLarge
+    "In alto a sinistra", // TopLeft
+    "In alto al centro", // TopCenter
+    "In alto a destra", // TopRight
+    "In basso a sinistra", // BottomLeft
+    "In basso al centro", // BottomCenter
+    "In basso a destra", // BottomRight
+    "Scegli quando mostrare il tempo rimanente della sessione.", // ClockHelp
+    "Anteprima", // SessionPreview
+    "Ultimi 5 minuti", // ClockLastFive
+    "Intera sessione", // ClockWholeSession
+    "Colore delle cifre", // ClockDigitColor
+    "Bianco", // ClockWhite
+    "Giallo", // ClockYellow
+    "Verde", // ClockGreen
+    "Ciano", // ClockCyan
+    "Blu", // ClockBlue
+    "Arancione", // ClockOrange
+    "Rosa", // ClockPink
+    "Rosso", // ClockRed
+    "Stile del timer", // ClockStyle
+    "Sfondo classico", // BasicFillLabel
+    "Opacità dello sfondo classico", // BasicAlphaLabel
+    "Classico", // SkinClassic
+    "Cristallo", // SkinCrystal
+    "Tabellone", // SkinScore
+    "Minimalista", // SkinMinimal
+    "Antracite", // FillCarbon
+    "Blu notte", // FillNavy
+    "Prugna", // FillPlum
+    "Foresta", // FillForest
+    "Bordeaux", // FillBurgundy
+    "Gesto del timer (5 s)", // PeekLabel
+    "Scorri verso destra per mostrare il timer per cinque secondi.", // PeekHelp
+    "Aurora", // SkinAurora
+    "Radar", // SkinRadar
+    "Brace", // SkinEmber
+    "Oceano", // SkinOcean
+    "Orbita", // SkinOrbit
+    "Sakura", // SkinSakura
 };

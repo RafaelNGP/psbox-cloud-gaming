@@ -36,6 +36,7 @@ SettingsChoice choiceFromSettings(const app::Settings& s) {
     c.maxBitrateMbps = s.maxBitrateMbps;
     c.gameVolume = s.gameVolume;
     c.queueReadyAlert = s.queueReadyAlert;
+    c.sessionPrefs = s.sessionPrefs;
     c.previewFeatures = s.previewFeatures;
     c.syncTrophies = s.syncTrophies;
     c.keyMap = s.keyMap;
@@ -82,6 +83,7 @@ void applyChoice(const SettingsChoice& c, app::Settings& s) {
     s.maxBitrateMbps = c.maxBitrateMbps;
     s.gameVolume = c.gameVolume;
     s.queueReadyAlert = c.queueReadyAlert;
+    s.sessionPrefs = c.sessionPrefs;
     s.previewFeatures = c.previewFeatures;
     s.syncTrophies = c.syncTrophies;
     s.keyMap = c.keyMap;

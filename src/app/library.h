@@ -158,6 +158,7 @@ private:
     // The account (loadOwned() or the cache).
     bool ownershipKnown_ = false;
     bool gamePassMember_ = false;
+    std::map<std::string, int> sessionLimits_;
     int freeTierSessionSeconds_ = 0;
     bool ownershipFresh_ = false;            // the account's list of this start (not the cache's) is in
     std::set<std::string> knownGamePass_;    // the Game Pass catalog at the last start (cache)

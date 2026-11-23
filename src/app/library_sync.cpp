@@ -499,6 +499,7 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
     std::set<std::string> seenMine;
     std::map<std::string, std::string> toBuy;  // productId -> titleId
     bool member = false;
+    sessionLimits_.clear();
     int freeTierSession = 0;  // the shortest session among the titles played through the free tier
     auto registerCloudTitle = [&](const std::string& pid, const std::string& tid, const std::string& xboxId, bool freeStore, bool mkb) {
         if (pid.empty()) return;
@@ -522,6 +523,7 @@ void Library::loadOwned(xcloud::GssvClient gssv, const Changed& changed, const s
         }
         bool entitled = t.hasEntitlement || isAcquired;
         member |= entitled && t.viaSubscription;
+        if (entitled && t.freeTier && t.maxSessionSeconds > 0) sessionLimits_[t.titleId] = t.maxSessionSeconds;
         if (entitled && t.freeTier && t.maxSessionSeconds > 0 && (freeTierSession == 0 || t.maxSessionSeconds < freeTierSession))
             freeTierSession = t.maxSessionSeconds;
         if (xcloud::isNonGameAddon(t.titleId)) continue;

@@ -312,6 +312,7 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         playerReconnects_ = g_player ? g_player->reconnects() : 0;
     }
     if (g_player != overlayPlayer_) {  // a new stream
+        peekUntilMs_ = 0;
         overlayPlayer_ = g_player;
         wasStreaming_ = true;
         menu_.close();
@@ -473,6 +474,12 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                 padVol = g_settings.padSpeakerVolume;
             }
             touchOverlay_.reset();
+            {
+                std::lock_guard<std::mutex> lock(g_settingsMutex);
+                menu_.sessionGeneral = g_settings.sessionPrefs.general;
+                menu_.sessionOverrides = g_settings.sessionPrefs.overrides(gameKey_);
+                menu_.skipOnce = g_settings.sessionClock.skipReconnect;
+            }
             menu_.open(streamResolution_, showStats_, sharpness_, deband_, upscaler_, g_playingHome, allow1440,
                        hasCustomProfile_, triggerStrength_, deadzone_, circleConfirms_, micLvl, micMuted, padVol);
             menu_.setGameKey(gameKey_);
@@ -521,6 +528,16 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             nav.back |= pendingTouchNav_.back;
             pendingTouchNav_ = {};
             switch (gyroCalRunning_ ? ui::MenuAction::None : menu_.handle(nav)) {
+            case ui::MenuAction::SessionOptions:
+            case ui::MenuAction::SkipOnce: {
+                std::lock_guard<std::mutex> lock(g_settingsMutex);
+                g_settings.sessionPrefs.games[gameKey_] = menu_.sessionOverrides;
+                g_settings.sessionClock.skipReconnect = menu_.skipOnce;
+                g_settings.save(settingsPath());
+                if (g_ui) g_ui->setSettings(ui::choiceFromSettings(g_settings));
+                overlaySeq_ = 0;
+                break;
+            }
             case ui::MenuAction::GyroCalibrate: startGyroCalibration_(); break;
             case ui::MenuAction::Leave: g_cancel = true; break;
             case ui::MenuAction::ReloadStream:
@@ -1196,7 +1213,16 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
                                           : left ? touchpadShortcuts_.swipeLeft
                                                  : touchpadShortcuts_.swipeRight;
                 const char* dirName = up ? "swipe up" : down ? "swipe down" : left ? "swipe left" : "swipe right";
-                if (menu_.isOpen()) {
+                bool peek = false;
+                if (right && !g_playingHome && !menu_.isOpen()) {
+                    std::lock_guard<std::mutex> lock(g_settingsMutex);
+                    peek = g_settings.sessionPrefs.effective(gameKey_)[PeekGesture] != 0;
+                }
+                if (peek) {
+                    swipe_.fired = true;
+                    peekUntilMs_ = platform::nowMs() + 5000;
+                    overlaySeq_ = 0;
+                } else if (menu_.isOpen()) {
                     if (act == input::TouchpadAction::GameMenu) {
                         swipe_.fired = true;
                         swipeMenu_ = true;
@@ -1438,6 +1464,10 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
     // A desktop's toasts take the overlay while they last (the menu still
     // comes first); the PS5's notifications are the system's.
     uint64_t toasts = platform::toastsEnabled() ? platform::toasts().version(nowMs) : 0;
+    if (peekUntilMs_ && nowMs >= peekUntilMs_) {
+        peekUntilMs_ = 0;
+        overlaySeq_ = 0;
+    }
     if (overlaySeq_ != seq + 1 || menuRedraw || statsRedraw || touchRedraw || toasts != toastsShown_) {
         overlaySeq_ = seq + 1;
         toastsShown_ = toasts;
@@ -1462,6 +1492,13 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
             menu_.setFrametimes(jitter);
         } else if (!info.frametimes.empty()) {
             menu_.setFrametimes(info.frametimes);
+        }
+        SessionChoices style = defaultSession;
+        bool showSessionTimer = !g_playingHome && (info.sessionLeft >= 0 || peekUntilMs_);
+        if (showSessionTimer) {
+            std::lock_guard<std::mutex> lock(g_settingsMutex);
+            style = g_settings.sessionPrefs.effective(gameKey_);
+            showSessionTimer = (peekUntilMs_ && style[PeekGesture]) || timerVisible(info.sessionLeft, style[ShowClock]);
         }
         if (menu_.isOpen()) {
             menu_.update(nowMs);
@@ -1541,6 +1578,32 @@ void StreamScreen::update(const input::ControllerState& pad, ui::NavInput nav, b
         } else if (auto shown = toasts ? platform::toasts().visible(nowMs) : std::vector<std::string>(); !shown.empty()) {
             ui::Canvas c = ui::renderToastPanel(fonts_, shown);
             display::setOverlay(c.data(), (static_cast<int>(display::kWidth) - c.width()) / 2, 28, c.width(), c.height(), 235);
+        } else if (showSessionTimer) {
+            auto timer = menu_.renderTimer(style,info.sessionLeft);
+            const int w=timer.width(), h=timer.height(), pos=style[ClockPosition];
+            const int x=pos%3 == 0 ? 32 : pos%3 == 1 ? (int(display::kWidth)-w)/2 : int(display::kWidth)-32-w;
+            const int y=pos < 3 ? 28 : int(display::kHeight)-28-h;
+            const int opacity=(style[ClockOpacity]+1)*255/4;
+            const bool stats = showStats_ && seq;
+            if (stats || info.degraded || info.wifiHoldNow) {
+                auto other = stats ? menu_.renderStats(info) : menu_.renderWarning(info.wifiHoldNow && !info.degraded);
+                const int ox=stats ? ui::StreamMenu::kStatsX : ui::StreamMenu::kWarnRight-other.width();
+                const int oy=stats ? ui::StreamMenu::kStatsY : ui::StreamMenu::kWarnY;
+                const bool overlap=x<ox+other.width() && x+w>ox && y<oy+other.height() && y+h>oy;
+                const int ty=overlap ? oy+other.height()+6 : y;
+                const int bx=std::min(x,ox), by=std::min(ty,oy);
+                ui::Canvas both(std::max(x+w,ox+other.width())-bx,std::max(ty+h,oy+other.height())-by);
+                auto blit = [&](const ui::Canvas& layer,int lx,int ly,int alpha) {
+                    ui::Image img{layer.width(),layer.height(),false,
+                        std::vector<uint32_t>(layer.data(),layer.data()+layer.width()*layer.height())};
+                    both.drawImage(img,lx-bx,ly-by,alpha);
+                };
+                blit(other,ox,oy,200);
+                blit(timer,x,ty,opacity);
+                display::setOverlay(both.data(),bx,by,both.width(),both.height(),255);
+            } else {
+                display::setOverlay(timer.data(),x,y,w,h,opacity);
+            }
         } else if (showStats_ && seq) {
             ui::Canvas c = menu_.renderStats(info);
             display::setOverlay(c.data(), ui::StreamMenu::kStatsX, ui::StreamMenu::kStatsY, c.width(), c.height(), 200);

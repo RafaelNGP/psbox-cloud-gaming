@@ -85,6 +85,7 @@ private:
         bool active = false, fired = false;
         float x = 0, y = 0;  // where the finger came down
     } swipe_;
+    uint64_t peekUntilMs_ = 0;
     bool swipeMenu_ = false;  // a swipe asked for the game menu
     int sharpness_ = 0;       // 0..3, as Settings::sharpness
     int deband_ = 3;          // 0..3, as Settings::deband

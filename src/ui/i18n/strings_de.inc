@@ -594,4 +594,61 @@ constexpr Column kGerman = {
     "Groß (115%)",                                                                    // UiScaleLarge
     "Sehr groß (130%)",                                                               // UiScaleExtraLarge
     "Vergrößert Menüs, Texte und Zeilen für bessere Lesbarkeit auf Fernsehern, Handhelds und Smartphones.", // SettingDescUiScale
+    "Automatisch neu verbinden", // AutoReconnect
+    "Nach Sitzungsende erneut für dasselbe Spiel anstellen.", // SettingDescAutoReconnect
+    "Sitzung und Timer", // SessionPanel
+    "Zusätzliche Einstellungen", // MySettings
+    "Auto-Verbindung", // ReconnectTab
+    "Timer", // TimerTab
+    "Timer anzeigen", // ShowSessionClock
+    "Timergröße", // ClockTextSize
+    "Timerposition", // ClockPlacement
+    "Deckkraft", // ClockTransparency
+    "Allgemeine Einstellung", // InheritSession
+    "Neuverbindung einmal aussetzen", // SkipRestart
+    "Spielzeit", // SessionPlayed
+    "Verbleibende Zeit", // SessionLeft
+    "Unbekannt", // UnknownTime
+    "Klein", // ClockSmall
+    "Mittel", // ClockMedium
+    "Groß", // ClockLarge
+    "Oben links", // TopLeft
+    "Oben mittig", // TopCenter
+    "Oben rechts", // TopRight
+    "Unten links", // BottomLeft
+    "Unten mittig", // BottomCenter
+    "Unten rechts", // BottomRight
+    "Wähle, wann die verbleibende Sitzungszeit angezeigt wird.", // ClockHelp
+    "Vorschau", // SessionPreview
+    "Letzte 5 Minuten", // ClockLastFive
+    "Gesamte Sitzung", // ClockWholeSession
+    "Ziffernfarbe", // ClockDigitColor
+    "Weiß", // ClockWhite
+    "Gelb", // ClockYellow
+    "Grün", // ClockGreen
+    "Cyan", // ClockCyan
+    "Blau", // ClockBlue
+    "Orange", // ClockOrange
+    "Rosa", // ClockPink
+    "Rot", // ClockRed
+    "Timerstil", // ClockStyle
+    "Klassischer Hintergrund", // BasicFillLabel
+    "Deckkraft des klassischen Hintergrunds", // BasicAlphaLabel
+    "Klassisch", // SkinClassic
+    "Kristall", // SkinCrystal
+    "Anzeigetafel", // SkinScore
+    "Minimal", // SkinMinimal
+    "Anthrazit", // FillCarbon
+    "Nachtblau", // FillNavy
+    "Pflaume", // FillPlum
+    "Waldgrün", // FillForest
+    "Burgunderrot", // FillBurgundy
+    "Timer-Geste (5 s)", // PeekLabel
+    "Nach rechts wischen, um den Timer fünf Sekunden lang zu sehen.", // PeekHelp
+    "Polarlicht", // SkinAurora
+    "Radar", // SkinRadar
+    "Glut", // SkinEmber
+    "Ozean", // SkinOcean
+    "Umlaufbahn", // SkinOrbit
+    "Sakura", // SkinSakura
 };

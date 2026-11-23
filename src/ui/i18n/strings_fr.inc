@@ -594,4 +594,61 @@ constexpr Column kFrench = {
     "Grand (115%)",                                                                   // UiScaleLarge
     "Très grand (130%)",                                                              // UiScaleExtraLarge
     "Agrandit les menus, les textes et les lignes pour faciliter la lecture sur téléviseurs, consoles portables et mobiles.", // SettingDescUiScale
+    "Reconnexion automatique", // AutoReconnect
+    "À la fin de la session, rejoint la file pour le même jeu.", // SettingDescAutoReconnect
+    "Session et compteur", // SessionPanel
+    "Paramètres supplémentaires", // MySettings
+    "Reconnexion auto.", // ReconnectTab
+    "Compteur", // TimerTab
+    "Afficher le compteur", // ShowSessionClock
+    "Taille du compteur", // ClockTextSize
+    "Position du compteur", // ClockPlacement
+    "Opacité du compteur", // ClockTransparency
+    "Réglage général", // InheritSession
+    "Désactiver la reconnexion cette fois", // SkipRestart
+    "Temps joué", // SessionPlayed
+    "Temps restant", // SessionLeft
+    "Inconnu", // UnknownTime
+    "Petit", // ClockSmall
+    "Moyen", // ClockMedium
+    "Grand", // ClockLarge
+    "En haut à gauche", // TopLeft
+    "En haut au centre", // TopCenter
+    "En haut à droite", // TopRight
+    "En bas à gauche", // BottomLeft
+    "En bas au centre", // BottomCenter
+    "En bas à droite", // BottomRight
+    "Choisissez quand afficher le temps restant de la session.", // ClockHelp
+    "Aperçu", // SessionPreview
+    "5 dernières minutes", // ClockLastFive
+    "Toute la session", // ClockWholeSession
+    "Couleur des chiffres", // ClockDigitColor
+    "Blanc", // ClockWhite
+    "Jaune", // ClockYellow
+    "Vert", // ClockGreen
+    "Cyan", // ClockCyan
+    "Bleu", // ClockBlue
+    "Orange", // ClockOrange
+    "Rose", // ClockPink
+    "Rouge", // ClockRed
+    "Style du compteur", // ClockStyle
+    "Fond classique", // BasicFillLabel
+    "Opacité du fond classique", // BasicAlphaLabel
+    "Classique", // SkinClassic
+    "Cristal", // SkinCrystal
+    "Chrono sportif", // SkinScore
+    "Minimaliste", // SkinMinimal
+    "Anthracite", // FillCarbon
+    "Bleu nuit", // FillNavy
+    "Prune", // FillPlum
+    "Forêt", // FillForest
+    "Bordeaux", // FillBurgundy
+    "Geste du compteur (5 s)", // PeekLabel
+    "Balayez vers la droite pour afficher le compteur pendant cinq secondes.", // PeekHelp
+    "Aurore", // SkinAurora
+    "Radar", // SkinRadar
+    "Braise", // SkinEmber
+    "Océan", // SkinOcean
+    "Orbite", // SkinOrbit
+    "Sakura", // SkinSakura
 };

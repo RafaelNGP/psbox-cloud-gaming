@@ -76,9 +76,9 @@ constexpr bool kSettingsGroupStart[kSettingsCount] = {false, false, false, false
 // confirm, 8 120 Hz, 9 keyboard keys, 10 back to the default, 11 controller
 // buttons, 12 gyro aiming, 13 touchpad as mouse, 14 game language, 15 video decoder,
 // 16 audio-to-haptics, 17 touchpad shortcuts, 18 trophy sync).
-constexpr int kGameRowCount = 18;
-constexpr int kGameRowOrder[kGameRowCount] = {0, 4, 8, 15, 14, 18, 1, 2, 3, 5, 6, 16, 7, 12, 11, 13, 9, 10};
-constexpr bool kGameGroupStart[kGameRowCount] = {false, true, false, false, false, false, true, false, false, true, false, false, false, false, false, false, false, true};
+constexpr int kGameRowCount = 19;
+constexpr int kGameRowOrder[kGameRowCount] = {0, 19, 4, 8, 15, 14, 18, 1, 2, 3, 5, 6, 16, 7, 12, 11, 13, 9, 10};
+constexpr bool kGameGroupStart[kGameRowCount] = {false, false, true, false, false, false, false, true, false, false, true, false, false, false, false, false, false, false, true};
 // The keyboard keys' screen: two columns of inputs, then "Reset to default".
 constexpr int kKeysPerColumn = input::kKeyActions / 2;
 // Updates on a desktop: the newest release's page (the app doesn't install it there).
@@ -118,21 +118,21 @@ inline int settingsClipBottom(int scaleChoice = 0) {
     return kH - (scaleChoice >= 2 ? 118 : (scaleChoice == 1 ? 104 : 80));
 }
 
-inline int settingsTotalHeight(const UiCaps& caps, int scaleChoice = 0) {
+inline int settingsTotalHeight(const UiCaps& caps, int scaleChoice = 0, bool personal = false) {
     int totalH = 0;
     const int rowH = settingsRowH(scaleChoice);
     const int gap = settingsGap(scaleChoice);
     const int groupGap = settingsGroupGap(scaleChoice);
-    for (const auto& [i, groupStart] : visibleSettingsRows(caps)) {
+    for (const auto& [i, groupStart] : visibleSettingsRows(caps, personal)) {
         if (groupStart) totalH += groupGap;
         totalH += rowH + gap;
     }
     return totalH;
 }
 
-inline float settingsMaxScroll(const UiCaps& caps, int scaleChoice = 0) {
+inline float settingsMaxScroll(const UiCaps& caps, int scaleChoice = 0, bool personal = false) {
     const float viewportH = static_cast<float>(settingsClipBottom(scaleChoice) - kSettingsListTop);
-    return std::max(0.0f, static_cast<float>(settingsTotalHeight(caps, scaleChoice)) - viewportH);
+    return std::max(0.0f, static_cast<float>(settingsTotalHeight(caps, scaleChoice, personal)) - viewportH);
 }
 
 // The rows of `order` that `shown` keeps. A group starts on screen where the

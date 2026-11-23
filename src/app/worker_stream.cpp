@@ -106,7 +106,8 @@ struct LowLatencyNetGuard {
 };
 }  // namespace
 
-std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQuery) {
+std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQuery, bool& restart,
+                   const std::string& account, int limit, bool knownNewSession) {
     crash::setStage(gssv.isHome() ? "streaming own Xbox" : ("streaming " + g_stageTitle).c_str());
     g_gameClosedOnServer = false;
     app::StreamPlayer player(gssv);
@@ -164,6 +165,21 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
     {
         std::lock_guard<std::mutex> lock(g_playerMutex);
         g_player = &player;
+    }
+    int64_t initialElapsed = -1;
+    if (!gssv.isHome()) {
+        const auto wallTime = auth::unixNow();
+        const auto& path = gssv.activeSessionPath();
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        initialElapsed = g_settings.sessionClock.open(path, g_stageTitle, account, limit, wallTime, knownNewSession);
+        limit = g_settings.sessionClock.limit;
+        g_settings.save(settingsPath());
+    }
+    {
+        std::lock_guard<std::mutex> lock(g_infoMutex);
+        g_streamInfo.sessionElapsed = initialElapsed;
+        g_streamInfo.sessionLeft = estimatedSessionLeft(initialElapsed, limit);
+        ++g_infoSeq;
     }
     g_ui->showStreaming();
     {
@@ -653,6 +669,10 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
                     if (st.rttMs > 0) session.rttSum += static_cast<uint64_t>(st.rttMs), ++session.rttCount;
                 }
                 info.cloudTimeSeconds = cloud.left(platform::nowMs());
+                if (initialElapsed >= 0) {
+                    info.sessionElapsed = initialElapsed + static_cast<int64_t>((tickNow - started) / 1000);
+                    info.sessionLeft = estimatedSessionLeft(info.sessionElapsed, limit);
+                }
                 info.playtimeSeconds = prevPlaytime + session.seconds;
                 player.getRecentFrametimes(info.frametimes);
                 StreamTelemetry tel;
@@ -783,11 +803,20 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
 
     // An abnormal stream end (connection lost, WebRTC failure, decoder failure):
     // report it as an error so the user sees the error screen and can report or retry.
-    bool normalEnd = g_cancel || autoplayDone || reason == "stopped" ||
+    const bool closedDuringPlay = st.decodedFrames > 0 && reason.find("the game closed on the server") == 0;
+    bool normalEnd = closedDuringPlay || g_cancel || autoplayDone || reason == "stopped" ||
                      reason.find("KickForStopCommand") != std::string::npos ||
                      reason.find("KickByNewSession") != std::string::npos ||
                      reason.find("KickForServerShutdown") != std::string::npos ||
                      reason.find("KickForBeingIdle") != std::string::npos;
+    // Recoverable drops have already been handled by StreamPlayer. Only a
+    // session that reached gameplay may start another trip through the queue.
+    if (!gssv.isHome() && !g_cancel && !g_quit && !autoplayDone &&
+        restartableEnd(reason, st.decodedFrames > 0, s_playtimeRemainingSeconds == 0)) {
+        std::lock_guard<std::mutex> lock(g_settingsMutex);
+        const auto key = gameProfileKey(g_stageProduct, g_stageTitle);
+        restart = g_settings.sessionPrefs.effective(key)[Reconnect] && !g_settings.sessionClock.skipReconnect;
+    }
     if (!normalEnd) {
         g_gameClosedOnServer = reason.rfind("the game closed on the server", 0) == 0;
         return "ERROR: " + ui::trf(ui::Str::StreamFailed, reason);
@@ -801,8 +830,9 @@ std::string stream(xcloud::GssvClient& gssv, const auth::CloudTimeQuery& cloudQu
 
 }  // namespace
 
-std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::GameTile& game, bool& failed,
-                 const std::string& regionName) {
+static std::string playOnce(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::GameTile& game, bool& failed,
+                 const std::string& regionName, bool& restart) {
+    g_gameClosedOnServer = false;
     failed = true;
     // A home session's id is the console's: only its start in the log.
     XC_LOGI("starting %s (%s)", gssv.isHome() ? "own Xbox" : game.name.c_str(),  // not the console's name
@@ -912,6 +942,7 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
     }
     bool connected = false;
     bool wasInQueue = false;
+    bool sawProvisioning = false;
     std::string result = "cancelled";  // the loop below ends otherwise with its own reason
     // A console that is off for good (not asleep) never comes out of
     // Provisioning: give up after a minute (the cloud's queue may take long).
@@ -944,6 +975,7 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
         }
         pollErrors = 0;
         XC_LOGI("session state: %s", st.raw.c_str());
+        if (st.state == xcloud::SessionState::Provisioning) sawProvisioning = true;
         if (st.state == xcloud::SessionState::WaitingForResources) {
             wasInQueue = true;
             uint64_t now = platform::nowMs();
@@ -993,7 +1025,9 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
                 playQueueReadyAlert(true);
             }
             g_ui->setLaunchStatus(ui::tr(ui::Str::StartingStream));
-            result = stream(gssv, am.cloudTimeQuery());
+            const int limit = game.sessionLimitSeconds > 0 ? game.sessionLimitSeconds : g_ui->freeTierLimitEstimate();
+            result = stream(gssv, am.cloudTimeQuery(), restart, am.profile().xuid, limit,
+                            sawProvisioning || wasInQueue || status == 201);
             failed = result.rfind("ERROR", 0) == 0;
             break;
         }
@@ -1005,6 +1039,16 @@ std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::Game
     }
     gssv.stopSession();
     return result;
+}
+
+std::string play(auth::AuthManager& am, xcloud::GssvClient& gssv, const ui::GameTile& game, bool& failed,
+                 const std::string& regionName) {
+    for (;;) {
+        bool restart = false;
+        auto result = playOnce(am, gssv, game, failed, regionName, restart);
+        if (!restart || g_cancel || g_quit) return result;
+        XC_LOGI("cloud session ended: queuing again for %s", game.titleId.c_str());
+    }
 }
 
 // The name of the game being played (the stream screen's dialogs show it).

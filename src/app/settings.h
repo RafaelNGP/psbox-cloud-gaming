@@ -7,6 +7,7 @@
 #include "input/pad_map.h"
 
 #include <cstdint>
+#include "app/session_options.h"
 #include <map>
 #include <string>
 #include <vector>
@@ -171,6 +172,8 @@ struct Settings {
     int voiceRouting = 0;   // 0: Auto (DualSense Speaker if available), 1: Always TV/Headset
     int padSpeakerVolume = 100; // 0 to 100% (DualSense controller speaker)
     bool queueReadyAlert = true; // Queue-ready chime and rumble alert
+    SessionPreferences sessionPrefs;
+    SessionClockRecord sessionClock;
     bool previewFeatures = true; // xCloud preview client identification & ad-supported F2P streaming
     bool syncTrophies = false;   // Xbox achievement to PlayStation trophy conversion
     // `hidden`, `favorites` and `titlePlaytime` belong to the Xbox account signed in, not to the

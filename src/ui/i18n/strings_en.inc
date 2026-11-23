@@ -594,4 +594,61 @@ constexpr Column kEnglish = {
     "Large (115%)",                                                                   // UiScaleLarge
     "Extra Large (130%)",                                                             // UiScaleExtraLarge
     "Scales menus, text and list rows for easier reading on TVs, handhelds and phones.", // SettingDescUiScale
+    "Automatic reconnection", // AutoReconnect
+    "When a session ends, queue for the same game again.", // SettingDescAutoReconnect
+    "Session and timer", // SessionPanel
+    "Additional settings", // MySettings
+    "Auto reconnect", // ReconnectTab
+    "Timer", // TimerTab
+    "Show timer", // ShowSessionClock
+    "Timer size", // ClockTextSize
+    "Timer position", // ClockPlacement
+    "Timer opacity", // ClockTransparency
+    "Use general setting", // InheritSession
+    "Disable reconnect this session", // SkipRestart
+    "Time played", // SessionPlayed
+    "Time remaining", // SessionLeft
+    "Unknown", // UnknownTime
+    "Small", // ClockSmall
+    "Medium", // ClockMedium
+    "Large", // ClockLarge
+    "Top left", // TopLeft
+    "Top center", // TopCenter
+    "Top right", // TopRight
+    "Bottom left", // BottomLeft
+    "Bottom center", // BottomCenter
+    "Bottom right", // BottomRight
+    "Choose when to show the remaining session time.", // ClockHelp
+    "Preview", // SessionPreview
+    "Last 5 minutes", // ClockLastFive
+    "Whole session", // ClockWholeSession
+    "Digit color", // ClockDigitColor
+    "White", // ClockWhite
+    "Yellow", // ClockYellow
+    "Green", // ClockGreen
+    "Cyan", // ClockCyan
+    "Blue", // ClockBlue
+    "Orange", // ClockOrange
+    "Pink", // ClockPink
+    "Red", // ClockRed
+    "Timer style", // ClockStyle
+    "Classic background", // BasicFillLabel
+    "Classic background opacity", // BasicAlphaLabel
+    "Classic", // SkinClassic
+    "Crystal", // SkinCrystal
+    "Scoreboard", // SkinScore
+    "Minimal", // SkinMinimal
+    "Charcoal", // FillCarbon
+    "Midnight blue", // FillNavy
+    "Plum", // FillPlum
+    "Forest", // FillForest
+    "Burgundy", // FillBurgundy
+    "Timer gesture (5 s)", // PeekLabel
+    "Swipe right during play to show the session timer for five seconds.", // PeekHelp
+    "Aurora", // SkinAurora
+    "Radar", // SkinRadar
+    "Ember", // SkinEmber
+    "Ocean", // SkinOcean
+    "Orbit", // SkinOrbit
+    "Sakura", // SkinSakura
 };
