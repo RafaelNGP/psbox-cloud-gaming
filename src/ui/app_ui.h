@@ -74,6 +74,7 @@ struct GameTile {
     std::vector<std::string> ratingDescriptors;
     // Active friends playing this game now
     std::vector<FriendPlaying> friends;
+    int sessionLimitSeconds = 0;
 };
 
 // One of the user's own consoles, as "My consoles" shows it.
@@ -144,6 +145,7 @@ struct SettingsChoice {
     int maxBitrateMbps = 0;    // 0 automatic, else 5 / 10 / 15 / 20 / 25 / 30 / 35 / 40 / 45 / 50
     int gameVolume = 100;      // percent: 25 / 50 / 75 / 100 / 150
     bool queueReadyAlert = true; // Queue-ready chime and rumble alert
+    app::SessionPreferences sessionPrefs;
     bool previewFeatures = true; // xCloud preview client identification & ad-supported F2P streaming
     input::KeyMap keyMap = input::defaultKeyMap();  // the keyboard as a player's controller
     input::PadMap padMap = input::defaultPadMap();  // the controller's buttons toward the game (always complete)
@@ -201,7 +203,7 @@ struct SettingsRowPos {
 };
 // Settings' rows on screen with `caps`, in order: those it rules out are
 // hidden (their setting stays as it is in settings.json).
-std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps);
+std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps, bool personal = false);
 // Where row `row` (its id) is among them: the presses of down from the top
 // that reach it; -1 when it is hidden with `caps`.
 int settingsRowPosition(const UiCaps& caps, int row);
@@ -219,6 +221,7 @@ constexpr int kSettingRows = 29;  // language, resolution, region, dead zone, tr
                                   // touchpad shortcuts, restore defaults, sync trophies, remove trophies, fps limit,
                                   // store country, interface & text scale
 
+constexpr int kMySettings = kSettingRows + app::SessionChoiceCount;
 struct SignInStage {
     std::string name;
     bool ok = false;
@@ -324,6 +327,7 @@ public:
     void setMembership(bool member);
     // The free tier with ads: one session's length in seconds (0: not this account's way to play).
     void setFreeTierSession(int seconds);
+    int freeTierLimitEstimate() { std::lock_guard<std::mutex> lock(mutex_); return freeTierSessionSeconds_; }
     std::string gamertag() const;  // for keeping it out of reports
     std::vector<std::string> consoleNames() const;  // the same: the user's names for their consoles
     // "Report a problem": a QR code of `url` (the GitHub bug form, filled
@@ -820,6 +824,9 @@ private:
     uint64_t pickerLastMs_ = 0;
     std::vector<uint32_t> wheel_;  // the wheel's pixels at wheelValue_
     float wheelValue_ = -1;
+    bool personalSettings_ = false;
+    float parentScroll_ = 0;
+    void showPersonalSettings(bool open);
     int settingsRow_ = 0;
     float settingsScrollY_ = 0.0f;
     bool dropdownOpen_ = false;  // the list of the focused settings row

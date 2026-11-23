@@ -198,6 +198,22 @@ bool Settings::load(const std::string& path) {
     for (const auto& [name, ms] : (*j)["regionRtt"].members())
         if (ms.asInt() > 0) regionRtt[name] = static_cast<int>(ms.asInt());
     queueReadyAlert = (*j)["queueReadyAlert"].asBool(queueReadyAlert);
+    sessionPrefs = {};
+    auto readChoices = [](const json::Value& obj, SessionChoices values, int minimum) {
+        for (size_t i = 0; i < values.size() && i < obj.items().size(); ++i)
+            values[i] = static_cast<int>(std::clamp<int64_t>(obj.items()[i].asInt(values[i]), minimum, sessionChoiceCounts[i]-1));
+        return values;
+    };
+    sessionPrefs.general[Reconnect] = (*j)["autoReconnect"].asBool(false);
+    sessionPrefs.general = readChoices((*j)["sessionDisplay"], sessionPrefs.general, 0);
+    for (const auto& [key, val] : (*j)["gameSessionOptions"].members())
+        sessionPrefs.games[key] = readChoices(val, inheritedSession, -1);
+    sessionClock.id = (*j)["clockSessionId"].str();
+    sessionClock.title = (*j)["clockTitle"].str();
+    sessionClock.account = (*j)["clockAccount"].str();
+    sessionClock.startUtc = (*j)["clockStartUtc"].asInt();
+    sessionClock.limit = static_cast<int>((*j)["clockLimit"].asInt());
+    sessionClock.skipReconnect = (*j)["skipSessionReconnect"].asBool(false);
     previewFeatures = (*j)["previewFeatures"].asBool(previewFeatures);
     syncTrophies = (*j)["syncTrophies"].asBool(syncTrophies);
     usbControllers = (*j)["usbControllers"].asBool((*j)["usb_controllers"].asBool((*j)["enable_onefamily"].asBool(usbControllers)));
@@ -442,6 +458,23 @@ bool Settings::save(const std::string& path) const {
     v.set("voiceRouting", voiceRouting);
     v.set("padSpeakerVolume", padSpeakerVolume);
     v.set("queueReadyAlert", queueReadyAlert);
+    auto writeChoices = [](const SessionChoices& values) {
+        auto list = json::Value::array();
+        for (int value : values) list.push(value);
+        return list;
+    };
+    v.set("autoReconnect", sessionPrefs.general[Reconnect] != 0);
+    v.set("sessionDisplay", writeChoices(sessionPrefs.general));
+    auto gameChoices = json::Value::object();
+    for (const auto& [key, values] : sessionPrefs.games)
+        if (values != inheritedSession) gameChoices.set(key, writeChoices(values));
+    v.set("gameSessionOptions", gameChoices);
+    v.set("clockSessionId", sessionClock.id);
+    v.set("clockTitle", sessionClock.title);
+    v.set("clockAccount", sessionClock.account);
+    v.set("clockStartUtc", sessionClock.startUtc);
+    v.set("clockLimit", sessionClock.limit);
+    v.set("skipSessionReconnect", sessionClock.skipReconnect);
     v.set("previewFeatures", previewFeatures);
     v.set("syncTrophies", syncTrophies);
     v.set("usbControllers", usbControllers);

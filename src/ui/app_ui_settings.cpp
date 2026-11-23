@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include "ui/app_ui_internal.h"
+#include "ui/session_choices.h"
 #include "ui/stream_menu.h"
 #include "input/gyro.h"
 #include "input/controller_backend.h"
@@ -613,6 +614,7 @@ void AppUi::setRegions(std::vector<std::string> regions, const std::string& defa
 }
 
 std::vector<std::string> AppUi::settingOptions(int row) const {
+    if (row == kMySettings) return {};
     // Caller holds mutex_.
     std::vector<std::string> out;
     auto withMs = [&](std::string label, const std::string& region) {
@@ -658,6 +660,8 @@ std::vector<std::string> AppUi::settingOptions(int row) const {
     } else if (row == 14) {
         // So do the controller buttons'.
         out = {tr(settings_.padMap == input::defaultPadMap() ? Str::ProfileDefault : Str::ProfileCustom)};
+    } else if (row >= kSettingRows && row < kMySettings) {
+        for (int i = 0; i < app::sessionChoiceCounts[row-kSettingRows]; ++i) out.push_back(sessionChoiceLabel(row-kSettingRows, i));
     } else if (row == 22) {
         out = {tr(Str::Deactivated), tr(Str::Activated)};
     } else if (row == 15) {
@@ -720,6 +724,7 @@ int AppUi::settingSelected(int row) const {
     if (row == 16) return settings_.queueReadyAlert ? 1 : 0;
     if (row == 20) return std::clamp(settings_.videoDecoder, 0, 1);
     if (row == 21) return std::clamp(settings_.audioHaptics, 0, 3);
+    if (row >= kSettingRows && row < kMySettings) return settings_.sessionPrefs.general[row - kSettingRows];
     if (row == 22) return settings_.previewFeatures ? 1 : 0;
     if (row == 24) return settings_.syncTrophies ? 1 : 0;
     if (row == 26) {
@@ -846,12 +851,14 @@ void AppUi::applySetting(int row, int index) {
         settings_.audioHaptics = std::clamp(index, 0, 3);
     } else if (row == 22) {
         settings_.previewFeatures = (index == 1);
+    } else if (row >= kSettingRows && row < kMySettings) {
+        settings_.sessionPrefs.general[row-kSettingRows] = index;
     } else if (row == 27) {
         settings_.storeCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
     } else if (row == 28) {
         settings_.uiScale = std::clamp(index, 0, 2);
         fonts_.setScale(app::uiScaleFactor(settings_.uiScale));
-        settingsScrollY_ = std::clamp(settingsScrollY_, 0.0f, settingsMaxScroll(caps_, settings_.uiScale));
+        settingsScrollY_ = std::clamp(settingsScrollY_, 0.0f, settingsMaxScroll(caps_, settings_.uiScale, personalSettings_));
     } else if (row == 8) {
         settings_.loginCountry = index == 0 ? std::string() : kLoginCountries[index - 1];
     } else {
@@ -916,6 +923,16 @@ void AppUi::handleGameSettings(const NavInput& in, UiEvent& ev) {
         dirty_ = true;
     }
     const int rowId = rows[static_cast<size_t>(std::clamp(gameSettingsRow_, 0, rowCount - 1))].row;
+    if (rowId == 19 && (in.left || in.right || in.accept)) {
+        const auto key = app::gameProfileKey(detail_.productId, detail_.titleId);
+        auto values = settings_.sessionPrefs.overrides(key);
+        cycleOverride(values, app::Reconnect, in.left ? -1 : 1);
+        settings_.sessionPrefs.games[key] = values;
+        ev.action = Action::SettingsChanged;
+        ev.settings = settings_;
+        dirty_ = true;
+        return;
+    }
     if (in.left || in.right) {
         int dir = in.right ? 1 : -1;
         switch (rowId) {
@@ -1232,7 +1249,7 @@ void AppUi::drawSettings(Canvas& c) {
         c.line(bx - 4.0f, by, bx + 4.0f, by + 9.0f, 3.0f, kWhite);
     }
 
-    fonts_.bold.draw(c, tr(Str::Settings), hasTouch ? (kMargin + 72) : kMargin, 116, 46, kWhite);
+    fonts_.bold.draw(c, tr(personalSettings_ ? Str::MySettings : Str::Settings), hasTouch ? (kMargin + 72) : kMargin, 116, 46, kWhite);
     if (loading_) {
         drawLoadingBar(c, kW - kMargin - 480, 100, 480, lastRender_);
     }
@@ -1252,10 +1269,10 @@ void AppUi::drawSettings(Canvas& c) {
     const int kGroupGap = settingsGroupGap(settings_.uiScale);
     constexpr int kListTop = kSettingsListTop, kClipTop = kSettingsClipTop;
     const int clipBottom = settingsClipBottom(settings_.uiScale);
-    Rect rows[kSettingRows];  // by row id
+    Rect rows[kMySettings+1];  // by row id
     int y = kListTop - static_cast<int>(std::lround(settingsScrollY_));
     c.setClip({kMargin - 8, kClipTop, kRowW + 16, clipBottom - kClipTop});
-    for (const auto& [i, groupStart] : visibleSettingsRows(caps_)) {  // what caps_ rules out is hidden
+    for (const auto& [i, groupStart] : visibleSettingsRows(caps_, personalSettings_)) {  // what caps_ rules out is hidden
         if (groupStart) y += kGroupGap;
         Rect r{kMargin, y, kRowW, kRowH};
         rows[i] = r;
@@ -1284,9 +1301,9 @@ void AppUi::drawSettings(Canvas& c) {
         } else {
             c.fillRect(r, focused ? rgba(255, 255, 255, 36) : rgba(255, 255, 255, 14), 12);
             if (focused && !dropdownOpen_) c.strokeRect({r.x - 4, r.y - 4, r.w + 8, r.h + 8}, kWhite, 3, 16);
-            int labelEnd = fonts_.semibold.drawTruncated(c, labels[i], r.x + 32, ty, kRowPx, r.w / 2 + 100, kWhite);
+            int labelEnd = fonts_.semibold.drawTruncated(c, i == kMySettings ? tr(Str::MySettings) : i >= kSettingRows ? tr(sessionLabels[i-kSettingRows]) : labels[i], r.x + 32, ty, kRowPx, r.w / 2 + 100, kWhite);
             float cx = static_cast<float>(r.x + r.w - 40), cy = static_cast<float>(r.y + r.h / 2);
-            const bool isSubmenuRow = (i == 3 || i == 4 || i == 12 || i == 14 || i == 15);
+            const bool isSubmenuRow = (i == kMySettings || i == 3 || i == 4 || i == 12 || i == 14 || i == 15);
             if (isSubmenuRow) {
                 const int pillW = focused ? 42 : 24;
                 const int pillH = 22;
@@ -1346,7 +1363,7 @@ void AppUi::drawSettings(Canvas& c) {
                 fonts_.regular.draw(c, value, vx - w, fonts_.regular.centeredY(r.y, r.h, kRowPx), kRowPx, rgba(120, 220, 120));
                 drawSpinner(c, vx - w - 20.0f, cy, 8, lastRender_);
                 animating_ = true;
-            } else {
+            } else if (i != kMySettings) {
                 auto options = settingOptions(i);
                 int sel = settingSelected(i);
                 std::string value = sel < static_cast<int>(options.size()) ? options[static_cast<size_t>(sel)] : "";
@@ -1394,8 +1411,10 @@ void AppUi::drawSettings(Canvas& c) {
         Str::SettingDescStoreCountry,
         Str::SettingDescUiScale,
     };
-    if (settingsRow_ >= 0 && settingsRow_ < kSettingRows) {
-        const char* desc = tr(kSettingDescs[settingsRow_]);
+    if (settingsRow_ >= 0 && settingsRow_ <= kMySettings) {
+        const char* desc = settingsRow_ < kSettingRows ? tr(kSettingDescs[settingsRow_]) :
+            tr(settingsRow_ == kMySettings ? Str::MySettings : settingsRow_ == kSettingRows ? Str::SettingDescAutoReconnect :
+               settingsRow_ == kSettingRows + app::PeekGesture ? Str::PeekHelp : Str::ClockHelp);
         const int descMaxW = settings_.uiScale > 0 ? (kRowW - 20) : (kRowW - 40);
         auto lines = fonts_.regular.wrap(desc, 22, descMaxW, 2);
         const int hintBaseline = kH - 64;
@@ -2519,6 +2538,11 @@ void AppUi::drawGameSettings(Canvas& c) {
         case 15:
             label = tr(Str::VideoDecoder);
             value = activeGameProfile_.videoDecoder == 1 ? tr(Str::VideoDecoderSw) : tr(Str::VideoDecoderHw);
+            break;
+        case 19:
+            label = tr(Str::AutoReconnect);
+            value = sessionChoiceLabel(app::Reconnect, settings_.sessionPrefs.overrides(
+                app::gameProfileKey(detail_.productId, detail_.titleId))[app::Reconnect]);
             break;
         case 18:
             label = tr(Str::SyncTrophies);

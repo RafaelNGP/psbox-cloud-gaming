@@ -4,6 +4,7 @@
 // and the statistics line. Each is drawn into its own small canvas, which
 // display::setOverlay() lays over the video.
 #pragma once
+#include "ui/strings.h"
 
 #include <cstdint>
 #include "ui/app_ui.h"
@@ -40,6 +41,7 @@ struct StreamInfo {
     bool degraded = false;      // frames lost / video stalled / round trip far up, in the last seconds
     int wifiHolds = 0;          // packets held and then delivered at once (most likely the Wi-Fi), last 2 min
     bool wifiHoldNow = false;   // one in the last seconds, with wifiHolds at 3 or more
+    int64_t sessionElapsed = -1, sessionLeft = -1;
     int64_t cloudTimeSeconds = -1;  // the account's cloud time left (-1: no limit, or not known)
     uint64_t playtimeSeconds = 0; // total playtime for this title in seconds
     std::vector<float> frametimes;  // presentation frametimes (ms)
@@ -64,13 +66,15 @@ enum class MenuAction {
     TouchpadShortcuts, Player, AudioHaptics, ReloadStream, GuitarStrum, GuitarTilt, GuitarBinding,
     VideoDecoder, FpsLimiter, BitrateLimiter, VrrToggle,
     TouchOverlayToggle, TouchInvertSticksToggle, TouchLayoutStudio,
-    VibrationToggle, TouchOpacity
+    SessionOptions, SkipOnce, VibrationToggle, TouchOpacity
 };
 
 enum class MenuTab {
     General = 0,
     Controls,
     Guitar,  // opened by a USB guitar: what it needs, in one tab (it has no L1 / R1 to switch)
+    Reconnect,
+    Timer,
     TabCount
 };
 
@@ -110,7 +114,7 @@ public:
     bool onTouch(float screenX, float screenY, NavInput& outNav);
 
     MenuTab tab() const { return activeTab_; }
-    void setTab(MenuTab t) { activeTab_ = t; selectFirstItem(); }
+    void setTab(MenuTab t) { activeTab_ = t; if (onSessionTab()) sessionRow_ = 0; else selectFirstItem(); }
 
     int resolution() const { return resolution_; }
     bool statsOn() const { return stats_; }
@@ -275,6 +279,9 @@ public:
     void setCapabilities(const UiCaps& caps);
     const UiCaps& capabilities() const { return caps_; }
 
+    app::SessionChoices sessionGeneral = app::defaultSession, sessionOverrides = app::inheritedSession;
+    bool skipOnce = false;
+    Canvas renderTimer(const app::SessionChoices& style, int64_t seconds) const;
     Canvas renderMenu(const StreamInfo& info) const;
     Canvas renderStats(const StreamInfo& info) const;
     void recordFrametime(float ms) const;
@@ -285,6 +292,7 @@ public:
     enum Item {
         // Tab General
         XboxButton = 0,
+        SessionItem,
         TouchOverlayItem,
         TouchOpacityItem,
         TouchInvertSticksItem,
@@ -338,6 +346,25 @@ private:
 
     const Fonts& fonts_;
     UiCaps caps_;
+    struct TimerArt {
+        bool loaded = false;
+        Image original, scaled;
+    };
+    mutable std::array<TimerArt,app::sessionChoiceCounts[app::ClockSkin]-1> timerArt_;
+    void drawTabs(Canvas& c) const;
+    void stepTab(int direction);
+    struct TabEntry { MenuTab tab; Str label; };
+    std::vector<TabEntry> visibleTabs() const;
+    mutable std::array<Rect,static_cast<size_t>(MenuTab::TabCount)> tabRects_{};
+    bool onSessionTab() const { return activeTab_ == MenuTab::Reconnect || activeTab_ == MenuTab::Timer; }
+    int sessionRows() const { return activeTab_ == MenuTab::Reconnect ? 2 : app::SessionChoiceCount - 1; }
+    int sessionOption(int row) const {
+        if (activeTab_ == MenuTab::Reconnect) return row == 0 ? app::Reconnect : app::SessionChoiceCount;
+        return app::ShowClock + row;
+    }
+    int sessionTop() const { return activeTab_ == MenuTab::Reconnect ? 128 : 190; }
+    int sessionRow_ = 0;
+    Canvas renderSessionPanel(const StreamInfo& info) const;
     bool open_ = false, stats_ = false;
     uint32_t statsMask_ = StatsDefaultMask;
     bool statsCustomizing_ = false;

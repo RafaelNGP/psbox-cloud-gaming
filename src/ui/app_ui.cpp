@@ -7,8 +7,13 @@
 
 namespace xc::ui {
 
-std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps) {
-    return filterRows(kSettingsOrder, kSettingsGroupStart, [&](int row) {
+std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps, bool personal) {
+    if (personal) {
+        std::vector<SettingsRowPos> rows;
+        for (int row = kSettingRows; row < kMySettings; ++row) rows.push_back({row, false});
+        return rows;
+    }
+    auto rows = filterRows(kSettingsOrder, kSettingsGroupStart, [&](int row) {
 #if defined(__ANDROID__)
         if (row == 20) return false; // Hardware video decoder
         if (row == 5) return false;  // Confirm button (Cross/Circle swap)
@@ -27,6 +32,16 @@ std::vector<SettingsRowPos> visibleSettingsRows(const UiCaps& caps) {
         default: return true;
         }
     });
+    rows.push_back({kMySettings, true});
+    return rows;
+}
+
+void AppUi::showPersonalSettings(bool open) {
+    if (open) parentScroll_ = settingsScrollY_;
+    personalSettings_ = open;
+    settingsScrollY_ = open ? 0.0f : parentScroll_;
+    settingsRow_ = open ? kSettingRows : kMySettings;
+    dirty_ = true;
 }
 
 int settingsRowPosition(const UiCaps& caps, int row) {
@@ -1493,7 +1508,7 @@ void AppUi::setCaps(const UiCaps& caps) {
     dirty_ = true;
     // A pad without what a row is for came in (or the one with it left): the
     // focus goes to the row after it, and what the row had open closes.
-    const auto rows = visibleSettingsRows(caps_);
+    const auto rows = visibleSettingsRows(caps_, personalSettings_);
     auto shown = [&](int row) {
         return std::any_of(rows.begin(), rows.end(), [&](const SettingsRowPos& r) { return r.row == row; });
     };

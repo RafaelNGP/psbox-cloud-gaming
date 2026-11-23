@@ -486,6 +486,8 @@ ui::GameTile Library::tile(const std::string& productId, const std::string& titl
             }
         }
     }
+    auto limit = sessionLimits_.find(t.titleId);
+    if (!gamePassMember_ && limit != sessionLimits_.end()) t.sessionLimitSeconds = limit->second;
     return t;
 }
 
@@ -760,6 +762,8 @@ bool Library::loadCache(bool withLayout) {
     // Written since the free tier with ads stopped counting as a subscription (the
     // "freeTierSession" field came with that): an older cache's membership is not trusted.
     gamePassMember_ = j->has("freeTierSession") && (*j)["gamePassMember"].asBool();
+    sessionLimits_.clear();
+    for (const auto& [id, value] : (*j)["sessionLimits"].members()) sessionLimits_[id] = static_cast<int>(value.asInt());
     freeTierSessionSeconds_ = static_cast<int>((*j)["freeTierSession"].asInt(0));
     if (subscription_.empty()) subscription_ = (*j)["subscription"].str();
     for (const auto& p : (*j)["ownedProducts"].items()) ownedProducts_.insert(p.str());
@@ -956,6 +960,14 @@ void Library::saveCache() const {
 
     appendJsonKey(out, first, "gamePassMember");
     out += gamePassMember_ ? "true" : "false";
+    appendJsonKey(out, first, "sessionLimits");
+    out += "{";
+    bool firstLimit = true;
+    for (const auto& [id, limit] : sessionLimits_) {
+        appendJsonKey(out, firstLimit, id);
+        appendJsonInt(out, limit);
+    }
+    out += "}";
     appendJsonKey(out, first, "freeTierSession");
     appendJsonInt(out, freeTierSessionSeconds_);
     if (!subscription_.empty()) {
